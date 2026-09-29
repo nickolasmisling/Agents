@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+tests/behavior/results/
+.claude/worktrees/
+.claude/settings.local.json
