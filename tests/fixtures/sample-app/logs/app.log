@@ -1,0 +1,517 @@
+2026-09-14T12:00:00.003Z INFO  [batchtrack.metrics] window=60s requests=58 errors_5xx=0 p50_ms=36 p95_ms=177 p99_ms=286 db_pool_in_use=3/10
+2026-09-14T12:00:00.214Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0408 started
+2026-09-14T12:00:00.564Z WARN  [py.warnings] /opt/batchtrack/app/audit_export.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+2026-09-14T12:00:01.589Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0408 finished rows=29 duration_ms=896
+2026-09-14T12:00:05.656Z WARN  [batchtrack.disk] volume /var/lib/batchtrack usage=81% threshold=80%
+2026-09-14T12:00:37.281Z INFO  [batchtrack.api] req=d5fe71a2 method=POST path=/batches/1812/signatures status=201 duration_ms=34 user=sortiz
+2026-09-14T12:01:00.006Z INFO  [batchtrack.metrics] window=60s requests=45 errors_5xx=0 p50_ms=34 p95_ms=160 p99_ms=316 db_pool_in_use=1/10
+2026-09-14T12:02:00.015Z INFO  [batchtrack.metrics] window=60s requests=57 errors_5xx=0 p50_ms=40 p95_ms=140 p99_ms=259 db_pool_in_use=3/10
+2026-09-14T12:02:45.121Z INFO  [batchtrack.api] req=f426ac6b method=GET path=/batches/1833 status=200 duration_ms=25 user=ctorres
+2026-09-14T12:03:00.015Z INFO  [batchtrack.metrics] window=60s requests=44 errors_5xx=0 p50_ms=33 p95_ms=149 p99_ms=246 db_pool_in_use=2/10
+2026-09-14T12:04:00.010Z INFO  [batchtrack.metrics] window=60s requests=55 errors_5xx=0 p50_ms=42 p95_ms=180 p99_ms=302 db_pool_in_use=1/10
+2026-09-14T12:04:50.512Z INFO  [batchtrack.api] req=ffaaea92 method=GET path=/batches?site=CLO&status=released&page=1 status=200 duration_ms=41 user=ngarcia
+2026-09-14T12:05:00.016Z INFO  [batchtrack.metrics] window=60s requests=51 errors_5xx=0 p50_ms=39 p95_ms=184 p99_ms=284 db_pool_in_use=1/10
+2026-09-14T12:05:33.511Z INFO  [batchtrack.api] req=7af014d1 method=POST path=/batches/1827/signatures status=201 duration_ms=36 user=ngarcia
+2026-09-14T12:06:00.027Z INFO  [batchtrack.metrics] window=60s requests=56 errors_5xx=0 p50_ms=32 p95_ms=174 p99_ms=343 db_pool_in_use=2/10
+2026-09-14T12:06:23.513Z INFO  [batchtrack.api] req=22942cdd method=GET path=/dashboard/summary status=200 duration_ms=26 user=ctorres
+2026-09-14T12:07:00.029Z INFO  [batchtrack.metrics] window=60s requests=38 errors_5xx=0 p50_ms=38 p95_ms=154 p99_ms=280 db_pool_in_use=1/10
+2026-09-14T12:07:28.664Z WARN  [batchtrack.auth] login failed username=lmartinez reason=bad_password remote=10.20.9.205
+2026-09-14T12:07:37.436Z INFO  [batchtrack.api] req=b8a509c5 method=POST path=/batches/1815/signatures status=201 duration_ms=98 user=pvargas
+2026-09-14T12:08:00.002Z INFO  [batchtrack.metrics] window=60s requests=44 errors_5xx=0 p50_ms=43 p95_ms=174 p99_ms=317 db_pool_in_use=3/10
+2026-09-14T12:08:16.720Z INFO  [batchtrack.api] req=5237dd89 method=GET path=/batches?site=MDE&status=released&page=3 status=200 duration_ms=47 user=jramirez
+2026-09-14T12:09:00.003Z INFO  [batchtrack.metrics] window=60s requests=39 errors_5xx=0 p50_ms=37 p95_ms=175 p99_ms=264 db_pool_in_use=3/10
+2026-09-14T12:09:15.851Z INFO  [batchtrack.api] req=0842f488 method=GET path=/batches/1838 status=200 duration_ms=38 user=sortiz
+2026-09-14T12:09:53.546Z INFO  [batchtrack.api] req=82e10bb4 method=POST path=/batches/1706/signatures status=201 duration_ms=70 user=rsuarez
+2026-09-14T12:10:00.007Z INFO  [batchtrack.metrics] window=60s requests=54 errors_5xx=0 p50_ms=43 p95_ms=125 p99_ms=221 db_pool_in_use=2/10
+2026-09-14T12:10:21.033Z INFO  [batchtrack.api] req=b67371ac method=GET path=/batches/1835 status=200 duration_ms=22 user=emoreno
+2026-09-14T12:10:53.173Z INFO  [batchtrack.api] req=b40eb8c8 method=GET path=/batches/1699/signatures status=200 duration_ms=23 user=ngarcia
+2026-09-14T12:11:00.009Z INFO  [batchtrack.metrics] window=60s requests=58 errors_5xx=0 p50_ms=35 p95_ms=155 p99_ms=259 db_pool_in_use=3/10
+2026-09-14T12:11:56.986Z INFO  [batchtrack.api] req=47bf9c90 method=GET path=/batches?site=CLO&status=released&page=2 status=200 duration_ms=75 user=emoreno
+2026-09-14T12:11:57.538Z WARN  [batchtrack.lims] slow response endpoint=/api/v2/samples duration_ms=2923
+2026-09-14T12:12:00.005Z INFO  [batchtrack.metrics] window=60s requests=38 errors_5xx=0 p50_ms=36 p95_ms=124 p99_ms=207 db_pool_in_use=3/10
+2026-09-14T12:12:27.935Z INFO  [batchtrack.api] req=521e064c method=GET path=/batches?site=BOG&status=released&page=3 status=200 duration_ms=25 user=mhernandez
+2026-09-14T12:12:55.346Z INFO  [batchtrack.api] req=b0c29330 method=GET path=/batches?site=BOG&status=released&page=2 status=200 duration_ms=28 user=sortiz
+2026-09-14T12:13:00.014Z INFO  [batchtrack.metrics] window=60s requests=50 errors_5xx=0 p50_ms=38 p95_ms=153 p99_ms=245 db_pool_in_use=1/10
+2026-09-14T12:14:00.009Z INFO  [batchtrack.metrics] window=60s requests=59 errors_5xx=0 p50_ms=33 p95_ms=167 p99_ms=236 db_pool_in_use=3/10
+2026-09-14T12:14:24.143Z INFO  [batchtrack.api] req=3c30d4ab method=GET path=/batches/1718 status=200 duration_ms=71 user=emoreno
+2026-09-14T12:14:57.397Z INFO  [batchtrack.api] req=1e959031 method=GET path=/batches/1753 status=200 duration_ms=45 user=aperez
+2026-09-14T12:15:00.022Z INFO  [batchtrack.metrics] window=60s requests=47 errors_5xx=0 p50_ms=44 p95_ms=139 p99_ms=202 db_pool_in_use=1/10
+2026-09-14T12:15:00.214Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0409 started
+2026-09-14T12:15:00.564Z WARN  [py.warnings] /opt/batchtrack/app/audit_export.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+2026-09-14T12:15:01.451Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0409 finished rows=46 duration_ms=957
+2026-09-14T12:15:04.713Z INFO  [batchtrack.api] req=e71100c0 method=POST path=/batches/1831/signatures status=201 duration_ms=91 user=jgomez
+2026-09-14T12:15:11.893Z INFO  [batchtrack.api] req=3d4235fe method=GET path=/batches/1815 status=200 duration_ms=35 user=ctorres
+2026-09-14T12:16:00.014Z INFO  [batchtrack.metrics] window=60s requests=42 errors_5xx=0 p50_ms=35 p95_ms=149 p99_ms=276 db_pool_in_use=2/10
+2026-09-14T12:16:44.436Z INFO  [batchtrack.api] req=85255b04 method=GET path=/batches?site=BOG&status=released&page=1 status=200 duration_ms=22 user=emoreno
+2026-09-14T12:17:00.010Z INFO  [batchtrack.metrics] window=60s requests=47 errors_5xx=0 p50_ms=42 p95_ms=173 p99_ms=254 db_pool_in_use=1/10
+2026-09-14T12:17:25.215Z INFO  [batchtrack.api] req=11fbc285 method=GET path=/dashboard/summary status=200 duration_ms=40 user=ctorres
+2026-09-14T12:18:00.027Z INFO  [batchtrack.metrics] window=60s requests=42 errors_5xx=0 p50_ms=32 p95_ms=128 p99_ms=254 db_pool_in_use=3/10
+2026-09-14T12:18:17.903Z INFO  [batchtrack.api] req=5649809e method=POST path=/batches/1728/signatures status=201 duration_ms=65 user=jramirez
+2026-09-14T12:19:00.001Z INFO  [batchtrack.metrics] window=60s requests=60 errors_5xx=0 p50_ms=41 p95_ms=140 p99_ms=268 db_pool_in_use=1/10
+2026-09-14T12:19:40.556Z INFO  [batchtrack.api] req=c7c10bd9 method=GET path=/batches/1818 status=200 duration_ms=31 user=dcastro
+2026-09-14T12:19:42.063Z WARN  [batchtrack.lims] deprecated endpoint in use endpoint=/api/v2/samples sunset=2026-12-31 lot=API-PCM-2601
+2026-09-14T12:20:00.024Z INFO  [batchtrack.metrics] window=60s requests=59 errors_5xx=0 p50_ms=42 p95_ms=140 p99_ms=267 db_pool_in_use=1/10
+2026-09-14T12:20:09.020Z WARN  [batchtrack.lims] deprecated endpoint in use endpoint=/api/v2/samples sunset=2026-12-31 lot=API-PCM-2601
+2026-09-14T12:20:48.024Z INFO  [batchtrack.api] req=d405324f method=GET path=/batches/1822/signatures status=200 duration_ms=53 user=pvargas
+2026-09-14T12:21:00.017Z INFO  [batchtrack.metrics] window=60s requests=49 errors_5xx=0 p50_ms=38 p95_ms=140 p99_ms=249 db_pool_in_use=3/10
+2026-09-14T12:21:54.544Z INFO  [batchtrack.api] req=1d2e014e method=GET path=/batches/1840 status=200 duration_ms=47 user=jgomez
+2026-09-14T12:22:00.008Z INFO  [batchtrack.metrics] window=60s requests=60 errors_5xx=0 p50_ms=35 p95_ms=147 p99_ms=240 db_pool_in_use=2/10
+2026-09-14T12:22:18.942Z INFO  [batchtrack.api] req=fd3b3468 method=POST path=/batches/1774/signatures status=201 duration_ms=28 user=jgomez
+2026-09-14T12:22:37.991Z WARN  [batchtrack.api] slow request req=01ce3e28 method=GET path=/reports/site-yield duration_ms=3024 user=jgomez
+2026-09-14T12:23:00.001Z INFO  [batchtrack.metrics] window=60s requests=50 errors_5xx=0 p50_ms=39 p95_ms=146 p99_ms=283 db_pool_in_use=1/10
+2026-09-14T12:23:06.942Z INFO  [batchtrack.api] req=dac6a3ce method=POST path=/batches status=201 duration_ms=34 user=sortiz
+2026-09-14T12:24:00.008Z INFO  [batchtrack.metrics] window=60s requests=43 errors_5xx=0 p50_ms=32 p95_ms=153 p99_ms=305 db_pool_in_use=1/10
+2026-09-14T12:24:41.178Z INFO  [batchtrack.api] req=e044ec53 method=GET path=/batches/1702 status=200 duration_ms=55 user=ngarcia
+2026-09-14T12:25:00.021Z INFO  [batchtrack.metrics] window=60s requests=51 errors_5xx=0 p50_ms=36 p95_ms=159 p99_ms=238 db_pool_in_use=3/10
+2026-09-14T12:25:57.790Z INFO  [batchtrack.api] req=e57a4bf5 method=GET path=/batches?site=MDE&status=released&page=1 status=200 duration_ms=25 user=sortiz
+2026-09-14T12:26:00.025Z INFO  [batchtrack.metrics] window=60s requests=57 errors_5xx=0 p50_ms=43 p95_ms=142 p99_ms=240 db_pool_in_use=3/10
+2026-09-14T12:26:11.140Z WARN  [batchtrack.auth] login failed username=ctorres reason=bad_password remote=10.20.5.19
+2026-09-14T12:27:00.009Z INFO  [batchtrack.metrics] window=60s requests=49 errors_5xx=0 p50_ms=37 p95_ms=121 p99_ms=192 db_pool_in_use=3/10
+2026-09-14T12:28:00.016Z INFO  [batchtrack.metrics] window=60s requests=43 errors_5xx=0 p50_ms=36 p95_ms=125 p99_ms=200 db_pool_in_use=2/10
+2026-09-14T12:28:33.863Z INFO  [batchtrack.api] req=e6e8882a method=GET path=/batches/1693 status=200 duration_ms=31 user=ngarcia
+2026-09-14T12:29:00.007Z INFO  [batchtrack.metrics] window=60s requests=55 errors_5xx=0 p50_ms=39 p95_ms=137 p99_ms=194 db_pool_in_use=2/10
+2026-09-14T12:29:14.726Z INFO  [batchtrack.api] req=a09c138d method=GET path=/batches/1697/signatures status=200 duration_ms=25 user=pvargas
+2026-09-14T12:29:34.543Z INFO  [batchtrack.api] req=91e55566 method=POST path=/batches status=201 duration_ms=62 user=lmartinez
+2026-09-14T12:30:00.017Z INFO  [batchtrack.metrics] window=60s requests=50 errors_5xx=0 p50_ms=40 p95_ms=155 p99_ms=218 db_pool_in_use=2/10
+2026-09-14T12:30:00.214Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0410 started
+2026-09-14T12:30:00.564Z WARN  [py.warnings] /opt/batchtrack/app/audit_export.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+2026-09-14T12:30:01.201Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0410 finished rows=56 duration_ms=746
+2026-09-14T12:30:05.797Z WARN  [batchtrack.disk] volume /var/lib/batchtrack usage=81% threshold=80%
+2026-09-14T12:30:22.327Z INFO  [batchtrack.api] req=7a2664e0 method=GET path=/batches/1744 status=200 duration_ms=30 user=jramirez
+2026-09-14T12:31:00.018Z INFO  [batchtrack.metrics] window=60s requests=41 errors_5xx=0 p50_ms=32 p95_ms=165 p99_ms=310 db_pool_in_use=2/10
+2026-09-14T12:31:01.277Z INFO  [batchtrack.api] req=f9cdb0c0 method=GET path=/dashboard/summary status=200 duration_ms=56 user=jramirez
+2026-09-14T12:32:00.013Z INFO  [batchtrack.metrics] window=60s requests=51 errors_5xx=0 p50_ms=42 p95_ms=152 p99_ms=237 db_pool_in_use=2/10
+2026-09-14T12:32:50.642Z INFO  [batchtrack.api] req=6b33db3e method=POST path=/batches status=201 duration_ms=136 user=dcastro
+2026-09-14T12:33:00.019Z INFO  [batchtrack.metrics] window=60s requests=41 errors_5xx=0 p50_ms=40 p95_ms=129 p99_ms=237 db_pool_in_use=1/10
+2026-09-14T12:33:50.833Z INFO  [batchtrack.api] req=40ff387f method=POST path=/batches status=201 duration_ms=94 user=mhernandez
+2026-09-14T12:34:00.016Z INFO  [batchtrack.metrics] window=60s requests=45 errors_5xx=0 p50_ms=42 p95_ms=184 p99_ms=265 db_pool_in_use=1/10
+2026-09-14T12:34:02.632Z INFO  [batchtrack.api] req=a8fe06c7 method=POST path=/batches/1713/signatures status=201 duration_ms=66 user=dcastro
+2026-09-14T12:35:00.025Z INFO  [batchtrack.metrics] window=60s requests=46 errors_5xx=0 p50_ms=38 p95_ms=151 p99_ms=217 db_pool_in_use=3/10
+2026-09-14T12:35:29.805Z INFO  [batchtrack.api] req=8891266c method=POST path=/batches status=201 duration_ms=58 user=rsuarez
+2026-09-14T12:35:49.874Z WARN  [batchtrack.lims] deprecated endpoint in use endpoint=/api/v2/samples sunset=2026-12-31 lot=API-IBU-2602
+2026-09-14T12:36:00.012Z INFO  [batchtrack.metrics] window=60s requests=42 errors_5xx=0 p50_ms=41 p95_ms=168 p99_ms=280 db_pool_in_use=3/10
+2026-09-14T12:36:05.952Z INFO  [batchtrack.api] req=c9dcfbdd method=GET path=/batches?site=MDE&status=released&page=3 status=200 duration_ms=28 user=aperez
+2026-09-14T12:37:00.022Z INFO  [batchtrack.metrics] window=60s requests=47 errors_5xx=0 p50_ms=33 p95_ms=151 p99_ms=225 db_pool_in_use=2/10
+2026-09-14T12:37:59.399Z INFO  [batchtrack.api] req=c8ecf3c6 method=GET path=/batches/1776/signatures status=200 duration_ms=23 user=aperez
+2026-09-14T12:38:00.020Z INFO  [batchtrack.metrics] window=60s requests=38 errors_5xx=0 p50_ms=42 p95_ms=148 p99_ms=209 db_pool_in_use=3/10
+2026-09-14T12:38:42.068Z INFO  [batchtrack.api] req=a9eb8397 method=POST path=/batches/1712/signatures status=201 duration_ms=93 user=pvargas
+2026-09-14T12:38:49.366Z WARN  [batchtrack.lims] deprecated endpoint in use endpoint=/api/v2/samples sunset=2026-12-31 lot=API-PCM-2601
+2026-09-14T12:39:00.028Z INFO  [batchtrack.metrics] window=60s requests=46 errors_5xx=0 p50_ms=44 p95_ms=147 p99_ms=287 db_pool_in_use=1/10
+2026-09-14T12:40:00.029Z INFO  [batchtrack.metrics] window=60s requests=41 errors_5xx=0 p50_ms=40 p95_ms=174 p99_ms=295 db_pool_in_use=2/10
+2026-09-14T12:40:16.079Z INFO  [batchtrack.api] req=06cead52 method=GET path=/batches?site=BAQ&status=released&page=1 status=200 duration_ms=9 user=rsuarez
+2026-09-14T12:41:00.005Z INFO  [batchtrack.metrics] window=60s requests=60 errors_5xx=0 p50_ms=42 p95_ms=156 p99_ms=258 db_pool_in_use=1/10
+2026-09-14T12:41:33.292Z WARN  [batchtrack.auth] login failed username=emoreno reason=bad_password remote=10.20.6.115
+2026-09-14T12:41:50.466Z INFO  [batchtrack.api] req=8efd6bb2 method=GET path=/batches?site=BAQ&status=released&page=4 status=200 duration_ms=23 user=dcastro
+2026-09-14T12:42:00.015Z INFO  [batchtrack.metrics] window=60s requests=41 errors_5xx=0 p50_ms=34 p95_ms=160 p99_ms=285 db_pool_in_use=3/10
+2026-09-14T12:43:00.015Z INFO  [batchtrack.metrics] window=60s requests=42 errors_5xx=0 p50_ms=40 p95_ms=121 p99_ms=170 db_pool_in_use=3/10
+2026-09-14T12:43:26.054Z INFO  [batchtrack.api] req=f3df1aa7 method=GET path=/batches/1824 status=200 duration_ms=69 user=dcastro
+2026-09-14T12:44:00.023Z INFO  [batchtrack.metrics] window=60s requests=51 errors_5xx=0 p50_ms=44 p95_ms=148 p99_ms=265 db_pool_in_use=2/10
+2026-09-14T12:44:56.971Z INFO  [batchtrack.api] req=64e4aa36 method=GET path=/batches?site=BOG&status=released&page=2 status=200 duration_ms=51 user=dcastro
+2026-09-14T12:45:00.027Z INFO  [batchtrack.metrics] window=60s requests=46 errors_5xx=0 p50_ms=37 p95_ms=177 p99_ms=313 db_pool_in_use=3/10
+2026-09-14T12:45:00.214Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0411 started
+2026-09-14T12:45:00.564Z WARN  [py.warnings] /opt/batchtrack/app/audit_export.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+2026-09-14T12:45:01.139Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0411 finished rows=26 duration_ms=870
+2026-09-14T12:45:20.782Z INFO  [batchtrack.api] req=1abdab21 method=GET path=/batches/1769/signatures status=200 duration_ms=42 user=lmartinez
+2026-09-14T12:45:37.257Z WARN  [batchtrack.lims] slow response endpoint=/api/v2/samples duration_ms=2549
+2026-09-14T12:45:47.231Z INFO  [batchtrack.api] req=9626f1f4 method=GET path=/batches?site=BAQ&status=released&page=2 status=200 duration_ms=41 user=mhernandez
+2026-09-14T12:46:00.022Z INFO  [batchtrack.metrics] window=60s requests=61 errors_5xx=0 p50_ms=35 p95_ms=124 p99_ms=174 db_pool_in_use=3/10
+2026-09-14T12:47:00.010Z INFO  [batchtrack.metrics] window=60s requests=47 errors_5xx=0 p50_ms=41 p95_ms=147 p99_ms=228 db_pool_in_use=3/10
+2026-09-14T12:47:17.156Z WARN  [batchtrack.api] slow request req=28b4d881 method=GET path=/reports/site-yield duration_ms=3473 user=sortiz
+2026-09-14T12:48:00.029Z INFO  [batchtrack.metrics] window=60s requests=47 errors_5xx=0 p50_ms=33 p95_ms=180 p99_ms=311 db_pool_in_use=2/10
+2026-09-14T12:48:10.890Z INFO  [batchtrack.api] req=d9e82500 method=GET path=/batches?site=BAQ&status=released&page=2 status=200 duration_ms=39 user=emoreno
+2026-09-14T12:49:00.025Z INFO  [batchtrack.metrics] window=60s requests=49 errors_5xx=0 p50_ms=40 p95_ms=177 p99_ms=255 db_pool_in_use=2/10
+2026-09-14T12:49:18.526Z INFO  [batchtrack.api] req=89c7e7bd method=GET path=/batches/1795/signatures status=200 duration_ms=15 user=ngarcia
+2026-09-14T12:49:54.396Z INFO  [batchtrack.api] req=80698a73 method=GET path=/batches/1734/signatures status=200 duration_ms=28 user=emoreno
+2026-09-14T12:50:00.007Z INFO  [batchtrack.metrics] window=60s requests=58 errors_5xx=0 p50_ms=43 p95_ms=147 p99_ms=214 db_pool_in_use=1/10
+2026-09-14T12:50:48.981Z INFO  [batchtrack.api] req=761501d4 method=GET path=/batches/1834 status=200 duration_ms=41 user=emoreno
+2026-09-14T12:51:00.018Z INFO  [batchtrack.metrics] window=60s requests=47 errors_5xx=0 p50_ms=34 p95_ms=153 p99_ms=229 db_pool_in_use=1/10
+2026-09-14T12:51:55.437Z INFO  [batchtrack.api] req=790bd092 method=GET path=/dashboard/summary status=200 duration_ms=36 user=rsuarez
+2026-09-14T12:52:00.005Z INFO  [batchtrack.metrics] window=60s requests=52 errors_5xx=0 p50_ms=37 p95_ms=183 p99_ms=264 db_pool_in_use=3/10
+2026-09-14T12:52:08.011Z INFO  [batchtrack.api] req=69aa39b7 method=GET path=/batches/1793 status=200 duration_ms=12 user=jramirez
+2026-09-14T12:53:00.004Z INFO  [batchtrack.metrics] window=60s requests=39 errors_5xx=0 p50_ms=41 p95_ms=172 p99_ms=279 db_pool_in_use=1/10
+2026-09-14T12:53:13.542Z INFO  [batchtrack.api] req=74932737 method=GET path=/batches?site=BAQ&status=released&page=3 status=200 duration_ms=65 user=sortiz
+2026-09-14T12:53:26.789Z INFO  [batchtrack.api] req=2594d466 method=GET path=/batches?site=BOG&status=released&page=2 status=200 duration_ms=54 user=pvargas
+2026-09-14T12:54:00.013Z INFO  [batchtrack.metrics] window=60s requests=47 errors_5xx=0 p50_ms=38 p95_ms=181 p99_ms=281 db_pool_in_use=1/10
+2026-09-14T12:54:08.772Z INFO  [batchtrack.api] req=f500a29a method=GET path=/dashboard/summary status=200 duration_ms=30 user=lmartinez
+2026-09-14T12:55:00.022Z INFO  [batchtrack.metrics] window=60s requests=56 errors_5xx=0 p50_ms=35 p95_ms=180 p99_ms=254 db_pool_in_use=1/10
+2026-09-14T12:55:01.638Z INFO  [batchtrack.api] req=5759f410 method=GET path=/batches?site=MDE&status=released&page=3 status=200 duration_ms=59 user=jgomez
+2026-09-14T12:56:00.023Z INFO  [batchtrack.metrics] window=60s requests=54 errors_5xx=0 p50_ms=37 p95_ms=148 p99_ms=289 db_pool_in_use=1/10
+2026-09-14T12:57:00.001Z INFO  [batchtrack.metrics] window=60s requests=41 errors_5xx=0 p50_ms=38 p95_ms=162 p99_ms=290 db_pool_in_use=3/10
+2026-09-14T12:57:45.574Z INFO  [batchtrack.api] req=3fc43148 method=GET path=/batches/1733/signatures status=200 duration_ms=29 user=aperez
+2026-09-14T12:58:00.019Z INFO  [batchtrack.metrics] window=60s requests=40 errors_5xx=0 p50_ms=42 p95_ms=181 p99_ms=353 db_pool_in_use=2/10
+2026-09-14T12:58:12.735Z WARN  [batchtrack.auth] login failed username=pvargas reason=bad_password remote=10.20.5.117
+2026-09-14T12:58:14.775Z INFO  [batchtrack.api] req=218d8975 method=GET path=/batches/1790/signatures status=200 duration_ms=27 user=jramirez
+2026-09-14T12:58:15.540Z INFO  [batchtrack.api] req=57211177 method=GET path=/batches?site=BAQ&status=released&page=3 status=200 duration_ms=14 user=dcastro
+2026-09-14T12:59:00.020Z INFO  [batchtrack.metrics] window=60s requests=50 errors_5xx=0 p50_ms=35 p95_ms=139 p99_ms=245 db_pool_in_use=2/10
+2026-09-14T12:59:16.905Z INFO  [batchtrack.api] req=63720fe2 method=GET path=/batches/1719 status=200 duration_ms=47 user=jramirez
+2026-09-14T13:00:00.028Z INFO  [batchtrack.metrics] window=60s requests=58 errors_5xx=0 p50_ms=40 p95_ms=146 p99_ms=236 db_pool_in_use=3/10
+2026-09-14T13:00:00.214Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0412 started
+2026-09-14T13:00:00.564Z WARN  [py.warnings] /opt/batchtrack/app/audit_export.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+2026-09-14T13:00:00.833Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0412 finished rows=52 duration_ms=1173
+2026-09-14T13:00:05.132Z WARN  [batchtrack.disk] volume /var/lib/batchtrack usage=82% threshold=80%
+2026-09-14T13:01:00.023Z INFO  [batchtrack.metrics] window=60s requests=40 errors_5xx=0 p50_ms=33 p95_ms=177 p99_ms=328 db_pool_in_use=3/10
+2026-09-14T13:02:00.011Z INFO  [batchtrack.metrics] window=60s requests=54 errors_5xx=0 p50_ms=43 p95_ms=175 p99_ms=262 db_pool_in_use=1/10
+2026-09-14T13:02:06.826Z INFO  [batchtrack.api] req=ff984d4b method=GET path=/batches/1840 status=200 duration_ms=32 user=dcastro
+2026-09-14T13:03:00.026Z INFO  [batchtrack.metrics] window=60s requests=45 errors_5xx=0 p50_ms=44 p95_ms=170 p99_ms=257 db_pool_in_use=1/10
+2026-09-14T13:03:39.979Z INFO  [batchtrack.api] req=8b5c6113 method=GET path=/batches?site=BOG&status=released&page=3 status=200 duration_ms=33 user=jgomez
+2026-09-14T13:04:00.006Z INFO  [batchtrack.metrics] window=60s requests=48 errors_5xx=0 p50_ms=40 p95_ms=134 p99_ms=208 db_pool_in_use=3/10
+2026-09-14T13:04:16.123Z INFO  [batchtrack.api] req=9f7d25d6 method=GET path=/dashboard/summary status=200 duration_ms=58 user=lmartinez
+2026-09-14T13:04:40.473Z WARN  [batchtrack.lims] slow response endpoint=/api/v2/samples duration_ms=2413
+2026-09-14T13:05:00.020Z INFO  [batchtrack.metrics] window=60s requests=41 errors_5xx=0 p50_ms=36 p95_ms=130 p99_ms=221 db_pool_in_use=1/10
+2026-09-14T13:06:00.005Z INFO  [batchtrack.metrics] window=60s requests=51 errors_5xx=0 p50_ms=35 p95_ms=159 p99_ms=264 db_pool_in_use=3/10
+2026-09-14T13:06:35.848Z INFO  [batchtrack.api] req=34e47e7c method=GET path=/batches/1832/signatures status=200 duration_ms=30 user=rsuarez
+2026-09-14T13:06:46.111Z WARN  [batchtrack.lims] deprecated endpoint in use endpoint=/api/v2/samples sunset=2026-12-31 lot=OIL-OM3-2603
+2026-09-14T13:07:00.028Z INFO  [batchtrack.metrics] window=60s requests=43 errors_5xx=0 p50_ms=41 p95_ms=172 p99_ms=306 db_pool_in_use=2/10
+2026-09-14T13:08:00.011Z INFO  [batchtrack.metrics] window=60s requests=42 errors_5xx=0 p50_ms=41 p95_ms=180 p99_ms=311 db_pool_in_use=2/10
+2026-09-14T13:08:22.997Z INFO  [batchtrack.api] req=5dfdbd61 method=GET path=/batches/1813 status=200 duration_ms=16 user=mhernandez
+2026-09-14T13:08:48.836Z INFO  [batchtrack.api] req=931d056f method=GET path=/batches?site=BOG&status=released&page=3 status=200 duration_ms=92 user=aperez
+2026-09-14T13:09:00.025Z INFO  [batchtrack.metrics] window=60s requests=50 errors_5xx=0 p50_ms=43 p95_ms=142 p99_ms=276 db_pool_in_use=3/10
+2026-09-14T13:09:13.574Z INFO  [batchtrack.api] req=47d998c3 method=GET path=/batches?site=BAQ&status=released&page=1 status=200 duration_ms=41 user=jgomez
+2026-09-14T13:09:13.936Z INFO  [batchtrack.api] req=80a481c4 method=GET path=/batches?site=MDE&status=released&page=2 status=200 duration_ms=33 user=dcastro
+2026-09-14T13:10:00.022Z INFO  [batchtrack.metrics] window=60s requests=55 errors_5xx=0 p50_ms=37 p95_ms=170 p99_ms=338 db_pool_in_use=3/10
+2026-09-14T13:11:00.029Z INFO  [batchtrack.metrics] window=60s requests=45 errors_5xx=0 p50_ms=43 p95_ms=129 p99_ms=189 db_pool_in_use=3/10
+2026-09-14T13:11:13.210Z INFO  [batchtrack.api] req=5c73c790 method=GET path=/batches/1786 status=200 duration_ms=29 user=aperez
+2026-09-14T13:11:58.402Z INFO  [batchtrack.server] received SIGTERM, draining connections version=1.4.0 pid=2281
+2026-09-14T13:12:03.117Z INFO  [batchtrack.server] stopped version=1.4.0 pid=2281 uptime_s=431877
+2026-09-14T13:12:09.850Z INFO  [batchtrack.server] starting batchtrack version=1.4.1 commit=8e1d2c7 python=3.11.9 pid=3117
+2026-09-14T13:12:09.911Z INFO  [batchtrack.config] db=/var/lib/batchtrack/batchtrack.db db_pool_size=10 db_pool_timeout_s=5.0 sqlite_busy_timeout_ms=5000 journal_mode=delete access_log_sample=0.05
+2026-09-14T13:12:10.003Z INFO  [batchtrack.jobs] scheduled job=audit_export every=900s
+2026-09-14T13:12:10.005Z INFO  [batchtrack.jobs] scheduled job=cache_warmer every=120s workers=8 scope=all_batches
+2026-09-14T13:12:10.221Z INFO  [batchtrack.server] listening on 0.0.0.0:8080 threads=16
+2026-09-14T13:12:14.500Z INFO  [batchtrack.deploy] deploy finished release=1.4.1 previous=1.4.0 change=CHG-20931 actor=ci-release
+2026-09-14T13:13:00.008Z INFO  [batchtrack.metrics] window=60s requests=43 errors_5xx=0 p50_ms=34 p95_ms=134 p99_ms=258 db_pool_in_use=1/10
+2026-09-14T13:13:10.015Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0001 started batches=1843 workers=8 active_runs=1
+2026-09-14T13:13:51.312Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0001 finished loaded=1843 duration_ms=41300 cache_size=1843 hit_rate=0.0
+2026-09-14T13:14:00.009Z INFO  [batchtrack.metrics] window=60s requests=38 errors_5xx=0 p50_ms=38 p95_ms=121 p99_ms=172 db_pool_in_use=9/10
+2026-09-14T13:14:18.131Z INFO  [batchtrack.api] req=49d51728 method=GET path=/batches/1721 status=200 duration_ms=63 user=aperez
+2026-09-14T13:15:00.001Z INFO  [batchtrack.metrics] window=60s requests=57 errors_5xx=0 p50_ms=34 p95_ms=166 p99_ms=254 db_pool_in_use=6/10
+2026-09-14T13:15:00.214Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0413 started
+2026-09-14T13:15:00.564Z WARN  [py.warnings] /opt/batchtrack/app/audit_export.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+2026-09-14T13:15:01.189Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0413 finished rows=20 duration_ms=1059
+2026-09-14T13:15:10.054Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0002 started batches=1843 workers=8 active_runs=1
+2026-09-14T13:15:50.062Z INFO  [batchtrack.api] req=c08148c3 method=POST path=/batches status=201 duration_ms=76 user=ctorres
+2026-09-14T13:16:00.008Z INFO  [batchtrack.metrics] window=60s requests=51 errors_5xx=0 p50_ms=38 p95_ms=211 p99_ms=414 db_pool_in_use=8/10
+2026-09-14T13:16:13.851Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0002 finished loaded=1843 duration_ms=63800 cache_size=1843 hit_rate=0.149
+2026-09-14T13:16:57.584Z INFO  [batchtrack.api] req=143b1edf method=GET path=/batches/1696/signatures status=200 duration_ms=62 user=dcastro
+2026-09-14T13:17:00.017Z INFO  [batchtrack.metrics] window=60s requests=60 errors_5xx=0 p50_ms=70 p95_ms=537 p99_ms=897 db_pool_in_use=7/10
+2026-09-14T13:17:10.063Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0003 started batches=1843 workers=8 active_runs=1
+2026-09-14T13:17:31.336Z WARN  [batchtrack.lims] slow response endpoint=/api/v2/samples duration_ms=3014
+2026-09-14T13:17:51.558Z WARN  [batchtrack.lims] deprecated endpoint in use endpoint=/api/v2/samples sunset=2026-12-31 lot=OIL-OM3-2603
+2026-09-14T13:18:00.019Z INFO  [batchtrack.metrics] window=60s requests=40 errors_5xx=0 p50_ms=74 p95_ms=873 p99_ms=1581 db_pool_in_use=8/10
+2026-09-14T13:18:01.538Z INFO  [batchtrack.api] req=460a4723 method=GET path=/batches?site=BOG&status=released&page=2 status=200 duration_ms=96 user=sortiz
+2026-09-14T13:18:27.531Z ERROR [batchtrack.api] req=3d3199f2 method=POST path=/batches/1791/signatures status=500 duration_ms=5009 error="sqlite3.OperationalError: database is locked"
+Traceback (most recent call last):
+  File "/opt/batchtrack/app/api.py", line 82, in do_POST
+    sig_id = signatures.sign_batch(
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/batchtrack/app/signatures.py", line 26, in sign_batch
+    conn.commit()
+sqlite3.OperationalError: database is locked
+2026-09-14T13:18:31.109Z ERROR [batchtrack.api] req=975faa87 method=POST path=/batches/1696/signatures status=500 duration_ms=5015 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:18:47.260Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0003 finished loaded=1843 duration_ms=97200 cache_size=1843 hit_rate=0.142
+2026-09-14T13:19:00.022Z INFO  [batchtrack.metrics] window=60s requests=59 errors_5xx=2 p50_ms=106 p95_ms=1259 p99_ms=2508 db_pool_in_use=9/10
+2026-09-14T13:19:10.086Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0004 started batches=1843 workers=8 active_runs=1
+2026-09-14T13:19:18.266Z ERROR [batchtrack.api] req=8457aa37 method=POST path=/batches/1748/signatures status=500 duration_ms=5039 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:19:18.283Z ERROR [batchtrack.api] req=594a885f method=POST path=/batches/1775/signatures status=500 duration_ms=5012 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:19:35.914Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=1 oldest_holder=ThreadPoolExecutor-5_7 held_ms=24530
+2026-09-14T13:20:00.009Z INFO  [batchtrack.metrics] window=60s requests=53 errors_5xx=2 p50_ms=119 p95_ms=1952 p99_ms=2809 db_pool_in_use=10/10
+2026-09-14T13:20:10.348Z INFO  [batchtrack.api] req=194306dc method=GET path=/batches/1841 status=200 duration_ms=219 user=ngarcia
+2026-09-14T13:20:14.166Z ERROR [batchtrack.api] req=d416f1ea method=GET path=/batches/1780 status=503 duration_ms=5006 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:20:27.650Z ERROR [batchtrack.api] req=41beba75 method=POST path=/batches status=500 duration_ms=5035 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:20:31.979Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=1 oldest_holder=ThreadPoolExecutor-5_0 held_ms=81188
+2026-09-14T13:20:59.950Z WARN  [batchtrack.logging] suppressed 1 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:21:00.003Z INFO  [batchtrack.metrics] window=60s requests=49 errors_5xx=3 p50_ms=123 p95_ms=1646 p99_ms=3120 db_pool_in_use=9/10
+2026-09-14T13:21:10.114Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0005 started batches=1843 workers=8 active_runs=2
+2026-09-14T13:21:12.792Z INFO  [batchtrack.api] req=c63f776c method=GET path=/batches/1724/signatures status=200 duration_ms=409 user=emoreno
+2026-09-14T13:21:14.960Z ERROR [batchtrack.api] req=6ef62274 method=POST path=/batches status=500 duration_ms=5004 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:21:21.583Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0004 finished loaded=1843 duration_ms=131500 cache_size=1843 hit_rate=0.135
+2026-09-14T13:21:24.568Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=1 oldest_holder=ThreadPoolExecutor-6_4 held_ms=13109
+2026-09-14T13:21:41.415Z INFO  [batchtrack.api] req=df287a74 method=GET path=/batches/1717/signatures status=200 duration_ms=273 user=jgomez
+2026-09-14T13:21:44.531Z ERROR [batchtrack.api] req=df524091 method=GET path=/batches/1807 status=503 duration_ms=5002 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:21:59.950Z WARN  [batchtrack.logging] suppressed 5 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:22:00.015Z INFO  [batchtrack.metrics] window=60s requests=60 errors_5xx=7 p50_ms=145 p95_ms=2657 p99_ms=4405 db_pool_in_use=10/10
+2026-09-14T13:22:34.337Z ERROR [batchtrack.api] req=c354dade method=POST path=/batches/1740 status=503 duration_ms=5008 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:22:48.363Z ERROR [batchtrack.api] req=eef33779 method=GET path=/batches/1801 status=503 duration_ms=5003 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:22:51.227Z WARN  [batchtrack.api] slow request req=4553848b method=GET path=/reports/site-yield duration_ms=3024 user=emoreno
+2026-09-14T13:22:59.950Z WARN  [batchtrack.logging] suppressed 5 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:23:00.018Z INFO  [batchtrack.metrics] window=60s requests=46 errors_5xx=7 p50_ms=196 p95_ms=2919 p99_ms=5083 db_pool_in_use=9/10
+2026-09-14T13:23:08.243Z ERROR [batchtrack.api] req=e952a2aa method=POST path=/batches/1692/signatures status=500 duration_ms=5031 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:23:10.150Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0006 started batches=1843 workers=8 active_runs=2
+2026-09-14T13:23:10.380Z INFO  [batchtrack.api] req=886171cb method=GET path=/batches?site=BOG&status=released&page=2 status=200 duration_ms=441 user=ngarcia
+2026-09-14T13:23:15.363Z WARN  [batchtrack.lims] deprecated endpoint in use endpoint=/api/v2/samples sunset=2026-12-31 lot=OIL-OM3-2603
+2026-09-14T13:23:30.956Z WARN  [batchtrack.auth] login failed username=pvargas reason=bad_password remote=10.20.2.216
+2026-09-14T13:23:47.908Z ERROR [batchtrack.api] req=429d6654 method=GET path=/batches/1698 status=503 duration_ms=5005 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:23:49.011Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0005 failed duration_ms=158900 loaded=1124/1843
+Traceback (most recent call last):
+  File "/opt/batchtrack/app/scheduler.py", line 58, in _run_job
+    job.func(**job.kwargs)
+  File "/opt/batchtrack/app/cache.py", line 45, in warm_cache
+    for _ in pool.map(lambda batch_no: get_batch(db_path, batch_no), batch_numbers):
+  File "/usr/lib/python3.11/concurrent/futures/_base.py", line 619, in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/concurrent/futures/_base.py", line 317, in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/concurrent/futures/_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/batchtrack/app/cache.py", line 45, in <lambda>
+    for _ in pool.map(lambda batch_no: get_batch(db_path, batch_no), batch_numbers):
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/batchtrack/app/cache.py", line 32, in get_batch
+    value = _load(db_path, batch_no)
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/batchtrack/app/cache.py", line 18, in _load
+    row = conn.execute("SELECT * FROM batches WHERE batch_no = ?", (batch_no,)).fetchone()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked
+2026-09-14T13:23:50.292Z INFO  [batchtrack.api] req=ec18e84e method=GET path=/dashboard/summary status=200 duration_ms=391 user=aperez
+2026-09-14T13:23:59.950Z WARN  [batchtrack.logging] suppressed 11 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:24:00.030Z INFO  [batchtrack.metrics] window=60s requests=39 errors_5xx=13 p50_ms=173 p95_ms=3634 p99_ms=5022 db_pool_in_use=8/10
+2026-09-14T13:24:17.601Z ERROR [batchtrack.api] req=e258af41 method=POST path=/batches/1732/signatures status=500 duration_ms=5021 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:24:39.421Z INFO  [batchtrack.api] req=08c28e22 method=GET path=/batches?site=BAQ&status=released&page=1 status=200 duration_ms=1092 user=ngarcia
+2026-09-14T13:24:43.864Z ERROR [batchtrack.api] req=2f83cc7d method=POST path=/batches/1826/signatures status=500 duration_ms=5015 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:24:57.090Z INFO  [batchtrack.api] req=02b9bf06 method=GET path=/dashboard/summary status=200 duration_ms=355 user=rsuarez
+2026-09-14T13:24:59.950Z WARN  [batchtrack.logging] suppressed 13 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:25:00.021Z INFO  [batchtrack.metrics] window=60s requests=49 errors_5xx=15 p50_ms=245 p95_ms=2999 p99_ms=4745 db_pool_in_use=10/10
+2026-09-14T13:25:10.183Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0007 started batches=1843 workers=8 active_runs=2
+2026-09-14T13:25:30.067Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=3 oldest_holder=ThreadPoolExecutor-7_1 held_ms=139051
+2026-09-14T13:25:36.272Z ERROR [batchtrack.api] req=28559b9e method=POST path=/batches/1730/signatures status=500 duration_ms=5011 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:25:55.578Z ERROR [batchtrack.api] req=05247c65 method=POST path=/batches/1814/signatures status=500 duration_ms=5009 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:25:59.950Z WARN  [batchtrack.logging] suppressed 17 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:26:00.012Z INFO  [batchtrack.metrics] window=60s requests=57 errors_5xx=19 p50_ms=256 p95_ms=4000 p99_ms=5103 db_pool_in_use=9/10
+2026-09-14T13:26:13.249Z INFO  [batchtrack.api] req=c9297628 method=GET path=/batches/1718/signatures status=200 duration_ms=311 user=ctorres
+2026-09-14T13:26:16.220Z ERROR [batchtrack.api] req=dd73f4e5 method=POST path=/batches/1744 status=503 duration_ms=5017 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:26:17.547Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0006 failed duration_ms=187400 loaded=931/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:26:58.579Z ERROR [batchtrack.api] req=3c61965f method=POST path=/batches status=500 duration_ms=5032 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:26:59.950Z WARN  [batchtrack.logging] suppressed 18 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:27:00.022Z INFO  [batchtrack.metrics] window=60s requests=46 errors_5xx=20 p50_ms=244 p95_ms=4664 p99_ms=5127 db_pool_in_use=10/10
+2026-09-14T13:27:08.729Z INFO  [batchtrack.api] req=e57a2f71 method=GET path=/batches?site=BOG&status=released&page=3 status=200 duration_ms=533 user=ctorres
+2026-09-14T13:27:10.193Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0008 started batches=1843 workers=8 active_runs=2
+2026-09-14T13:27:20.133Z ERROR [batchtrack.api] req=109ff908 method=GET path=/batches/1738 status=503 duration_ms=5003 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:27:47.613Z ERROR [batchtrack.api] req=ea5cda4f method=GET path=/batches/1762 status=503 duration_ms=5004 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:27:59.950Z WARN  [batchtrack.logging] suppressed 22 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:28:00.008Z INFO  [batchtrack.metrics] window=60s requests=46 errors_5xx=24 p50_ms=265 p95_ms=4020 p99_ms=5098 db_pool_in_use=10/10
+2026-09-14T13:28:44.180Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0007 failed duration_ms=214000 loaded=741/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:28:45.897Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=4 oldest_holder=ThreadPoolExecutor-9_3 held_ms=94576
+2026-09-14T13:28:46.590Z ERROR [batchtrack.api] req=9a1ebed9 method=GET path=/batches/1764 status=503 duration_ms=5018 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:28:52.386Z ERROR [batchtrack.api] req=b0f4091a method=GET path=/batches/1746 status=503 duration_ms=5006 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:28:59.950Z WARN  [batchtrack.logging] suppressed 26 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:29:00.019Z INFO  [batchtrack.metrics] window=60s requests=44 errors_5xx=28 p50_ms=256 p95_ms=3600 p99_ms=5052 db_pool_in_use=10/10
+2026-09-14T13:29:10.200Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0009 started batches=1843 workers=8 active_runs=2
+2026-09-14T13:29:27.489Z INFO  [batchtrack.api] req=0cb5a5cf method=GET path=/batches?site=BOG&status=released&page=3 status=200 duration_ms=201 user=lmartinez
+2026-09-14T13:29:38.813Z ERROR [batchtrack.api] req=a3cf1fc2 method=GET path=/batches/1702 status=503 duration_ms=5001 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:29:55.285Z ERROR [batchtrack.api] req=db3bbdc6 method=GET path=/batches/1834 status=503 duration_ms=5019 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:29:59.950Z WARN  [batchtrack.logging] suppressed 30 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:30:00.006Z INFO  [batchtrack.metrics] window=60s requests=61 errors_5xx=32 p50_ms=287 p95_ms=3547 p99_ms=5062 db_pool_in_use=10/10
+2026-09-14T13:30:00.214Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0414 started
+2026-09-14T13:30:00.564Z WARN  [py.warnings] /opt/batchtrack/app/audit_export.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+2026-09-14T13:30:01.195Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0414 finished rows=28 duration_ms=1264
+2026-09-14T13:30:05.131Z WARN  [batchtrack.disk] volume /var/lib/batchtrack usage=82% threshold=80%
+2026-09-14T13:30:24.230Z INFO  [batchtrack.api] req=0a684623 method=GET path=/batches/1802 status=200 duration_ms=866 user=ngarcia
+2026-09-14T13:30:54.141Z ERROR [batchtrack.api] req=faa7bbee method=GET path=/batches/1833 status=503 duration_ms=5010 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:30:56.552Z ERROR [batchtrack.api] req=b406210e method=GET path=/batches/1827 status=503 duration_ms=5017 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:30:59.950Z WARN  [batchtrack.logging] suppressed 32 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:31:00.008Z INFO  [batchtrack.metrics] window=60s requests=44 errors_5xx=34 p50_ms=282 p95_ms=4924 p99_ms=5033 db_pool_in_use=10/10
+2026-09-14T13:31:05.627Z ERROR [batchtrack.api] req=85409c2e method=POST path=/batches/1837 status=503 duration_ms=5011 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:31:06.790Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0008 failed duration_ms=236600 loaded=1321/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:31:10.200Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0010 started batches=1843 workers=8 active_runs=2
+2026-09-14T13:31:12.240Z ERROR [batchtrack.api] req=907fe1d3 method=POST path=/batches status=500 duration_ms=5005 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:31:59.950Z WARN  [batchtrack.logging] suppressed 30 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:32:00.002Z INFO  [batchtrack.metrics] window=60s requests=50 errors_5xx=32 p50_ms=224 p95_ms=3713 p99_ms=5131 db_pool_in_use=10/10
+2026-09-14T13:32:05.089Z ERROR [batchtrack.api] req=58ea2bd2 method=GET path=/batches/1716 status=503 duration_ms=5008 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:32:16.135Z ERROR [batchtrack.api] req=8b4f08f1 method=GET path=/batches/1766 status=503 duration_ms=5012 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:32:43.843Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=5 oldest_holder=ThreadPoolExecutor-10_5 held_ms=212252
+2026-09-14T13:32:55.520Z INFO  [batchtrack.api] req=90d8e8c8 method=GET path=/batches?site=BOG&status=released&page=1 status=200 duration_ms=1400 user=mhernandez
+2026-09-14T13:32:59.950Z WARN  [batchtrack.logging] suppressed 31 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:33:00.004Z INFO  [batchtrack.metrics] window=60s requests=61 errors_5xx=33 p50_ms=241 p95_ms=4585 p99_ms=5107 db_pool_in_use=10/10
+2026-09-14T13:33:10.238Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0011 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:33:30.114Z ERROR [batchtrack.api] req=69d5959d method=POST path=/batches/1741 status=503 duration_ms=5006 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:33:32.618Z ERROR [batchtrack.api] req=1ce940c6 method=POST path=/batches/1786 status=503 duration_ms=5016 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:33:46.517Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0009 failed duration_ms=276320 loaded=1358/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:33:50.278Z INFO  [batchtrack.api] req=cb9dada2 method=GET path=/batches?site=BAQ&status=released&page=1 status=200 duration_ms=1567 user=jgomez
+2026-09-14T13:33:59.950Z WARN  [batchtrack.logging] suppressed 32 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:34:00.023Z INFO  [batchtrack.metrics] window=60s requests=55 errors_5xx=34 p50_ms=307 p95_ms=3990 p99_ms=5080 db_pool_in_use=10/10
+2026-09-14T13:34:17.905Z INFO  [batchtrack.api] req=e0167b9a method=GET path=/batches/1830 status=200 duration_ms=1007 user=ngarcia
+2026-09-14T13:34:35.104Z INFO  [batchtrack.api] req=f55428e5 method=GET path=/batches?site=CLO&status=released&page=2 status=200 duration_ms=332 user=jramirez
+2026-09-14T13:34:42.679Z ERROR [batchtrack.api] req=947efb31 method=GET path=/batches/1708 status=503 duration_ms=5009 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:34:45.555Z ERROR [batchtrack.api] req=7076dbf5 method=POST path=/batches/1713/signatures status=500 duration_ms=5009 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:34:59.950Z WARN  [batchtrack.logging] suppressed 23 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:35:00.027Z INFO  [batchtrack.metrics] window=60s requests=38 errors_5xx=25 p50_ms=303 p95_ms=3853 p99_ms=5035 db_pool_in_use=10/10
+2026-09-14T13:35:01.075Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0010 failed duration_ms=230878 loaded=1090/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:35:07.942Z ERROR [batchtrack.api] req=757aa774 method=POST path=/batches/1690/signatures status=500 duration_ms=5035 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:35:10.272Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0012 started batches=1843 workers=8 active_runs=2
+2026-09-14T13:35:35.093Z INFO  [batchtrack.api] req=2d42c8f9 method=POST path=/batches status=201 duration_ms=687 user=pvargas
+2026-09-14T13:35:36.318Z ERROR [batchtrack.api] req=18c3aa48 method=POST path=/batches/1799/signatures status=500 duration_ms=5029 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:35:59.950Z WARN  [batchtrack.logging] suppressed 30 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:36:00.016Z INFO  [batchtrack.metrics] window=60s requests=57 errors_5xx=32 p50_ms=289 p95_ms=4868 p99_ms=5064 db_pool_in_use=10/10
+2026-09-14T13:36:16.986Z ERROR [batchtrack.api] req=2e69d62f method=POST path=/batches/1690/signatures status=500 duration_ms=5032 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:36:39.490Z ERROR [batchtrack.api] req=e4bdd64f method=GET path=/batches/1705 status=503 duration_ms=5012 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:36:59.950Z WARN  [batchtrack.logging] suppressed 30 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:37:00.010Z INFO  [batchtrack.metrics] window=60s requests=60 errors_5xx=32 p50_ms=234 p95_ms=3686 p99_ms=5098 db_pool_in_use=10/10
+2026-09-14T13:37:10.273Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0013 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:37:11.796Z WARN  [batchtrack.auth] login failed username=mhernandez reason=bad_password remote=10.20.7.99
+2026-09-14T13:37:12.103Z ERROR [batchtrack.api] req=6392f1d5 method=GET path=/batches/1813 status=503 duration_ms=5013 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:37:31.452Z INFO  [batchtrack.api] req=2e91f788 method=POST path=/batches/1773/signatures status=201 duration_ms=2578 user=jgomez
+2026-09-14T13:37:32.947Z ERROR [batchtrack.api] req=039f1169 method=POST path=/batches/1758/signatures status=500 duration_ms=5039 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:37:38.087Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0011 finished loaded=1843 duration_ms=267852 cache_size=1843 hit_rate=0.09
+2026-09-14T13:37:59.950Z WARN  [batchtrack.logging] suppressed 30 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:38:00.024Z INFO  [batchtrack.metrics] window=60s requests=58 errors_5xx=32 p50_ms=269 p95_ms=3530 p99_ms=5058 db_pool_in_use=10/10
+2026-09-14T13:38:21.326Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=8 oldest_holder=ThreadPoolExecutor-13_1 held_ms=190206
+2026-09-14T13:38:28.907Z ERROR [batchtrack.api] req=8ab21ef1 method=GET path=/batches/1820 status=503 duration_ms=5005 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:38:31.521Z ERROR [batchtrack.api] req=8fdc465e method=POST path=/batches status=500 duration_ms=5016 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:38:55.204Z INFO  [batchtrack.api] req=81bf4861 method=GET path=/batches/1789/signatures status=200 duration_ms=709 user=ngarcia
+2026-09-14T13:38:59.950Z WARN  [batchtrack.logging] suppressed 22 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:39:00.018Z INFO  [batchtrack.metrics] window=60s requests=51 errors_5xx=24 p50_ms=287 p95_ms=4040 p99_ms=5121 db_pool_in_use=10/10
+2026-09-14T13:39:10.294Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0014 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:39:11.089Z ERROR [batchtrack.api] req=37e61122 method=GET path=/batches/1723 status=503 duration_ms=5014 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:39:12.284Z INFO  [batchtrack.api] req=3ce0dbe1 method=GET path=/batches?site=BAQ&status=released&page=4 status=200 duration_ms=891 user=pvargas
+2026-09-14T13:39:22.417Z ERROR [batchtrack.api] req=afd59f0e method=GET path=/batches/1752 status=503 duration_ms=5006 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:39:59.009Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0012 failed duration_ms=288740 loaded=1316/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:39:59.950Z WARN  [batchtrack.logging] suppressed 32 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:40:00.020Z INFO  [batchtrack.metrics] window=60s requests=44 errors_5xx=34 p50_ms=269 p95_ms=4229 p99_ms=5063 db_pool_in_use=10/10
+2026-09-14T13:40:13.077Z ERROR [batchtrack.api] req=370ff248 method=POST path=/batches/1715/signatures status=500 duration_ms=5010 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:40:33.044Z ERROR [batchtrack.api] req=be0a79ff method=POST path=/batches status=500 duration_ms=5015 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:40:54.622Z INFO  [batchtrack.api] req=18ec60d6 method=POST path=/batches status=201 duration_ms=1055 user=aperez
+2026-09-14T13:40:59.950Z WARN  [batchtrack.logging] suppressed 32 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:41:00.020Z INFO  [batchtrack.metrics] window=60s requests=38 errors_5xx=34 p50_ms=275 p95_ms=4130 p99_ms=5095 db_pool_in_use=10/10
+2026-09-14T13:41:06.979Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0013 finished loaded=1843 duration_ms=236709 cache_size=1843 hit_rate=0.08
+2026-09-14T13:41:08.963Z INFO  [batchtrack.api] req=aef760c5 method=GET path=/batches?site=BOG&status=released&page=2 status=200 duration_ms=493 user=sortiz
+2026-09-14T13:41:09.499Z ERROR [batchtrack.api] req=5c2870f6 method=POST path=/batches/1702 status=503 duration_ms=5007 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:41:10.317Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0015 started batches=1843 workers=8 active_runs=2
+2026-09-14T13:41:22.823Z ERROR [batchtrack.api] req=4e3042f3 method=GET path=/batches/1704 status=503 duration_ms=5018 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:41:51.558Z INFO  [batchtrack.api] req=8ffa5120 method=GET path=/batches?site=MDE&status=released&page=3 status=200 duration_ms=1643 user=lmartinez
+2026-09-14T13:41:59.950Z WARN  [batchtrack.logging] suppressed 31 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:42:00.023Z INFO  [batchtrack.metrics] window=60s requests=46 errors_5xx=33 p50_ms=224 p95_ms=4078 p99_ms=5051 db_pool_in_use=10/10
+2026-09-14T13:42:15.318Z ERROR [batchtrack.api] req=50f05472 method=GET path=/batches/1808 status=503 duration_ms=5010 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:42:21.740Z INFO  [batchtrack.api] req=97448164 method=GET path=/batches?site=BAQ&status=released&page=1 status=200 duration_ms=497 user=lmartinez
+2026-09-14T13:42:24.983Z ERROR [batchtrack.api] req=44bbace8 method=POST path=/batches status=500 duration_ms=5027 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:42:48.398Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=9 oldest_holder=ThreadPoolExecutor-15_0 held_ms=217039
+2026-09-14T13:42:59.259Z INFO  [batchtrack.api] req=71d7868c method=GET path=/batches?site=BAQ&status=released&page=4 status=200 duration_ms=394 user=jgomez
+2026-09-14T13:42:59.950Z WARN  [batchtrack.logging] suppressed 25 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:43:00.008Z INFO  [batchtrack.metrics] window=60s requests=55 errors_5xx=27 p50_ms=236 p95_ms=3610 p99_ms=5088 db_pool_in_use=10/10
+2026-09-14T13:43:10.333Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0016 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:43:11.636Z ERROR [batchtrack.api] req=ca48fe28 method=POST path=/batches/1830 status=503 duration_ms=5016 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:43:36.047Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0014 failed duration_ms=265756 loaded=735/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:43:39.094Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=10 oldest_holder=ThreadPoolExecutor-16_6 held_ms=148135
+2026-09-14T13:43:43.699Z INFO  [batchtrack.api] req=f6e4022a method=GET path=/batches/1833 status=200 duration_ms=493 user=rsuarez
+2026-09-14T13:43:53.369Z ERROR [batchtrack.api] req=ec447c63 method=GET path=/batches/1827 status=503 duration_ms=5012 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:43:59.950Z WARN  [batchtrack.logging] suppressed 27 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:44:00.022Z INFO  [batchtrack.metrics] window=60s requests=52 errors_5xx=29 p50_ms=291 p95_ms=5031 p99_ms=5042 db_pool_in_use=10/10
+2026-09-14T13:44:14.021Z ERROR [batchtrack.api] req=e1d87fe4 method=POST path=/batches/1701/signatures status=500 duration_ms=5037 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:44:18.021Z INFO  [batchtrack.api] req=d52e6f89 method=GET path=/batches?site=CLO&status=released&page=4 status=200 duration_ms=989 user=mhernandez
+2026-09-14T13:44:18.872Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=10 oldest_holder=ThreadPoolExecutor-16_0 held_ms=187412
+2026-09-14T13:44:37.876Z ERROR [batchtrack.api] req=7b396f0b method=POST path=/batches/1800/signatures status=500 duration_ms=5003 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:44:59.950Z WARN  [batchtrack.logging] suppressed 28 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:45:00.013Z INFO  [batchtrack.metrics] window=60s requests=61 errors_5xx=30 p50_ms=264 p95_ms=4516 p99_ms=5044 db_pool_in_use=10/10
+2026-09-14T13:45:00.214Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0415 started
+2026-09-14T13:45:00.564Z WARN  [py.warnings] /opt/batchtrack/app/audit_export.py:41: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+2026-09-14T13:45:00.887Z INFO  [batchtrack.jobs] job=audit_export run_id=ae-0415 finished rows=32 duration_ms=706
+2026-09-14T13:45:05.219Z ERROR [batchtrack.api] req=11877e3e method=POST path=/batches status=500 duration_ms=5032 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:45:10.354Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0017 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:45:26.290Z ERROR [batchtrack.api] req=c0afa2c3 method=POST path=/batches/1826 status=503 duration_ms=5014 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:45:34.698Z INFO  [batchtrack.api] req=d4130e8d method=GET path=/batches/1762 status=200 duration_ms=300 user=rsuarez
+2026-09-14T13:45:59.477Z INFO  [batchtrack.api] req=67e50103 method=GET path=/batches/1698 status=200 duration_ms=572 user=jgomez
+2026-09-14T13:45:59.950Z WARN  [batchtrack.logging] suppressed 32 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:46:00.019Z INFO  [batchtrack.metrics] window=60s requests=41 errors_5xx=34 p50_ms=306 p95_ms=4011 p99_ms=5096 db_pool_in_use=10/10
+2026-09-14T13:46:00.827Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0015 failed duration_ms=290513 loaded=1357/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:46:14.799Z INFO  [batchtrack.api] req=7a109fda method=GET path=/batches/1821 status=200 duration_ms=768 user=ngarcia
+2026-09-14T13:46:40.888Z ERROR [batchtrack.api] req=88998a53 method=GET path=/batches/1786 status=503 duration_ms=5003 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:46:47.579Z INFO  [batchtrack.api] req=2f8dab5e method=POST path=/batches status=201 duration_ms=1425 user=pvargas
+2026-09-14T13:46:51.871Z ERROR [batchtrack.api] req=8507c39f method=GET path=/batches/1772 status=503 duration_ms=5013 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:46:59.950Z WARN  [batchtrack.logging] suppressed 22 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:47:00.030Z INFO  [batchtrack.metrics] window=60s requests=51 errors_5xx=24 p50_ms=258 p95_ms=4593 p99_ms=5072 db_pool_in_use=10/10
+2026-09-14T13:47:10.378Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0018 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:47:19.786Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=11 oldest_holder=ThreadPoolExecutor-17_5 held_ms=249047
+2026-09-14T13:47:20.990Z INFO  [batchtrack.api] req=c5cbb09c method=GET path=/batches/1710/signatures status=200 duration_ms=727 user=pvargas
+2026-09-14T13:47:36.436Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0016 failed duration_ms=266106 loaded=750/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:47:48.398Z ERROR [batchtrack.api] req=c2585f99 method=POST path=/batches status=500 duration_ms=5024 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:47:50.301Z WARN  [batchtrack.api] slow request req=60d17078 method=GET path=/reports/site-yield duration_ms=3006 user=sortiz
+2026-09-14T13:47:51.445Z ERROR [batchtrack.api] req=e437ac7d method=POST path=/batches/1750/signatures status=500 duration_ms=5027 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:47:59.950Z WARN  [batchtrack.logging] suppressed 25 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:48:00.017Z INFO  [batchtrack.metrics] window=60s requests=46 errors_5xx=27 p50_ms=270 p95_ms=3877 p99_ms=5100 db_pool_in_use=10/10
+2026-09-14T13:48:15.440Z ERROR [batchtrack.api] req=08c02d39 method=GET path=/batches/1744 status=503 duration_ms=5012 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:48:20.729Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=12 oldest_holder=ThreadPoolExecutor-18_4 held_ms=189307
+2026-09-14T13:48:21.304Z ERROR [batchtrack.api] req=1feb1d49 method=POST path=/batches/1825/signatures status=500 duration_ms=5013 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:48:24.727Z INFO  [batchtrack.api] req=91518e67 method=GET path=/batches/1784/signatures status=200 duration_ms=916 user=rsuarez
+2026-09-14T13:48:59.950Z WARN  [batchtrack.logging] suppressed 23 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:49:00.029Z INFO  [batchtrack.metrics] window=60s requests=55 errors_5xx=25 p50_ms=313 p95_ms=3843 p99_ms=5049 db_pool_in_use=10/10
+2026-09-14T13:49:03.282Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0017 failed duration_ms=232931 loaded=811/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:49:06.651Z ERROR [batchtrack.api] req=014a9ef4 method=GET path=/batches/1695 status=503 duration_ms=5016 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:49:10.405Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0019 started batches=1843 workers=8 active_runs=2
+2026-09-14T13:49:12.293Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=12 oldest_holder=ThreadPoolExecutor-19_6 held_ms=120959
+2026-09-14T13:49:15.663Z ERROR [batchtrack.api] req=545f130f method=POST path=/batches status=500 duration_ms=5006 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:49:39.469Z WARN  [batchtrack.auth] login failed username=lmartinez reason=bad_password remote=10.20.5.82
+2026-09-14T13:49:44.364Z INFO  [batchtrack.api] req=e2aca7fe method=GET path=/batches/1742 status=200 duration_ms=1148 user=dcastro
+2026-09-14T13:49:59.950Z WARN  [batchtrack.logging] suppressed 24 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:50:00.021Z INFO  [batchtrack.metrics] window=60s requests=49 errors_5xx=26 p50_ms=233 p95_ms=4065 p99_ms=5060 db_pool_in_use=10/10
+2026-09-14T13:50:20.873Z ERROR [batchtrack.api] req=84988b27 method=POST path=/batches/1785 status=503 duration_ms=5017 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:50:32.256Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=13 oldest_holder=ThreadPoolExecutor-19_0 held_ms=201202
+2026-09-14T13:50:38.732Z ERROR [batchtrack.api] req=abf80c35 method=GET path=/batches/1827 status=503 duration_ms=5005 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:50:49.042Z INFO  [batchtrack.api] req=0e134078 method=GET path=/dashboard/summary status=200 duration_ms=686 user=emoreno
+2026-09-14T13:50:59.950Z WARN  [batchtrack.logging] suppressed 25 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:51:00.002Z INFO  [batchtrack.metrics] window=60s requests=42 errors_5xx=27 p50_ms=226 p95_ms=3607 p99_ms=5020 db_pool_in_use=10/10
+2026-09-14T13:51:01.028Z INFO  [batchtrack.api] req=24ac0d71 method=GET path=/batches/1696 status=200 duration_ms=589 user=jramirez
+2026-09-14T13:51:01.871Z ERROR [batchtrack.api] req=afeda3e7 method=POST path=/batches status=500 duration_ms=5012 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:51:10.426Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0020 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:51:12.951Z ERROR [batchtrack.api] req=45077aec method=GET path=/batches/1768 status=503 duration_ms=5004 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:51:14.289Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=13 oldest_holder=ThreadPoolExecutor-19_4 held_ms=243686
+2026-09-14T13:51:51.358Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0018 failed duration_ms=280983 loaded=1436/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:51:56.096Z WARN  [batchtrack.lims] slow response endpoint=/api/v2/samples duration_ms=2616
+2026-09-14T13:51:59.950Z WARN  [batchtrack.logging] suppressed 30 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:52:00.015Z INFO  [batchtrack.metrics] window=60s requests=39 errors_5xx=32 p50_ms=224 p95_ms=4605 p99_ms=5122 db_pool_in_use=10/10
+2026-09-14T13:52:27.255Z ERROR [batchtrack.api] req=52073663 method=POST path=/batches/1732/signatures status=500 duration_ms=5018 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:52:30.804Z INFO  [batchtrack.api] req=74cf1ae8 method=GET path=/dashboard/summary status=200 duration_ms=810 user=ngarcia
+2026-09-14T13:52:37.093Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=13 oldest_holder=ThreadPoolExecutor-20_4 held_ms=206025
+2026-09-14T13:52:54.679Z ERROR [batchtrack.api] req=f5e13662 method=GET path=/batches/1832 status=503 duration_ms=5003 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:52:59.950Z WARN  [batchtrack.logging] suppressed 28 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:53:00.026Z INFO  [batchtrack.metrics] window=60s requests=41 errors_5xx=30 p50_ms=243 p95_ms=5057 p99_ms=5117 db_pool_in_use=10/10
+2026-09-14T13:53:10.458Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0021 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:53:15.128Z ERROR [batchtrack.api] req=309215bd method=GET path=/batches/1706 status=503 duration_ms=5003 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:53:16.621Z INFO  [batchtrack.api] req=9306c689 method=GET path=/batches/1824/signatures status=200 duration_ms=588 user=emoreno
+2026-09-14T13:53:17.854Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=14 oldest_holder=ThreadPoolExecutor-20_0 held_ms=246489
+2026-09-14T13:53:35.343Z ERROR [batchtrack.api] req=9438be52 method=GET path=/batches/1817 status=503 duration_ms=5002 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:53:54.933Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0019 finished loaded=1843 duration_ms=284531 cache_size=1843 hit_rate=0.094
+2026-09-14T13:53:59.950Z WARN  [batchtrack.logging] suppressed 25 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:54:00.023Z INFO  [batchtrack.metrics] window=60s requests=56 errors_5xx=27 p50_ms=254 p95_ms=4665 p99_ms=5137 db_pool_in_use=10/10
+2026-09-14T13:54:16.866Z WARN  [batchtrack.db] connection pool exhausted size=10 in_use=10 waiting=14 oldest_holder=ThreadPoolExecutor-21_2 held_ms=185934
+2026-09-14T13:54:27.911Z ERROR [batchtrack.api] req=d1acdb9d method=GET path=/batches/1829 status=503 duration_ms=5018 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:54:45.148Z INFO  [batchtrack.api] req=575b2795 method=GET path=/batches/1819/signatures status=200 duration_ms=435 user=lmartinez
+2026-09-14T13:54:45.165Z ERROR [batchtrack.api] req=88fb0edd method=POST path=/batches status=500 duration_ms=5011 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:54:59.950Z WARN  [batchtrack.logging] suppressed 26 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:55:00.009Z INFO  [batchtrack.metrics] window=60s requests=46 errors_5xx=28 p50_ms=276 p95_ms=3386 p99_ms=5131 db_pool_in_use=10/10
+2026-09-14T13:55:06.836Z ERROR [batchtrack.api] req=70dcb789 method=GET path=/batches/1747 status=503 duration_ms=5013 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:55:10.469Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0022 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:55:13.904Z ERROR [batchtrack.api] req=6c3ec109 method=POST path=/batches/1715 status=503 duration_ms=5010 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:55:50.252Z INFO  [batchtrack.api] req=ffda9f27 method=GET path=/batches/1802 status=200 duration_ms=123 user=jramirez
+2026-09-14T13:55:50.771Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0020 failed duration_ms=280348 loaded=749/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:55:59.950Z WARN  [batchtrack.logging] suppressed 28 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:56:00.024Z INFO  [batchtrack.metrics] window=60s requests=60 errors_5xx=30 p50_ms=273 p95_ms=3412 p99_ms=5119 db_pool_in_use=10/10
+2026-09-14T13:56:06.649Z INFO  [batchtrack.api] req=ade03857 method=POST path=/batches/1760/signatures status=201 duration_ms=542 user=rsuarez
+2026-09-14T13:56:08.470Z INFO  [batchtrack.api] req=d89e7e21 method=GET path=/batches/1714 status=200 duration_ms=874 user=rsuarez
+2026-09-14T13:56:14.865Z ERROR [batchtrack.api] req=3736988a method=POST path=/batches/1724/signatures status=500 duration_ms=5029 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:56:18.595Z ERROR [batchtrack.api] req=3fd75f37 method=POST path=/batches/1716 status=503 duration_ms=5010 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:56:59.950Z WARN  [batchtrack.logging] suppressed 24 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:57:00.026Z INFO  [batchtrack.metrics] window=60s requests=45 errors_5xx=26 p50_ms=291 p95_ms=4828 p99_ms=5104 db_pool_in_use=10/10
+2026-09-14T13:57:10.472Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0023 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:57:35.484Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0021 failed duration_ms=265029 loaded=1388/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:57:49.740Z ERROR [batchtrack.api] req=1521e99e method=GET path=/batches/1703 status=503 duration_ms=5014 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:57:56.964Z ERROR [batchtrack.api] req=25e7f33b method=POST path=/batches/1708/signatures status=500 duration_ms=5034 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:57:59.950Z WARN  [batchtrack.logging] suppressed 29 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:58:00.010Z INFO  [batchtrack.metrics] window=60s requests=56 errors_5xx=31 p50_ms=240 p95_ms=4834 p99_ms=5074 db_pool_in_use=10/10
+2026-09-14T13:58:03.287Z ERROR [batchtrack.api] req=103736e9 method=GET path=/batches/1808 status=503 duration_ms=5005 error="PoolTimeout: no connection available within 5.0s"
+2026-09-14T13:58:37.167Z INFO  [batchtrack.api] req=6535d9a4 method=POST path=/batches/1805/signatures status=201 duration_ms=2216 user=pvargas
+2026-09-14T13:58:49.957Z ERROR [batchtrack.api] req=c4a28028 method=POST path=/batches/1722/signatures status=500 duration_ms=5011 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:58:59.950Z WARN  [batchtrack.logging] suppressed 23 similar messages logger=batchtrack.api in last 60s
+2026-09-14T13:59:00.021Z INFO  [batchtrack.metrics] window=60s requests=53 errors_5xx=25 p50_ms=241 p95_ms=3873 p99_ms=5103 db_pool_in_use=10/10
+2026-09-14T13:59:10.487Z INFO  [batchtrack.jobs] job=cache_warmer run_id=cw-0024 started batches=1843 workers=8 active_runs=3
+2026-09-14T13:59:27.854Z ERROR [batchtrack.api] req=bdee55f4 method=POST path=/batches/1737/signatures status=500 duration_ms=5007 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:59:37.177Z ERROR [batchtrack.api] req=62a04943 method=POST path=/batches status=500 duration_ms=5012 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:59:58.936Z ERROR [batchtrack.jobs] job=cache_warmer run_id=cw-0022 failed duration_ms=288470 loaded=1470/1843 error="sqlite3.OperationalError: database is locked"
+2026-09-14T13:59:59.950Z WARN  [batchtrack.logging] suppressed 27 similar messages logger=batchtrack.api in last 60s

@@ -1,0 +1,151 @@
+batch_no,product,site,planned_qty,actual_qty,start_date,end_date,status,operator
+PX-2026-0201,Paracetamol 500mg,BAQ,1000.0,975.3,2026-01-05,2026-01-07,released,rsuarez
+SG-2026-0202,Omega-3 1000mg,MDE,1400.0,1372.5,2026-01-05,2026-01-08,released,emoreno
+PX-2026-0203,Paracetamol 500mg,CLO,1500.0,1333.5,2026-01-06,2026-01-09,released,pvargas
+PX-2026-0204,Paracetamol 500mg,CLO,1500.0,1379.5,2026-01-07,2026-01-10,released,pvargas
+SG-2026-0205,Vitamin D3 1000IU,BOG,1000.0,980.7,2026-01-07,2026-01-10,released,aperez
+SG-2026-0206,Vitamin D3 1000IU,BOG,1000.0,966.0,2026-01-08,2026-01-11,released,aperez
+SG-2026-0206,Vitamin D3 1000IU,BOG,1000.0,966.0,2026-01-08,2026-01-11,released,aperez
+PX-2026-0207,Loratadine 10mg,BOG,600.0,593.4,2026-01-10,2026-01-11,released,aperez
+SG-2026-0208,Omega-3 1000mg,MDE,1200.0,1166.2,2026-01-11,2026-01-12,released,jramirez
+SG-2026-0209,Vitamin D3 1000IU,MDE,900.0,893.4,2026-01-13,2026-01-14,released,emoreno
+PX-2026-0210,Paracetamol 500mg,BOG,1000.0,,2026-01-13,2026-01-14,released,lmartinez
+PX-2026-0211,Ibuprofen 400mg,CLO,800.0,731.1,2026-01-14,2026-01-15,released,pvargas
+SG-2026-0212,Vitamin D3 1000IU,MDE,900.0,852.4,2026-01-15,2026-01-16,released,sortiz
+PX-2026-0213,Ibuprofen 400mg,BOG,800.0,788.9,2026-01-15,2026-01-16,released,lmartinez
+PX-2026-0214,Paracetamol 500mg,MDE,1000.0,971.1,2026-01-17,2026-01-20,released,jramirez
+PX-2026-0215,Paracetamol 500mg,CLO,1500.0,1312.8,2026-01-17,2026-01-19,rejected,pvargas
+SG-2026-0216,Omega-3 1000mg,CLO,1200.0,1064.9,2026-01-17,2026-01-19,released,pvargas
+PX-2026-0217,Paracetamol 500mg,CLO,1000.0,903.6,2026-01-21,2026-01-24,released,ctorres
+PX-2026-0218,Ibuprofen 400mg,CLO,800.0,727.9,2026-01-21,2026-01-22,released,ngarcia
+SG-2026-0219,Vitamin D3 1000IU,CLO,1000.0,885.5,2026-01-21,2026-01-23,released,ctorres
+PX-2026-0220,Paracetamol 500mg,MDE,1500.0,1443.8,2026-01-25,2026-01-27,released,sortiz
+PX-2026-0221,Ibuprofen 400mg,MDE,800.0,772.6,2026-01-26,2026-01-29,released,emoreno
+PX-2026-0222,Paracetamol 500mg,BOG,1000.0,994.5,01/27/2026,2026-01-29,released,jgomez
+PX-2026-0223,Paracetamol 500mg,BOG,1000.0,983.5,2026-01-28,2026-01-29,released,jgomez
+SG-2026-0224,omega-3 1000mg,BOG,1200.0,1184.5,2026-01-29,2026-01-30,released,aperez
+PX-2026-0225,Ibuprofen 400mg,MDE,800.0,782.4,2026-01-29,2026-01-30,released,jramirez
+SG-2026-0226,Vitamin D3 1000IU,BOG,900.0,897.8,2026-01-30,2026-01-31,released,jgomez
+SG-2026-0227,Vitamin D3 1000IU,MDE,900.0,887.7,2026-01-30,2026-02-02,released,jramirez
+PX-2026-0228,Ibuprofen 400mg,BAQ,1200.0,1173.6,2026-02-01,2026-02-04,released,mhernandez
+PX-2026-0229,Loratadine 10mg,CLO,600.0,546.6,2026-02-03,2026-02-06,released,ngarcia
+PX-2026-0230,Ibuprofen 400mg,BOG,800.0,790.3,2026-02-04,2026-02-06,released,jgomez
+SG-2026-0231,Vitamin D3 1000IU,BAQ,900.0,900.1,2026-02-06,2026-02-08,released,dcastro
+SG-2026-0232,Vitamin D3 1000IU,BAQ,900.0,881.3,2026-02-06,2026-02-09,released,rsuarez
+SG-2026-0233,OMEGA-3 1000MG,BOG,1400.0,1376.9,2026-02-08,2026-02-10,released,lmartinez
+PX-2026-0234,Loratadine 10mg,CLO,500.0,,2026-02-10,2026-02-12,released,ngarcia
+PX-2026-0235,Loratadine 10mg,BOG,600.0,591.1,2026-02-10,2026-02-11,released,jgomez
+SG-2026-0231,Vitamin D3 1000IU,BAQ,900.0,900.1,2026-02-06,2026-02-08,released,dcastro
+PX-2026-0236,Ibuprofen 400mg,CLO,800.0,724.4,2026-02-11,2026-02-12,released,ctorres
+PX-2026-0237,Loratadine 10mg,MDE,600.0,596.1,2026-02-11,2026-02-14,released,sortiz
+PX-2026-0238,Paracetamol 500mg,BOG,1500.0,1336.9,2026-02-12,2026-02-13,rejected,lmartinez
+PX-2026-0239,Paracetamol 500mg,CLO,1000.0,921.0,2026-02-13,2026-02-14,released,ctorres
+PX-2026-0240,Ibuprofen 400mg,BOG,800.0,777.0,2026-02-13,2026-02-15,released,aperez
+PX-2026-0241,Loratadine 10mg,MDE,600.0,598.1,2026-02-16,2026-02-18,released,sortiz
+SG-2026-0242,Vitamin D3 1000IU,MDE,900.0,871.7,2026-02-17,2026-02-18,released,sortiz
+PX-2026-0243,Ibuprofen 400mg,MDE,1200.0,1185.7,2026-02-18,2026-02-20,released,emoreno
+SG-2026-0244,Vitamin D3 1000IU,CLO,1000.0,9028.0,2026-02-19,2026-02-21,released,pvargas
+SG-2026-0245,Vitamin D3 1000IU,BOG,900.0,875.4,2026-02-20,2026-02-22,released,aperez
+PX-2026-0246,Paracetamol 500mg,BAQ,1000.0,9910.0,2026-02-21,2026-02-23,released,rsuarez
+SG-2026-0247,Vitamin D3 1000IU,CLO,1000.0,916.5,2026-02-22,24/02/2026,released,ctorres
+SG-2026-0248,Vitamin D3 1000IU,MDE,1000.0,992.6,2026-02-23,2026-02-24,released,emoreno
+PX-2026-0249,Paracetamol 500mg,BAQ,1000.0,971.3,2026-02-23,2026-02-24,released,mhernandez
+PX-2026-0250,Loratadine 10mg,BAQ,500.0,501.2,2026-02-24,2026-02-26,released,dcastro
+PX-2026-0251,Loratadine 10mg,CLO,500.0,455.4,2026-02-24,2026-02-27,released,ctorres
+PX-2026-0252,Loratadine 10mg,MDE,600.0,591.1,2026-02-25,2026-02-28,released,sortiz
+SG-2026-0253,Omega-3 1000mg,MDE,1200.0,1157.9,2026-02-25,2026-02-27,released,sortiz
+SG-2026-0253,Omega-3 1000mg,MDE,1200.0,1157.9,2026-02-25,2026-02-27,released,sortiz
+PX-2026-0254,Ibuprofen 400mg,BOG,1200.0,1173.4,2026-02-25,2026-02-26,released,jgomez
+SG-2026-0255,Omega-3 1000mg,CLO,1200.0,1058.2,2026-02-26,2026-02-28,released,ctorres
+SG-2026-0256,Vitamin D3 1000IU,BAQ,1000.0,965.8,2026-02-26,2026-02-27,released,mhernandez
+SG-2026-0257,Omega-3 1000mg,CLO,1400.0,1259.5,2026-03-01,2026-03-02,released,pvargas
+SG-2026-0258,Omega-3 1000mg,BOG,1400.0,1375.2,2026-03-07,2026-03-10,released,jgomez
+PX-2026-0259,Paracetamol 500mg,MDE,1000.0,,2026-03-09,2026-03-11,released,jramirez
+PX-2026-0260,Loratadine 10mg,BOG,500.0,496.1,2026-03-10,2026-03-12,released,aperez
+PX-2026-0261,Paracetamol 500mg,BAQ,1000.0,983.2,2026-03-11,2026-03-14,released,dcastro
+PX-2026-0262,Paracetamol 500mg,BOG,1000.0,880.6,2026-03-11,2026-03-13,rejected,aperez
+PX-2026-0263,Loratadine 10mg,CLO,600.0,554.5,2026-03-12,2026-03-15,released,ctorres
+PX-2026-0264,Loratadine 10mg,MDE,600.0,587.1,2026-03-18,2026-03-21,released,sortiz
+PX-2026-0265,Paracetamol 500mg,MDE,1500.0,1490.7,2026-03-19,2026-03-20,released,jramirez
+PX-2026-0266,Loratadine 10mg,CLO,600.0,542.8,2026-03-20,2026-03-21,released,ctorres
+PX-2026-0267,Loratadine 10mg,CLO,500.0,451.2,2026-03-21,2026-03-24,released,pvargas
+PX-2026-0268,Loratadine 10mg,MDE,500.0,503.7,2026/03/26,2026-03-29,released,emoreno
+PX-2026-0269,Loratadine 10mg,MDE,600.0,583.8,2026-03-27,2026-03-30,released,emoreno
+PX-2026-0270,Ibuprofen 400mg,MDE,1200.0,1181.4,2026-03-29,2026-03-31,released,sortiz
+SG-2026-0271,Vitamin D3 1000IU,BOG,1000.0,968.5,2026-03-30,2026-04-02,released,aperez
+PX-2026-0272,Ibuprofen 400mg,CLO,800.0,721.9,2026-03-31,2026-04-03,released,ctorres
+SG-2026-0273,Omega-3 1000mg,BAQ,1200.0,1155.1,2026-03-31,2026-04-03,released,mhernandez
+PX-2026-0274,Ibuprofen 400mg,BAQ,800.0,796.4,2026-04-03,2026-04-04,released,dcastro
+SG-2026-0275,Vitamin D3 1000IU,BAQ,1000.0,961.3,2026-04-03,2026-04-04,released,mhernandez
+PX-2026-0276,Loratadine 10mg,BOG,600.0,595.5,2026-04-03,2026-04-04,released,lmartinez
+PX-2026-0277,Loratadine 10mg,BAQ,500.0,,2026-04-05,2026-04-06,released,rsuarez
+PX-2026-0278,Paracetamol 500mg,MDE,1500.0,1497.9,2026-04-09,2026-04-10,released,emoreno
+SG-2026-0279,Omega-3 1000mg,BOG,1400.0,1364.9,2026-04-11,2026-04-12,released,lmartinez
+SG-2026-0280,Omega-3 1000mg,BAQ,1400.0,1364.0,2026-04-12,2026-04-14,released,mhernandez
+SG-2026-0281,Omega-3 1000mg,MDE,1400.0,1367.3,2026-04-12,2026-04-14,released,sortiz
+SG-2026-0282,Vitamin D3 1000IU,MDE,1000.0,975.9,2026-04-16,2026-04-18,released,sortiz
+PX-2026-0283,Paracetamol 500mg,CLO,1500.0,1338.1,2026-04-17,20-Apr-2026,released,pvargas
+SG-2026-0284,Omega-3 1000mg,BOG,1200.0,1170.3,2026-04-17,2026-04-20,released,jgomez
+PX-2026-0285,Paracetamol 500mg,BOG,1500.0,1474.6,2026-04-17,2026-04-18,released,jgomez
+SG-2026-0286,Vitamin D3 1000IU,MDE,900.0,885.3,2026-04-18,2026-04-21,released,emoreno
+PX-2026-0287,Ibuprofen 400mg,CLO,800.0,740.3,2026-04-19,2026-04-21,released,ngarcia
+SG-2026-0288,Omega-3  1000mg,BAQ,1400.0,1387.0,2026-04-20,2026-04-22,released,mhernandez
+SG-2026-0289,Vitamin D3 1000IU,CLO,900.0,802.4,2026-04-20,2026-04-23,rejected,pvargas
+SG-2026-0290,Omega-3 1000mg,CLO,1200.0,1060.7,2026-04-21,2026-04-23,released,pvargas
+SG-2026-0291,Vitamin D3 1000IU,BOG,900.0,876.5,2026-04-22,2026-04-24,released,jgomez
+SG-2026-0292,Omega-3 1000mg,BAQ,1400.0,1370.1,2026-04-24,2026-04-27,released,dcastro
+SG-2026-0293,Omega-3 1000mg,BAQ,1200.0,1174.5,2026-04-27,2026-04-30,released,rsuarez
+PX-2026-0294,Paracetamol 500mg,BOG,1500.0,1477.4,2026-04-28,2026-04-29,released,lmartinez
+SG-2026-0291,Vitamin D3 1000IU,BOG,900.0,876.5,2026-04-22,2026-04-24,released,jgomez
+SG-2026-0295,Omega-3 1000mg,MDE,1400.0,1342.4,2026-04-30,2026-05-02,released,emoreno
+PX-2026-0296,Loratadine 10mg,BOG,600.0,595.4,2026-04-30,2026-05-03,released,lmartinez
+PX-2026-0297,Ibuprofen 400mg,MDE,1200.0,1164.9,2026-05-02,2026-05-04,released,jramirez
+PX-2026-0298,Loratadine 10mg,BAQ,500.0,,2026-05-02,2026-05-03,released,mhernandez
+SG-2026-0299,Vitamin D3 1000IU,BAQ,900.0,903.1,2026-05-03,2026-05-06,released,mhernandez
+PX-2026-0300,Loratadine 10mg,CLO,500.0,453.9,2026-05-06,2026-05-09,released,pvargas
+PX-2026-0301,Loratadine 10mg,BAQ,500.0,497.8,2026-05-07,2026-05-08,released,rsuarez
+PX-2026-0302,Paracetamol 500mg,MDE,1500.0,1460.9,2026-05-08,2026-05-10,released,emoreno
+PX-2026-0303,Ibuprofen 400mg,MDE,800.0,787.2,2026-05-09,2026-05-10,released,emoreno
+PX-2026-0304,Loratadine 10mg,CLO,500.0,432.7,2026-05-11,2026-05-13,rejected,ctorres
+SG-2026-0305,Omega-3 1000mg,CLO,1200.0,1077.9,2026-05-11,2026-05-13,released,ctorres
+PX-2026-0306,Ibuprofen 400mg,BAQ,1200.0,1203.3,2026-05-12,2026-05-14,released,dcastro
+SG-2026-0307,Vitamin D3 1000IU,BAQ,1000.0,976.8,2026-05-12,2026-05-15,released,rsuarez
+SG-2026-0308,Vitamin D3 1000IU,CLO,900.0,806.4,2026-05-16,2026-05-19,released,ctorres
+SG-2026-0309,Omega-3 1000mg,BOG,1200.0,1171.9,2026-05-18,2026-05-20,released,aperez
+SG-2026-0310,Omega-3 1000mg,MDE,1400.0,1361.0,2026-5-18,2026-05-20,released,jramirez
+PX-2026-0311,Ibuprofen 400mg,CLO,800.0,713.6,2026-05-19,2026-05-21,released,pvargas
+SG-2026-0312,Vitamin D3 1000IU,CLO,900.0,807.7,2026-05-22,2026-05-24,released,ngarcia
+PX-2026-0313,Ibuprofen 400mg,MDE,1200.0,1181.1,2026-05-23,2026-05-25,released,sortiz
+PX-2026-0314,Ibuprofen 400mg,CLO,800.0,706.2,2026-05-26,2026-05-28,released,ctorres
+PX-2026-0315,Loratadine 10mg,BOG,600.0,607.3,2026-05-28,2026-05-29,released,jgomez
+SG-2026-0316,Vitamin D3 1000IU,BAQ,1000.0,,2026-05-29,2026-05-30,released,mhernandez
+PX-2026-0317,Ibuprofen 400mg,BAQ,1200.0,1156.4,2026-05-29,2026-05-31,released,rsuarez
+PX-2026-0318,Paracetamol 500mg,MDE,1500.0,1461.6,2026-05-29,2026-06-01,released,jramirez
+PX-2026-0319,Ibuprofen 400mg,BAQ,800.0,781.5,2026-05-30,2026-06-02,released,mhernandez
+SG-2026-0320,Omega-3 1000mg,MDE,1200.0,1172.2,2026-05-31,2026-06-02,released,jramirez
+PX-2026-0321,Loratadine 10mg,BOG,600.0,516.6,2026-06-02,2026-06-05,rejected,lmartinez
+PX-2026-0322,Paracetamol 500mg,CLO,1000.0,902.3,2026-06-02,2026-06-03,released,pvargas
+PX-2026-0323,Loratadine 10mg,MDE,500.0,490.4,2026-06-04,2026-06-06,released,jramirez
+PX-2026-0324,Ibuprofen 400mg,BOG,800.0,797.3,2026-06-04,2026-06-06,released,lmartinez
+PX-2026-0325,Ibuprofen 400mg,BOG,1200.0,1171.1,2026-06-06,2026-06-07,released,jgomez
+PX-2026-0326,Paracetamol 500mg,BAQ,1000.0,985.5,2026-06-08,2026-06-10,released,rsuarez
+PX-2026-0327,Loratadine 10mg,BAQ,500.0,492.7,2026-06-12,2026-06-14,released,dcastro
+PX-2026-0328,Ibuprofen 400mg,BAQ,1200.0,1160.8,20260613,2026-06-16,released,rsuarez
+SG-2026-0329, Omega-3 1000mg,BOG,1400.0,1364.5,2026-06-15,2026-06-16,released,aperez
+PX-2026-0330,Paracetamol 500mg,BAQ,1000.0,989.1,2026-06-16,2026-06-18,released,mhernandez
+SG-2026-0331,Vitamin D3 1000IU,BAQ,900.0,868.4,2026-06-16,2026-06-17,released,rsuarez
+PX-2026-0332,Ibuprofen 400mg,BAQ,1200.0,1188.1,2026-06-16,2026-06-19,released,dcastro
+PX-2026-0332,Ibuprofen 400mg,BAQ,1200.0,1188.1,2026-06-16,2026-06-19,released,dcastro
+SG-2026-0333,Omega-3 1000mg ,BAQ,1200.0,1172.1,2026-06-17,2026-06-18,released,mhernandez
+PX-2026-0334,Ibuprofen 400mg,BOG,1200.0,1194.0,2026-06-19,2026-06-20,released,jgomez
+SG-2026-0335,Omega-3 1000 mg,BAQ,1400.0,1396.2,2026-06-19,2026-06-20,quarantined,rsuarez
+SG-2026-0336,omega-3 1000mg,MDE,1200.0,1156.8,2026-06-21,2026-06-23,quarantined,emoreno
+SG-2026-0337,Omega-3 1000mg,BAQ,1400.0,1387.7,2026-06-21,2026-06-23,quarantined,mhernandez
+SG-2026-0338,Omega-3 1000mg,CLO,1200.0,1080.5,2026-06-22,2026-06-24,quarantined,ctorres
+PX-2026-0339,Paracetamol 500mg,BAQ,1500.0,,2026-06-22,,in_progress,mhernandez
+SG-2026-0340,Vitamin D3 1000IU,BOG,900.0,,2026-06-22,,in_progress,jgomez
+SG-2026-0341,Vitamin D3 1000IU,CLO,1000.0,,2026-06-23,,in_progress,pvargas
+SG-2026-0342,Omega-3 1000mg,CLO,1400.0,,2026-06-24,,in_progress,pvargas
+PX-2026-0343,Loratadine 10mg,BAQ,500.0,,2026-06-24,,in_progress,mhernandez
+PX-2026-0344,Loratadine 10mg,BAQ,600.0,,2026-06-25,,in_progress,dcastro
+SG-2026-0345,Vitamin D3 1000IU,BOG,900.0,,2026-06-25,,in_progress,aperez
