@@ -24,15 +24,20 @@ fixture: sample-app
 #     the GET /batches/<id> detail branch, not to release.
 #   No guard: any non-'released' status (planned, in_progress, rejected, ...) is
 #     released; no 'approved' signature, auth or lifecycle check (docs/architecture.md
-#     L30 describes a lifecycle the code does not enforce). Verified: a 'rejected' batch
-#     was released with user_id 7 and one audit_log row.
+#     L30 describes a lifecycle the code does not enforce). Verified on seeded data:
+#     in_progress batch 3 released via ?user_id=7, rejected batch 5 released with no
+#     user_id (audit_log user_id 0), one audit_log row each; a repeat call on batch 3
+#     returned 200 with changed false and wrote nothing.
 #   Config: DB file from BATCHTRACK_DB (app/__init__.py L7, default batchtrack.db) ->
 #     BatchHandler.db_path (L22), overridden by serve(db_path) (L90-91). No flags.
 #   Side effects: none in the request (no events, LIMS, cache invalidation, ERP call).
 #     Downstream: services/erp-sync ErpSync.loadPending (~L74-93) later reads released
 #     batches that have an 'approved' signature and actual_qty directly from the DB.
-#   Web UI: web/src/api.ts updateBatchStatus (L47-52) sends PATCH /batches/{id};
-#     app/api.py has no do_PATCH, so the UI never reaches release_batch.
+#   Web UI: web/src/api.ts updateBatchStatus (L47-52) sends PATCH /batches/{id}, is
+#     imported by no component, and app/api.py has no do_PATCH, so the UI never reaches
+#     release_batch. BatchDetail.tsx offers a 'released' signature meaning (L95), but
+#     signBatch -> POST /batches/<id>/signatures -> signatures.sign_batch (L8-27) only
+#     inserts a signatures row + audit entry; batch status is untouched.
 #   Tests: tests/test_batches.py test_release_batch (L60-62, no assertion, PY-31) and
 #     test_release_batch_writes_audit_entry (L65-70) call release_batch directly;
 #     nothing in tests/ touches app.api; the already-released and unknown-id branches
@@ -61,19 +66,20 @@ check: >-
   test "$(git log -1 --format=%s)" = setup &&
   test -z "$(git stash list)" &&
   git diff --quiet HEAD &&
-  test -z "$(git ls-files --others --exclude-standard)" &&
+  test -z "$(git ls-files --others --exclude-standard -- ':!.claude/settings.local.json')" &&
   sed -n '42p' app/api.py | grep -q 'def do_GET' &&
   sed -n '57p' app/api.py | grep -q 'parts\[2\] == "release"' &&
   sed -n '77p' app/batches.py | grep -q 'def release_batch' &&
   ! grep -qE 'def do_(PATCH|PUT)' app/api.py &&
-  ! grep -rqE 'app\.api|import api|BatchHandler' tests/
+  ! git grep -qE 'app\.api|import api|BatchHandler' -- tests/
 rubric:
   must:
     - >-
       Identifies the entry point as the `/batches/<id>/release` branch of
       `BatchHandler.do_GET` in app/api.py (around L57-60, cited as path:line),
-      explicitly states that the HTTP method is GET (not POST/PUT/PATCH), and
-      makes clear that this GET request changes data (it releases the batch).
+      explicitly states that a release is triggered by an HTTP GET (e.g. `GET
+      /batches/<id>/release?user_id=<n>`), and makes clear that this GET
+      request changes data (it releases the batch).
     - >-
       Traces the handler into `batches.release_batch` (app/batches.py around
       L77-86) with path:line and describes its branches: it reads the batch's
@@ -87,10 +93,14 @@ rubric:
       Describes what the client receives: on success and for an already
       released batch the handler returns HTTP 200 with `{"batchId", "status":
       "released", "changed": true|false}` via `_send`; an unknown batch id
-      (LookupError) and a non-numeric id or user_id (ValueError from `int()`)
-      are not caught anywhere in app/api.py, so they escape do_GET (db.session
-      rolls back and re-raises) and the client gets no JSON error response and
-      no 404 (e.g. the server's default error handling / dropped connection).
+      (LookupError from release_batch) and a non-numeric id or user_id
+      (ValueError from `int()` at app/api.py around L58-59) are not caught
+      anywhere in app/api.py, so they propagate out of do_GET and the route
+      sends no JSON error body and no 404/400. (Actual runtime result:
+      socketserver prints a traceback and closes the connection without any
+      HTTP response. A report that calls these exceptions unhandled but guesses
+      "a 500" still meets this item; one that says the route answers them with
+      a handled 404/400 or a JSON error does not.)
     - >-
       Names the tests in tests/test_batches.py that call `release_batch`
       directly (`test_release_batch` around L60-62 and/or
@@ -119,9 +129,12 @@ rubric:
     - >-
       Covers where other parts join: the web UI does not call the release
       route (`updateBatchStatus` in web/src/api.ts around L47-52 sends PATCH
-      /batches/{id}, and app/api.py has no PATCH handler); services/erp-sync
-      ErpSync reads released batches (with an 'approved' signature and
-      actual_qty) from the database later, outside the request; the request
+      /batches/{id}, is not imported by any component, and app/api.py has no
+      PATCH handler; the 'Released' signature meaning in
+      web/src/BatchDetail.tsx only POSTs a signature and does not change the
+      batch status); services/erp-sync ErpSync.loadPending reads released
+      batches (with an 'approved' signature and actual_qty) from the database
+      later, outside the request; the request
       itself has no events, LIMS/HTTP calls or cache invalidation; the database
       file comes from BATCHTRACK_DB (app/__init__.py around L7, default
       batchtrack.db) via BatchHandler.db_path / serve().
@@ -132,8 +145,11 @@ rubric:
   must_not:
     - >-
       Describes the release entry point as a POST, PUT or PATCH route, or
-      claims the web UI's status change (`updateBatchStatus`, PATCH
-      /batches/{id}) reaches `release_batch`.
+      claims the web UI releases batches: that `updateBatchStatus` (PATCH
+      /batches/{id}) reaches `release_batch`, or that signing with the
+      'Released' meaning in web/src/BatchDetail.tsx (`signBatch` -> POST
+      /batches/<id>/signatures -> `signatures.sign_batch`) changes the batch
+      status.
     - >-
       Invents behavior on the release path that the code does not have: an
       'approved'-signature or QA check, authentication or role checks, status

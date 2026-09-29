@@ -10,12 +10,17 @@ fixture: sample-app
 #   - L19 `MODEL = "claude-3-5-sonnet-20240620"`: the deprecations page
 #     (platform.claude.com/docs/en/about-claude/model-deprecations.md, fetched 2026-09-29) lists
 #     it retired October 28, 2025, recommended replacement claude-sonnet-4-6; the models overview
-#     lists claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5, claude-haiku-4-5-20251001 as current.
+#     (platform.claude.com/docs/en/models/overview.md; the old about-claude/models/overview.md path
+#     redirects there) lists claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5,
+#     claude-haiku-4-5-20251001 as current.
 #   - L72 `max_tokens=200_000` on a non-streaming create: models overview gives max output 128K
 #     (64K for Haiku 4.5); anthropic 1.9.0 raises ValueError "Streaming is required for operations
 #     that may take longer than 10 minutes" before sending anything (reproduced in a scratch venv).
 #   - L73-80 `cache_control` on the FIRST system block, which holds reviewer + timestamp +
-#     question; the stable SOP block after it is never cached and the prefix changes every call.
+#     question; the cached prefix (tools + that block) changes on every ask() call (it only repeats
+#     within one call's tool loop, and is a few hundred tokens at most), and the ~30 KB SOP block
+#     after the breakpoint is never cached (prompt-caching.md "Common mistake: Breakpoint on
+#     content that changes every request").
 #   - L84-86 control flow on `response.content[0].type`, stop_reason never read: with a mocked
 #     transport, a reply [text "Let me look that up.", tool_use] returns the preamble and drops
 #     the tool call; max_tokens/refusal replies are returned as final.
@@ -24,7 +29,9 @@ fixture: sample-app
 #   - L95 `"tool_use_id": response.id` (msg_...), not `first.id` (toolu_...): with a mocked
 #     transport returning 400 invalid_request_error for the mismatch, ask() returns
 #     "The assistant is unavailable right now" because L101 catches every APIStatusError.
-#   - L25 `max_retries=0` with no replacement: 429/529 fail immediately into that message.
+#   - L25 `max_retries=0` with no replacement: 429/529 fail immediately into that message
+#     (reproduced with a mocked 529); APIConnectionError/APITimeoutError are not APIStatusError
+#     subclasses, so they escape ask() uncaught.
 #   - L44-51 `search` tool: "Search." description, undocumented q/s, no `required`; q/s flow into
 #     list_batches, whose product/site filters are f-string SQL (python-core.md PY-01).
 #  False-positive traps (correct code):
@@ -38,7 +45,7 @@ setup: |
   grep -q '"anthropic>=1.0"' pyproject.toml
 
   mkdir -p docs/sop
-  # Deterministic ~25 KB SOP that the assistant sends as system context: far above every
+  # Deterministic ~30 KB SOP that the assistant sends as system context: far above every
   # model's minimum cacheable prompt length, so caching it is worthwhile.
   python3 - <<'PY'
   sections = [
@@ -251,37 +258,41 @@ rubric:
     - >-
       Flags the tool_result built in `ask()` (app/assistant.py around L91-96) with
       `"tool_use_id": response.id`: that is the message id (msg_...), not the id of the
-      tool_use block being answered (`first.id`, toolu_...), so the follow-up request is
-      rejected (400 invalid_request_error) and no tool-using question ever completes. The fix
-      uses the tool_use block's own id.
+      tool_use block being answered (`first.id`, toolu_...), and states that the API rejects
+      the follow-up request (400 / invalid_request_error), so questions that need a tool fail.
+      The fix uses the tool_use block's own id.
     - >-
       Flags that `ask()` never reads `response.stop_reason` and instead decides from
       `response.content[0]` (around L84-86), with at least one concrete consequence: a reply
       that opens with a text block before its tool_use block (e.g. "Let me look that up.") is
       returned as the final answer and the tool call is dropped; a `max_tokens`-truncated or
       `refusal` reply is returned as if complete; or `content[0]` fails on an empty or
-      non-text first block. The fix branches on stop_reason and gathers all text blocks.
+      non-text first block. The fix branches on stop_reason rather than on the type of
+      content[0].
     - >-
       Flags `MODEL = "claude-3-5-sonnet-20240620"` (app/assistant.py around L19) as a retired /
       no longer available model id and backs this with a docs page it fetched, cited by URL
       (e.g. platform.claude.com/docs/en/about-claude/model-deprecations or the models
-      overview). If it could not fetch the docs, it says so explicitly and marks the model's
-      status unverified instead of asserting it.
+      overview, platform.claude.com/docs/en/models/overview, formerly
+      about-claude/models/overview). If it could not fetch the docs, it says so explicitly and
+      marks the model's status unverified instead of asserting it.
   should:
     - >-
       Flags the prompt-caching layout in `ask()` (around L73-80): `cache_control` is on the
       first system block, which contains the reviewer, the current timestamp and the question,
-      so the cached prefix differs on every request and never produces a cache hit, while the
-      large stable SOP_TEXT block after it is never cached. The fix puts SOP_TEXT first with
-      the breakpoint on it and moves the per-request context after it or into the user turn,
-      citing the fetched prompt-caching page.
+      so the cached prefix (tools plus that block) changes on every ask() call and cannot be
+      reused across questions, while the large stable SOP_TEXT block after the breakpoint is
+      never cached and is re-sent at full input price on every request. The fix puts SOP_TEXT
+      first with the breakpoint on it and moves the per-request context after it or into the
+      user turn, citing the fetched prompt-caching page.
     - >-
       Flags `max_retries=0` on the client (around L25) with no replacement: 429 rate-limit and
-      529 overloaded_error responses (and 5xx/connection errors) get no retry with backoff and
-      `ask()` returns "The assistant is unavailable" at once. Recommends the SDK's default
-      retries (or an explicit count) honouring retry-after, and/or notes that the blanket
-      `except anthropic.APIStatusError` (around L101) also hides 400s caused by the code's own
-      bugs.
+      529 overloaded_error responses (and other 5xx) get no retry with backoff and `ask()`
+      returns "The assistant is unavailable" at once (connection and timeout errors are not
+      APIStatusError subclasses, so they also go unretried and escape ask()). Recommends the
+      SDK's default retries (or an explicit count) honouring retry-after, and/or notes that
+      the blanket `except anthropic.APIStatusError` (around L101) also hides 400s caused by
+      the code's own bugs.
     - >-
       Flags `max_tokens=200_000` on the non-streaming `messages.create` (around L72): above
       the max output the fetched models page documents for every model, and/or refused
@@ -307,16 +318,20 @@ rubric:
       fetched (URL) or labelling it unverified; e.g. recommends a replacement model id from
       memory. For reference, docs fetched 2026-09-29: the deprecations page lists
       claude-3-5-sonnet-20240620 as retired on October 28, 2025 with replacement
-      claude-sonnet-4-6; the models overview lists claude-fable-5-1, claude-opus-5-5,
-      claude-sonnet-5-5 and claude-haiku-4-5-20251001 as current, max output 128K (64K for
-      Haiku 4.5).
+      claude-sonnet-4-6; the models overview (platform.claude.com/docs/en/models/overview)
+      lists claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5 and claude-haiku-4-5-20251001
+      as current (claude-sonnet-4-6 among legacy models still available), max output 128K
+      (64K for Haiku 4.5).
     - >-
       Reports a defect in the streaming handling of `stream_deviation_summary` (around
       L108-124), e.g. that the stream is left open, stop_reason goes unchecked, text is read
       from the wrong block or truncated output is returned as complete. It uses the
       `messages.stream` context manager, `text_stream`, `get_final_message()` and raises unless
-      stop_reason is "end_turn". Findings that only concern the shared MODEL constant or the
-      client's max_retries=0 applying to it are not violations.
+      stop_reason is "end_turn". Not violations: findings about the shared client or constants
+      that merely also apply to it (MODEL, the literal key, max_retries=0, no timeout), and a
+      note that callers must handle the RuntimeError after partial text reached on_text.
     - >-
       Reports the `get_batch` tool definition (around L29-43) as deficient, e.g. missing
-      `type: "object"`, `required` or an adequate description; it has all of them.
+      `type: "object"`, `required` or an adequate description; it has all of them. A general
+      hardening suggestion to add `strict: true` / `additionalProperties: false` to the tools,
+      or a note about `int(args["batch_id"])` in `_run_tool`, is not a violation.

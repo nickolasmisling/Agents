@@ -45,13 +45,16 @@ read_only: false
 #    is an ICU plural with one/=1 and other and its es-CO twin is a plural too, en keeps the
 #    original English copy and es-CO is actually Spanish (>= 15 messages differ from en);
 #  - none of the original hard-coded JSX literals, concatenated units/plurals, the no-locale
-#    toLocaleDateString() or the 'DD MMM YYYY' pattern remain in web/src/**/*.ts(x)
+#    toLocaleDateString() or the 'DD MMM YYYY' pattern remain in the code (comments are
+#    stripped first, so "// was: qty + ' kg'" is fine) of web/src/**/*.ts(x)
 #    (FormatJS in-source defaultMessage strings do not trip these patterns);
 #  - `tsc --noEmit -p web` (global tsc, no node_modules) reports no error other than the
 #    ones caused only by the missing packages (bare-specifier TS2307, jsx-runtime TS2875,
-#    CSS side-effect TS2882, TS7016, TS2688, JSX/React namespace TS2503, ImportMeta.env).
-# Validated: fails on the untouched fixture; passes on a react-intl reference solution that
-# also type-checks and builds with real node_modules.
+#    CSS side-effect TS2882, TS7016, TS2688, bare-module augmentation TS2664 such as
+#    `declare module 'i18next'`, JSX/React namespace TS2503, ImportMeta.env).
+# Validated: fails on the untouched fixture and on catalogs-only / lockfile / i18next-suffix
+# plural variants; passes on a react-intl reference and on an i18next + i18next-icu
+# reference whose comments quote the replaced code.
 check: |
   set -u
   fail() { echo "CHECK FAIL: $*"; exit 1; }
@@ -239,7 +242,7 @@ check: |
       (r"^\s*(Batch No\.|Product|Created|Close|Sign batch record|Cancel)\s*$", "JSX text literal"),
       (r"<th>\s*(Status|Actual / Planned)\s*</th>", "table header literal"),
       (r"Showing \{rows\.length\} of", "footer literal"),
-      (r">\s*(Loading…|Meaning of signature|Password|Sign|Reviewed|Approved|Released)\s*<", "JSX text literal"),
+      (r">\s*(Loading…|Meaning of signature|Password|Sign|Reviewed|Approved|Released|Site)\s*<", "JSX text literal"),
       (r"<h2>\s*Batch \{batch\.batchNo\}", "detail title literal"),
       (r"Status: \{batch\.status\}", "detail meta literal"),
       (r"Released after approval by user #\{approval", "release note literal"),
@@ -251,11 +254,54 @@ check: |
       (r"toLocaleDateString\(\)", "date formatted without a locale"),
       (r"DD MMM YYYY", "hard-coded date pattern"),
   ]
+
+
+  def strip_comments(text):
+      # Blank out // and /* */ comments (keeping newlines) so a comment that quotes the old
+      # code ("was: qty + ' kg'", "replaces toLocaleDateString()") is not read as UI text.
+      out, i, state = [], 0, None
+      while i < len(text):
+          c = text[i]
+          if state == "line":
+              if c == "\n":
+                  state = None
+                  out.append(c)
+              i += 1
+              continue
+          if state == "block":
+              if text.startswith("*/", i):
+                  state, i = None, i + 2
+                  continue
+              if c == "\n":
+                  out.append(c)
+              i += 1
+              continue
+          if state in ("'", '"', "`"):
+              if c == "\\":
+                  out.append(text[i:i + 2])
+                  i += 2
+                  continue
+              if c == state or (c == "\n" and state != "`"):
+                  state = None
+          elif text.startswith("//", i):
+              state, i = "line", i + 2
+              continue
+          elif text.startswith("/*", i):
+              state, i = "block", i + 2
+              continue
+          elif c in "'\"`":
+              state = c
+          out.append(c)
+          i += 1
+      return "".join(out)
+
+
   hits = []
   for f in sorted(Path("web/src").rglob("*.ts*")):
       if "locales" in f.parts or f.suffix not in (".ts", ".tsx"):
           continue
-      for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+      code = strip_comments(f.read_text(encoding="utf-8"))
+      for n, line in enumerate(code.splitlines(), 1):
           for pat, why in PATTERNS:
               if re.search(pat, line):
                   hits.append(f"{f}:{n}: {why}: {line.strip()[:80]}")
@@ -265,7 +311,7 @@ check: |
   PY
   out=$(tsc --noEmit -p web 2>&1)
   bad=$(printf '%s\n' "$out" | grep -E 'error TS[0-9]+' \
-    | grep -Ev "error TS(2875|2882|7016|2688):|error TS2307: Cannot find module '[^./]|error TS2503: Cannot find namespace '(JSX|React)'|error TS2339: Property 'env' does not exist on type 'ImportMeta'")
+    | grep -Ev "error TS(2875|2882|7016|2688):|error TS2307: Cannot find module '[^./]|error TS2664: Invalid module name in augmentation, module '[^./]|error TS2503: Cannot find namespace '(JSX|React)'|error TS2339: Property 'env' does not exist on type 'ImportMeta'")
   test -z "$bad" || fail "tsc errors beyond missing node_modules:
   $bad"
   echo "tsc OK (only missing-package errors)"
@@ -274,35 +320,44 @@ rubric:
     - >-
       Sets up an ICU-capable i18n library for React (react-intl/FormatJS, or
       i18next + react-i18next with i18next-icu, or Lingui) by declaring it in
-      web/package.json dependencies without installing it, wires its provider
-      at the root in web/src/main.tsx with the en/es-CO catalogs from
-      web/src/locales/, and selects the active locale with English as the
-      fallback (e.g. negotiated from navigator.languages or a stored choice,
-      es-CO -> es -> en).
+      web/package.json dependencies without installing it; wires it up at the
+      app root in web/src/main.tsx (the library's provider around <App />, or
+      an init module that main.tsx imports, e.g. i18next with
+      initReactI18next) with the en and es-CO catalogs from
+      web/src/locales/; and picks the active locale at
+      runtime (navigator.languages negotiation, a stored user choice or a
+      language switcher) with English as the fallback when no supported
+      locale matches.
     - >-
-      Extracts the user-facing text of web/src/BatchTable.tsx and
-      web/src/BatchDetail.tsx into web/src/locales/en.json with es-CO.json
-      counterparts, including the table headers, the "Search batch number"
-      placeholder, "Could not load batches.", the "Showing N of M batches"
-      footer, "Loading…", the detail title and labels, the Close / "Sign batch
-      record" / Sign / Cancel buttons and the signing dialog's labels; values
-      such as the batch number, lot and user id are ICU arguments inside one
-      whole-sentence message rather than concatenated fragments.
+      Extracts the user-facing text of web/src/BatchTable.tsx,
+      web/src/BatchDetail.tsx and the "Site" label in web/src/main.tsx into
+      web/src/locales/en.json with es-CO.json counterparts, including the
+      table headers (Batch No., Product, Status, Actual / Planned, Created),
+      the "Search batch number" placeholder, "Could not load batches.", the
+      "Showing N of M batches" footer, "Loading…", the "Batch {batchNo}"
+      title, the "Status:" meta line, the "Materials" heading, the Close /
+      "Sign batch record" / Sign / Cancel buttons and the signing dialog's
+      "Sign batch {batchNo}", "Meaning of signature" and "Password" labels;
+      values such as the batch number, lot and user id are ICU arguments
+      inside one whole-sentence message rather than concatenated fragments.
     - >-
       Fixes the formatting in both files: `new Date(s.signedAt).toLocaleDateString()`
       (BatchDetail ~L73) and `moment(b.createdAt).format('DD MMM YYYY')`
       (BatchTable ~L109) become Intl.DateTimeFormat or the library's
       formatDate/FormattedDate driven by the active locale; the `+ ' kg'`
       concatenations (BatchTable ~L108, BatchDetail ~L64) use locale number
-      formatting (Intl.NumberFormat / formatNumber, e.g. unit 'kilogram');
-      and the `signatures.length + ' signature' + (… ? '' : 's')` heading
-      (BatchDetail ~L69) becomes an ICU plural message with `one` and `other`
-      branches in both catalogs.
+      formatting (Intl.NumberFormat / formatNumber, e.g. unit 'kilogram', or
+      an ICU `{qty, number}` argument with the unit inside the translatable
+      message); and the `signatures.length + ' signature' + (… ? '' : 's')`
+      heading (BatchDetail ~L69) becomes an ICU plural message with `one`
+      (or `=1`) and `other` branches in both catalogs.
     - >-
       The report says the es-CO strings are machine-drafted and need human
-      (plant QA) review, identifying the file and how they are marked or
-      listed, and gives a "Strings extracted" count and a "Remaining hardcoded
-      strings" count, listing any remaining ones with path:line and reason.
+      (plant QA) review, naming the file and how they are marked or listed;
+      gives a "Strings extracted" count; and states what hardcoded
+      user-visible text remains (a "Remaining hardcoded strings" count with
+      path:line and reason for each one left, e.g. the "BatchTrack" brand or
+      index.html's <title>, or an explicit statement that none remain).
   should:
     - >-
       Handles a null `actualQty` in the Actual / Planned cell (BatchTable
@@ -333,16 +388,19 @@ rubric:
     - >-
       Translates or renames machine values instead of display labels: changes
       the `<option value="reviewed|approved|released">` values, the
-      BatchStatus/SignatureMeaning type members or STATUS_COLORS keys, the
-      `aria-sort` tokens ('ascending'/'descending'/'none'), API paths or
-      fields, or formats the signBatch payload or stored timestamps with the
-      locale.
+      BatchStatus/SignatureMeaning type members in web/src/types.ts or the
+      STATUS_COLORS keys, the `aria-sort` tokens ('ascending'/'descending'/
+      'none'), API paths or fields in web/src/api.ts, or formats the
+      signBatch payload or stored timestamps with the locale.
     - >-
       Makes non-i18n fixes the delegation excluded: rewrites the note's
-      `dangerouslySetInnerHTML`/`formatNote` rendering, the useEffect
-      dependency arrays or fetch error handling, the row `key={index}`, or
-      the request/response handling in web/src/api.ts (an added
-      Accept-Language header is acceptable).
+      `dangerouslySetInnerHTML`/`formatNote` rendering, fixes the stale-site
+      fetch by adding `site` to the BatchTable useEffect dependency array,
+      adds `res.ok` checks or new error handling to the fetches (e.g. a
+      `.catch` in BatchDetail), replaces the row `key={index}`, or changes
+      request/response handling in web/src/api.ts (an added Accept-Language
+      header is acceptable, and so is turning the load-error text into a
+      message id or flag).
     - >-
       Claims the es-CO translations are reviewed/final, or claims the web app
       type-checks or builds cleanly without evidence (node_modules is absent,

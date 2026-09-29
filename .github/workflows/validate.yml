@@ -33,7 +33,7 @@ jobs:
           bash -n install.sh scripts/test_loading.sh
           python3 -m py_compile scripts/*.py
           python3 -c "import yaml; yaml.safe_load(open('tests/routing/cases.yaml'))"
-          for f in tests/behavior/cases/*.yaml; do python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$f"; done
+          python3 scripts/test_behavior.py --lint
 
       - name: Install Claude Code
         run: npm install --global @anthropic-ai/claude-code

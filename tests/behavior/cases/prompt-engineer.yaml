@@ -554,7 +554,8 @@ rubric:
     - >-
       Updates tests/test_deviation_classifier.py to the new format (JSON
       replies parsed, an unparseable or free-text reply yields the
-      needs-review outcome, report text sits inside its tags), runs pytest and
+      needs-review outcome or the explicit error, report text sits inside its
+      tags), runs pytest and
       reports the exact command and pass/fail counts.
     - >-
       Handles the new outcome in `needs_same_day_escalation` (or states how

@@ -25,8 +25,8 @@ fixture: sample-app
 # v1.3.0, data migration None, DONE_WITH_CONCERNS (no SOP/trace matrix, inverted callers).
 setup: |
   set -e
-  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* (Fixture), which would override the per-commit
-  # authors the scenario sets with `git -c user.name=...`; unset them so the history has real authors.
+  # Clear any inherited GIT_AUTHOR_*/GIT_COMMITTER_* so the per-commit authors the
+  # scenario sets with `git -c user.name=...` apply (env vars would override them).
   env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
     bash "$FIXTURES/scenarios/regression_history.sh"
 prompt: >-

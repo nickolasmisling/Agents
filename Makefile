@@ -5,6 +5,7 @@ test: validate load
 
 validate:
 	python3 scripts/validate_agents.py --strict
+	python3 scripts/test_behavior.py --lint
 
 load:
 	bash scripts/test_loading.sh

@@ -28,8 +28,8 @@ fixture: sample-app
 # the baseline commit time), so the rubric grades by commit subject.
 setup: |
   set -euo pipefail
-  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* (Fixture), which would override the per-commit
-  # authors the scenario sets with `git -c user.name=...`; unset them so the history has real authors.
+  # Clear any inherited GIT_AUTHOR_*/GIT_COMMITTER_* so the per-commit authors the
+  # scenario sets with `git -c user.name=...` apply (env vars would override them).
   unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   bash "$FIXTURES/scenarios/regression_history.sh"
   tag_sha=$(git rev-parse --short 'v1.3.0^{commit}')

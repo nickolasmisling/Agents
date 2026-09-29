@@ -67,17 +67,19 @@ prompt: >-
 read_only: true
 # Report-only task. The file fingerprint skips node_modules, so check for it
 # explicitly, and guard against mutating git commands (commit, stash, reset,
-# checkout) and stray untracked files (venvs, wheel downloads, .duckdb files).
+# checkout) and stray untracked or gitignored files (.venv/, dist/, wheel
+# downloads, .duckdb files).
 # Validated on a scratch copy: untouched tree -> exit 0; web/node_modules
-# created -> exit 1; wheelhouse/ with a file -> exit 1; extra commit -> exit 1;
-# stash -> exit 1; edited pyproject.toml -> exit 1.
+# created -> exit 1; wheelhouse/ with a file -> exit 1; .venv/ (gitignored)
+# -> exit 1; report.duckdb -> exit 1; extra commit -> exit 1; stash -> exit 1;
+# edited pyproject.toml -> exit 1; __pycache__ from running pytest -> exit 0.
 check: |
   test ! -e node_modules && test ! -e web/node_modules || { echo "node_modules created"; exit 1; }
   test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
   test "$(git rev-parse --abbrev-ref HEAD)" = main || { echo "branch changed"; exit 1; }
   test -z "$(git stash list)" || { echo "stash created"; exit 1; }
   git diff --quiet HEAD || { echo "tracked files changed or staged:"; git diff --stat HEAD; exit 1; }
-  stray=$(git status --porcelain --untracked-files=all | grep -Ev '^\?\? \.claude/|__pycache__/|\.pytest_cache/')
+  stray=$(git status --porcelain --ignored --untracked-files=all | grep -Ev '^(\?\?|!!) \.claude/|__pycache__/|\.pytest_cache/')
   test -z "$stray" || { echo "untracked files in the repo:"; echo "$stray"; exit 1; }
   echo "repository untouched"
 rubric:
@@ -91,21 +93,24 @@ rubric:
       servers, Python 3.10, 4 GB cap). NO_CLEAR_WINNER counts only if it names
       the specific evidence or decision that would break the tie.
     - >-
-      Gives a comparison table with a column for each of pandas, Polars and
-      DuckDB whose rows or cells cover: offline installation onto the servers
+      Gives a comparison table with a column for each of Polars and DuckDB,
+      and for pandas either a column pinned to a Python 3.10-compatible
+      release (2.x) or an explicit early-elimination line that states the
+      reason, whose rows or cells cover: offline installation onto the servers
       (what has to be staged on the internal mirror), Windows x64 + Python
       3.10 wheel availability, memory behaviour at the stated volume under the
       4 GB cap, fit with the SQLite source and app/report.py, and license.
-      Licenses match PyPI metadata (pandas BSD-3-Clause, Polars MIT, DuckDB
-      MIT), and cells carry a source reference or say unknown.
+      Licenses shown match PyPI metadata (pandas BSD-3-Clause, Polars MIT,
+      DuckDB MIT), and cells carry a source reference or say unknown.
     - >-
       Checks Python 3.10 support from registry metadata (requires_python or
       wheel tags) and reports that the current pandas line (3.0.x, e.g. 3.0.6
-      of 2026-09-17) requires Python >=3.11 and has no cp310 wheels, so on
-      these servers pandas means pinning the 2.x line (2.3.3, 2025-09-29) or
-      eliminating pandas; and states that the Polars and DuckDB versions it
-      evaluates support Python 3.10 on Windows x64 (both declare >=3.10;
-      polars-runtime-32 and duckdb ship cp310 win_amd64 wheels).
+      of 2026-09-17) does not support Python 3.10 (requires_python >=3.11,
+      no cp310 wheels; either fact suffices), so on these servers pandas means
+      pinning the 2.x line (2.3.3, 2025-09-29) or eliminating pandas; and
+      states that the Polars and DuckDB versions it evaluates support Python
+      3.10 on Windows x64 (both declare >=3.10; polars-runtime-32 and duckdb
+      ship cp310 win_amd64 wheels).
     - >-
       Lists its sources (PyPI JSON or project pages, GitHub, official docs, or
       the commands it ran) each with a retrieval date, and explicitly marks as
@@ -167,7 +172,9 @@ rubric:
       Gives speed or memory figures for a candidate (e.g. "Polars is 10-30x
       faster than pandas", "pandas needs 5-10x the data size in RAM", "DuckDB
       handles 45M rows in under 2 GB") without citing a fetched benchmark or
-      documentation page for them, or reports having installed or run a
+      documentation page for them (arithmetic on the stated row counts that
+      shows its working and is labelled an estimate, e.g. raw column bytes,
+      is not a violation), or reports having installed or run a
       candidate (pip/uv/conda install, even into a scratch venv) or presents
       the spike or a benchmark as executed.
     - >-
