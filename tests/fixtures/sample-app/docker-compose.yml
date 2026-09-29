@@ -1,0 +1,42 @@
+# Local development stack: API + PostgreSQL.
+#   docker compose up --build
+# The API is then available on http://localhost:8080
+
+services:
+  api:
+    build: .
+    image: batchtrack-api:dev
+    ports:
+      - "8080:8080"
+    environment:
+      BATCHTRACK_DB: /data/batchtrack.db
+      BATCHTRACK_DATABASE_URL: postgresql://batchtrack:Btr4ck-Prod-2024!@db:5432/batchtrack
+      BATCHTRACK_LIMS_URL: https://lims-test.bog-plant.internal/api/v2
+    volumes:
+      - api-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:15.6
+    environment:
+      POSTGRES_USER: batchtrack
+      POSTGRES_PASSWORD: Btr4ck-Prod-2024!
+      POSTGRES_DB: batchtrack
+    ports:
+      - "0.0.0.0:5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U batchtrack -d batchtrack"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  api-data:
+  pg-data:

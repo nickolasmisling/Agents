@@ -3,3 +3,5 @@ __pycache__/
 tests/behavior/results/
 .claude/worktrees/
 .claude/settings.local.json
+.pytest_cache/
+node_modules/

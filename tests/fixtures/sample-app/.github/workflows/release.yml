@@ -1,0 +1,56 @@
+name: release
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: batchtrack-api
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          docker build \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            -t "${REGISTRY}/${ECR_REPOSITORY}:${short_sha}" \
+            -t "${REGISTRY}/${ECR_REPOSITORY}:latest" \
+            .
+
+      - name: Push image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: docker push --all-tags "${REGISTRY}/${ECR_REPOSITORY}"
+
+      - name: Summary
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          {
+            echo "### Published image"
+            echo ""
+            echo "\`${REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA::12}\` (also tagged \`latest\`)"
+            echo "Branch: \`${GITHUB_REF_NAME}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

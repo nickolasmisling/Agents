@@ -1,0 +1,11 @@
+[package]
+name = "checksum"
+version = "0.3.1"
+edition = "2021"
+description = "Check digits for batch labels and checksums for batch record exports"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

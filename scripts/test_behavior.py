@@ -10,8 +10,8 @@ Case format:
 
     agent: security-auditor
     fixture: sample-app            # directory under tests/fixtures/ (default: sample-app)
-    setup: |                       # optional shell run in the scratch copy after `git init`
-      bash ../../scripts/make_history.sh
+    setup: |                       # optional shell run in the scratch copy after `git init`;
+      bash "$FIXTURES/scenarios/regression_history.sh"   # $FIXTURES and $REPO_ROOT are set
     prompt: Audit the app for security vulnerabilities.
     read_only: true                # fail if the agent modifies any tracked/untracked file
     check: python -m pytest -q     # optional command that must exit 0 afterwards
@@ -65,7 +65,7 @@ Agent's final report:
 {report}
 >>>
 
-Files changed by the agent (git status --porcelain), then diff (truncated):
+Files the agent created, modified or deleted, then the unified diff of its changes (truncated):
 <<<
 {status}
 ---
@@ -105,7 +105,23 @@ def parse_json_blob(text: str) -> dict | None:
 
 
 def sh(cmd: str, cwd: Path, timeout: int = 300) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+    # Setup/check commands can reference $FIXTURES (tests/fixtures) and $REPO_ROOT.
+    env = dict(os.environ, FIXTURES=str(FIXTURES), REPO_ROOT=str(ROOT),
+               PYTHONDONTWRITEBYTECODE="1", GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.com",
+               GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.com")
+    return subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
+
+
+def fingerprint(root: Path) -> dict[str, str]:
+    """Content hash of every file outside .git, to detect any change an agent makes."""
+    import hashlib
+    skip = {".git", "__pycache__", ".pytest_cache", "node_modules"}
+    out = {}
+    for p in root.rglob("*"):
+        rel = p.relative_to(root)
+        if p.is_file() and not (set(rel.parts) & skip) and rel.parts[:2] != (".claude", "settings.local.json"):
+            out[rel.as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return out
 
 
 def run_case(path: Path, opts: argparse.Namespace) -> dict:
@@ -121,9 +137,13 @@ def run_case(path: Path, opts: argparse.Namespace) -> dict:
         r = sh(case["setup"], work)
         if r.returncode:
             return {"case": path.stem, "agent": agent, "pass": False, "error": f"setup failed: {r.stderr[-800:]}"}
-    sh(f"{git} add -A && {git} commit -qm 'setup' --allow-empty", work)
-    # Keep the agent definitions out of the diff we grade.
-    sh("git update-index --assume-unchanged $(git ls-files .claude) 2>/dev/null; true", work)
+    if not case.get("keep_setup_uncommitted"):
+        # Most cases grade a clean tree; cases that test "review my uncommitted diff"
+        # or "resolve this in-progress merge" set keep_setup_uncommitted: true.
+        sh(f"{git} add -A && {git} commit -qm 'setup' --allow-empty", work)
+    before = fingerprint(work)
+    snapshot = tmp / "before"
+    shutil.copytree(work, snapshot, ignore=shutil.ignore_patterns(".git", "node_modules", "__pycache__"))
 
     # Headless runs can't answer permission prompts; pre-approve the tools an agent may
     # legitimately need inside this throwaway copy. The agent's own `tools` list still
@@ -132,13 +152,15 @@ def run_case(path: Path, opts: argparse.Namespace) -> dict:
                        "--allowedTools", *opts.allow, "--max-budget-usd", str(opts.budget)],
                       work, opts.timeout)
     report = res.get("result") or ""
-    status = sh("git status --porcelain -- . ':!.claude'", work).stdout
-    diff = sh("git diff -- . ':!.claude'", work).stdout
-    untracked = sh("git ls-files --others --exclude-standard -- . ':!.claude'", work).stdout.split()
-    for f in untracked[:10]:
-        p = work / f
-        if p.is_file() and p.stat().st_size < 20000:
-            diff += f"\n+++ new file {f}\n" + p.read_text(errors="replace")
+    after = fingerprint(work)
+    touched = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
+    status = "\n".join(touched)  # files the agent created, modified or deleted
+    diff = ""
+    for f in touched[:25]:
+        old = snapshot / f if (snapshot / f).exists() else Path("/dev/null")
+        new = work / f if (work / f).exists() else Path("/dev/null")
+        diff += subprocess.run(["diff", "-u", "--label", f"a/{f}", "--label", f"b/{f}", str(old), str(new)],
+                               capture_output=True, text=True, errors="replace").stdout
 
     check_ok, check_out = True, ""
     if case.get("check"):

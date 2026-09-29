@@ -1,0 +1,74 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title follows Conventional Commits
+        run: |
+          title="${{ github.event.pull_request.title }}"
+          echo "PR title: $title"
+          if ! echo "$title" | grep -Eq '^(feat|fix|chore|docs|refactor|test|ci)(\([a-z0-9-]+\))?!?: .+'; then
+            echo "::error::PR title must look like 'fix(api): handle empty site filter'"
+            exit 1
+          fi
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -q --junitxml=reports/junit.xml
+
+      - name: Publish test report
+        if: always()
+        uses: mikepenz/action-junit-report@master
+        with:
+          report_paths: reports/junit.xml
+          check_name: pytest
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
