@@ -1,0 +1,135 @@
+agent: git-historian
+fixture: sample-app
+# Scenario: answer key data-and-history.md section 4 (HIST-WHY). historian_history.sh adds 7
+# commits on main:
+#   1 "Add LIMS integration notes" (Marta Salazar): docs/lims.md, mentions INC-4388 (gateway
+#     timeout) -- decoy incident.
+#   2 "Collapse duplicate LIMS results per lot and test" (Andrea Castillo): appends
+#     latest_results_by_lot() + get_lot_results() to app/lims_client.py and switches
+#     is_lot_approved() to get_lot_results(). The ONLY place the reason is recorded is this commit
+#     message: since the LIMS 7.2 upgrade GET /samples returns a re-reviewed result twice (original +
+#     amended row, same lot_no and test, no stable order); is_lot_approved() picked the stale "fail"
+#     row and lot OIL-OM3-2603 was held two days although QC passed it (INC-4521); vendor confirmed
+#     (Samplify support case SUP-88213), fix planned for LIMS 7.3; "Remove this once the upgrade is
+#     done."
+#   3 "Add tests for LIMS result collapsing" (Andrea Castillo): tests/test_lims_dedup.py.
+#   4 "Add runbook for LIMS outages" (Marta Salazar): mentions INC-4388 again (decoy).
+#   5 "Rename LIMS result helpers" (Julian Rojas, "No behaviour change"): renames to
+#     unique_results(), rewrites it as sort + dict comprehension, drops the explanatory docstring.
+#     `git blame` on the dedup body at HEAD points HERE, not at commit 2.
+#   6 "Note token rotation in LIMS docs" (Julian Rojas), 7 "Add editorconfig" (Marta Salazar):
+#     unrelated.
+# The key is (lot_no, test), not the lot number alone; the most recently reviewed row
+# (reviewed_at) wins. Nothing in the repo records which LIMS version the site runs, so whether the
+# removal condition (LIMS 7.3) is met is unknown from history.
+# Shas and dates differ per run (commit dates derive from the baseline commit time), so the rubric
+# grades by subject/author. The runner then adds an empty 'setup' commit on top of the recorded tip.
+setup: |
+  set -e
+  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* (Fixture), which would override the per-commit
+  # authors the scenario sets with `git -c user.name=...`; unset them so the history has real authors.
+  env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    bash "$FIXTURES/scenarios/historian_history.sh"
+  git rev-parse HEAD > "$(git rev-parse --git-dir)/case-orig-tip"
+prompt: >-
+  Question from a code review on batchtrack (the repo is the current
+  directory, a clean checkout of main). In app/lims_client.py,
+  is_lot_approved() goes through get_lot_results(), which passes the LIMS
+  sample rows through unique_results() and silently drops rows that share a
+  lot number. Nobody on the current team remembers why this is there. The
+  reviewer believes the LIMS never returns duplicate rows and wants to delete
+  it as dead code. From the version-control history, answer: why was this
+  de-duplication added, who added it and when, and is it still needed? Cite
+  the commits behind each claim and mark clearly what you are inferring
+  rather than reading from the history. Also tell me who I should ask about
+  it. This is research only; don't change anything in the repo.
+read_only: true
+# Passes when the agent leaves git state as it found it: HEAD on branch main at the scenario tip
+# (+ the runner's empty 'setup' commit), no stash, no extra worktree, no staged or unstaged changes.
+# Fails if the agent checked out an old commit and left HEAD detached, committed, reset, or stashed.
+# A do-nothing run also passes: file changes are policed by read_only and the answer by the rubric.
+check: |
+  set -u
+  gd=$(git rev-parse --git-dir)
+  tip=$(cat "$gd/case-orig-tip")
+  test "$(git symbolic-ref -q HEAD)" = refs/heads/main \
+    || { echo "HEAD is not on branch main: $(git rev-parse --abbrev-ref HEAD) $(git rev-parse --short HEAD)"; exit 1; }
+  main=$(git rev-parse refs/heads/main)
+  if [ "$main" != "$tip" ]; then
+    test "$(git rev-parse "$main^")" = "$tip" && test "$(git log -1 --format=%s "$main")" = setup \
+      && test "$(git rev-list --count "$tip..$main")" -eq 1 \
+      || { echo "main moved: now $(git log -1 --oneline "$main"), expected tip $tip (+ runner setup commit)"; exit 1; }
+  fi
+  test -z "$(git stash list)" || { echo "stash left: $(git stash list)"; exit 1; }
+  test "$(git worktree list --porcelain | grep -c '^worktree ')" -eq 1 || { echo "extra worktree left:"; git worktree list; exit 1; }
+  git diff --quiet HEAD -- . && git diff --cached --quiet || { echo "tracked files changed"; git status --short; exit 1; }
+  echo "repo untouched: on main at $(git rev-parse --short HEAD)"
+rubric:
+  must:
+    - >-
+      Identifies the commit that introduced the de-duplication logic as the
+      one with subject "Collapse duplicate LIMS results per lot and test" by
+      Andrea Castillo, giving its sha (at least 7 hex chars) and date. Naming
+      "Rename LIMS result helpers" (Julian Rojas), which is where `git blame`
+      points at HEAD, as the origin does not meet this.
+    - >-
+      Gives the reason recorded in that commit message: since the LIMS 7.2
+      upgrade, GET /samples returns a result twice once QC re-reviews it (the
+      original and the amended row, same lot_no and test, in no stable
+      order), so is_lot_approved() picked up the stale "fail" row and lot
+      OIL-OM3-2603 was held on the release dashboard although QC had passed
+      it -- incident INC-4521 -- and that this is a vendor-side LIMS defect
+      the vendor (Samplify) confirmed. Must cite INC-4521 and the vendor
+      duplicate-on-re-review bug; a generic "to avoid duplicate rows" does not
+      meet this.
+    - >-
+      Answers "is it still needed" with the removal condition stated in the
+      commit (remove once the site runs LIMS 7.3, where the vendor fix is
+      planned), and says the repository/history does not show whether the
+      site already runs 7.3, so the status is unknown or needs confirming
+      (e.g. with the LIMS admin/QC) rather than asserted either way.
+    - >-
+      Keeps facts and inferences separate: the reason and authorship are
+      presented as facts each citing a sha (quoting or closely paraphrasing
+      the commit message), while anything not recorded in history (whether
+      the site is on LIMS 7.3, whether duplicates still occur, whether
+      deletion is safe) is explicitly labelled as inference or unknown.
+  should:
+    - >-
+      Explains why the reason is not visible in the code today: the later
+      commit "Rename LIMS result helpers" (Julian Rojas, "No behaviour
+      change") renamed latest_results_by_lot() to unique_results(), rewrote
+      it and dropped the explanatory docstring, and the agent treats that
+      commit as non-semantic and looks past it (blame of its parent, `git log
+      -L`, or `git log -S`).
+    - >-
+      Cites the vendor support case SUP-88213 as a lead and says its contents
+      (and INC-4521's ticket) were not read / are not accessible from the
+      repo.
+    - >-
+      Corrects the premise that rows are de-duplicated by lot number alone:
+      the key is (lot_no, test), and the row with the latest reviewed_at is
+      kept, so different tests for the same lot are preserved.
+    - >-
+      Cites "Add tests for LIMS result collapsing" (Andrea Castillo,
+      tests/test_lims_dedup.py) as corroborating evidence, e.g. its
+      OIL-OM3-2603 peroxide fail-then-pass fixture showing the latest review
+      wins in either order.
+    - >-
+      Follows the output shape: a direct answer first (STATUS line citing
+      sha7s), an oldest-first timeline with sha, date, author and subject per
+      entry, and a people-to-ask list that names Andrea Castillo first (she
+      introduced the logic and its tests), with Julian Rojas as secondary.
+  must_not:
+    - >-
+      Gives INC-4388 (the gateway-timeout incident mentioned in docs/lims.md
+      and docs/runbooks/lims-outage.md) or the "Rename LIMS result helpers"
+      commit as the reason the de-duplication exists.
+    - >-
+      Concludes that the de-duplication is redundant, dead code or safe to
+      delete now (or agrees with the reviewer that the LIMS never returns
+      duplicates) without the LIMS 7.3 upgrade having been confirmed.
+    - >-
+      Edits, commits, reverts or checks out code itself (e.g. deleting
+      unique_results or running `git checkout <old sha>`) instead of only
+      reading history with log/show/blame.
