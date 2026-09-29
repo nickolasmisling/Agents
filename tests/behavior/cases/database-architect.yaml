@@ -1,0 +1,144 @@
+agent: database-architect
+fixture: sample-app
+# No setup: the design is grounded in the committed fixture. Read-only agent: it must propose, not
+# write a migration. Ground truth the agent has to find itself (not given in the prompt):
+#  - Engine: db/migrations/001_init.sql L2 "records database (PostgreSQL 15)", docker-compose.yml
+#    db image postgres:15.6, infra/main.tf aws_db_instance.records engine_version "15.6". The Python
+#    app still runs SQLite (app/db.py L1-3, own SCHEMA copy); answer key infra.md "Datastore
+#    mismatch" says noting it is valid, not a defect. PostgreSQL 15 has no system-versioned temporal
+#    tables and no built-in uuidv7() (PostgreSQL 18).
+#  - Conventions (001_init.sql): plural snake_case tables, `id BIGSERIAL PRIMARY KEY`, `<entity>_id`
+#    FKs, TIMESTAMPTZ `*_at` columns, NUMERIC(14,3) quantities, `idx_<table>_<col>` index names,
+#    whole migration in BEGIN/COMMIT. batches.id and users.id are BIGSERIAL (FKs BIGINT); sites.id
+#    from 002 is SERIAL (FK INTEGER).
+#  - Existing e-signatures (001 L32-38): signatures.batch_id NOT NULL (batch-only), meaning and
+#    signed_at nullable, no record version. app/signatures.py update_signature/delete_signature
+#    change or hard-delete rows without an audit entry (python-core.md PY-09, PY-10); meaning is
+#    optional (PY-11) and signed_at is client-supplied (PY-08).
+#  - Existing audit_log (001 L40-49): polymorphic (table_name, record_id) with no FK, old/new as
+#    TEXT, user_id nullable, no reason-for-change column, nothing prevents UPDATE/DELETE.
+#  - Site drift: 002 replaces batches.site with site_id -> sites, but app/batches.py and app/db.py
+#    still use batches.site TEXT (infra.md INF-31).
+#  - app/batches.py release_batch has no deviation/approval check (python-core.md "not seeded" note).
+#  - FP-INF-03: 001's CREATE INDEX without CONCURRENTLY is correct (new, empty tables in the same
+#    transaction); CONCURRENTLY is rejected inside BEGIN/COMMIT.
+# The prompt gives the domain, rules, access patterns and volumes as a QA delegation would. It does
+# not name the engine, key types, append-only/immutability, controlled meanings, record-version
+# binding or any defect of the existing tables.
+prompt: >-
+  Design task for batchtrack (this repo), proposal only: do not write the migration or any other
+  file, we review your design before anyone implements it. QA wants a deviation and CAPA module in
+  the batch records database. What QA told us: (1) Any user can raise a deviation against one or
+  more batches, or against a site with no batch involved (for example an equipment or environmental
+  excursion). It gets a number like DEV-2026-0042, a classification (minor, major, critical), a
+  description, when it occurred and when it was detected, and moves open -> under investigation ->
+  pending QA approval -> closed; it can also be cancelled with a reason. (2) Each deviation has one
+  investigation: investigator, root-cause category, root-cause narrative, impact assessment and a
+  target completion date. (3) CAPAs are raised from an investigation; one CAPA can address several
+  deviations when an issue recurs. A CAPA has a type (corrective or preventive), an owner, a due
+  date, a status and an effectiveness-check result at closure. (4) Approvals are 21 CFR Part 11
+  electronic signatures: QA approves the deviation classification, the investigation conclusion,
+  deviation closure and CAPA effectiveness; critical deviations also need the QA head's approval.
+  (5) Inspectors need the full change history of every one of these records. Main uses: the batch
+  release step checks whether a batch has any deviation that is not closed; the QA dashboard lists
+  open deviations per site by classification, oldest first; CAPA owners see their open CAPAs by due
+  date and a daily job flags overdue CAPAs; during an inspection QA pulls one deviation with its
+  investigation, CAPAs, signatures and full history. Volume is about 1,500 deviations and 600 CAPAs
+  a year across the three sites, kept for at least 10 years. Fit the existing schema and conventions
+  (db/migrations/, app/), and tell us whether the existing signatures and audit_log tables should be
+  reused, extended or left alone. Give us the DDL, an ER diagram, the rationale and tradeoffs for
+  your main decisions, and a migration plan.
+read_only: true
+# The runner's fingerprint already fails any file change. This check also catches commits, branch
+# switches and stashes (which leave files untouched). Validated on a scratch copy: clean tree -> exit
+# 0; new db/migrations/003_deviation_capa.sql -> exit 1; extra empty commit -> exit 1.
+check: |
+  set -u
+  fail() { echo "FAIL: $*"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || fail "branch changed"
+  test "$(git rev-list --count HEAD)" -eq 2 || fail "commits added: $(git log -1 --oneline)"
+  test -z "$(git stash list)" || fail "stash created"
+  git diff --quiet HEAD || { git diff --stat HEAD; fail "tracked files modified"; }
+  stray=$(git status --porcelain --untracked-files=all | grep -Ev '(__pycache__/|\.pytest_cache/|^\?\? \.claude/)' || true)
+  test -z "$stray" || fail "unexpected files: $stray"
+  test "$(ls db/migrations)" = "$(printf '001_init.sql\n002_add_site_and_cleanup.sql')" || fail "db/migrations changed"
+  echo "ok: proposal only, tree untouched"
+rubric:
+  must:
+    - >-
+      Gives proposed PostgreSQL DDL (engine taken from the repo, e.g. db/migrations/001_init.sql
+      "PostgreSQL 15", docker-compose.yml postgres:15.6 or infra/main.tf) for deviations,
+      investigations, CAPAs and approvals/e-signatures, in which deviations link to the existing
+      batches(id) through a junction table (or equivalent) that allows several batches or none,
+      people columns (raised by, investigator, CAPA owner, signer) are FKs to the existing
+      users(id), those FK columns are BIGINT to match the BIGSERIAL keys, and the deviation number
+      is UNIQUE and status/classification are restricted by CHECK or a lookup-table FK.
+    - >-
+      Designs the full change history for PostgreSQL, which has no system-versioned temporal
+      tables: a trigger-written history table (or per-table history tables) or an append-only
+      event table that records who made the change (user FK), a server-side timestamp, the old and
+      new values (row or field level) and a reason for the change, and makes it append-only (REVOKE
+      UPDATE/DELETE/TRUNCATE from the application role and/or a trigger that raises on UPDATE or
+      DELETE).
+    - >-
+      Binds every approval signature to the specific deviation, investigation or CAPA it approves
+      through an enforceable reference (a FK per record type, an exclusive arc with a CHECK that
+      exactly one FK is set, a per-entity signature table, or a common supertype table), not only
+      an unconstrained (table_name, record_id) pair; with the signer as a NOT NULL FK to users, the
+      meaning NOT NULL and limited to a controlled list (CHECK or lookup table, e.g. classification
+      approval, investigation approval, closure, CAPA effectiveness), and signed_at NOT NULL set by
+      the database server (e.g. DEFAULT now()) rather than supplied by the client.
+    - >-
+      Lists the access patterns (at least the delegated ones) and ties each proposed index to one,
+      including an index that serves the release check "non-closed deviations for batch X" (leading
+      with batch_id on the deviation-batch link), open deviations per site by classification and
+      age, and open CAPAs per owner by due date; and includes a Mermaid erDiagram of the new
+      entities whose relationships match the DDL, including the links to the existing batches and
+      users tables.
+  should:
+    - >-
+      States the engine choice with evidence and flags the mismatch that the Python app
+      (app/db.py) still runs SQLite with its own schema, and/or the site drift (002 replaced
+      batches.site with site_id -> sites while app/batches.py and app/db.py still use batches.site);
+      any site reference on deviations is a FK to sites(id) typed INTEGER to match its SERIAL key.
+    - >-
+      Decides on the existing tables with concrete evidence from 001_init.sql and/or app/: the
+      signatures table cannot sign non-batch records (batch_id NOT NULL) and has nullable meaning
+      and signed_at; audit_log has a nullable user_id, no reason column, old/new values as TEXT
+      and an unenforced (table_name, record_id) reference; and/or app/signatures.py
+      update_signature/delete_signature edit or hard-delete signatures without an audit entry,
+      which the new design must not allow.
+    - >-
+      Treats the records as immutable GxP data: signatures and history rows are never updated or
+      deleted, a signature also captures the version or a hash of the record content it signs (so
+      a later edit is distinguishable from what was signed), deviations/CAPAs are cancelled with a
+      reason instead of deleted, and FKs from these tables use RESTRICT/NO ACTION rather than ON
+      DELETE CASCADE.
+    - >-
+      Handles the delegated rules that a column constraint cannot express, saying where each is
+      enforced and why: no batch release while a linked deviation is not closed (trigger on the
+      batches status change, or app-level, noting app/batches.py release_batch has no such check
+      today) and the extra QA-head approval for critical deviations (noting users.role has no
+      QA-head role), and captures the acting user for trigger-written history (e.g. SET LOCAL
+      app.user_id read with current_setting) or writes history from the app in the same
+      transaction.
+    - >-
+      Migration plan is additive (a new 003_ migration creating the tables in FK-dependency order,
+      001 and 002 left unchanged, nothing executed), and declines partitioning at about 1,500
+      deviations a year (or justifies it only for the history table) while still addressing the
+      10-year retention.
+  must_not:
+    - >-
+      Writes, creates or edits any file (for example a db/migrations/003_*.sql), commits, or states
+      that it applied or ran the proposed DDL against a database.
+    - >-
+      Relies on features the repo's PostgreSQL 15 lacks, presented as available: SQL Server or
+      MariaDB system-versioned temporal syntax (PERIOD FOR SYSTEM_TIME, SYSTEM_VERSIONING = ON,
+      WITH SYSTEM VERSIONING) or a claim that PostgreSQL supports system-versioned temporal tables
+      natively; a built-in uuidv7() call (PostgreSQL 18+); or an extension such as temporal_tables,
+      pgaudit or pgcrypto used in the DDL without a CREATE EXTENSION or a note that it is not
+      installed.
+    - >-
+      Puts CREATE INDEX CONCURRENTLY inside a BEGIN/COMMIT block in the proposed migration
+      (PostgreSQL rejects it there), or claims the plain CREATE INDEX statements in 001_init.sql
+      should have used CONCURRENTLY (they index tables created empty in the same transaction).

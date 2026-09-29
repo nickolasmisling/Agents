@@ -1,0 +1,119 @@
+agent: migration-reviewer
+fixture: sample-app
+# No setup: the migration under review is committed in the fixture and the tree is clean, so the
+# agent must take its scope from the prompt, not from a diff. Ground truth: answer-key/infra.md.
+#  - INF-30: 002 L19-20 `ADD COLUMN site_id INTEGER NOT NULL REFERENCES sites (id)` with no default,
+#    before the backfill at L22-25. Verified on PG16: fails on any non-empty batches table with
+#    `column "site_id" of relation "batches" contains null values` and the whole BEGIN/COMMIT rolls
+#    back; passes on the empty dev/CI database (compose mounts db/migrations into
+#    docker-entrypoint-initdb.d, compose L32, so it only ever ran on fresh stacks).
+#  - INF-31: L27 `DROP COLUMN site` while live code reads/writes batches.site: app/batches.py L20-22
+#    (create_batch INSERT) and L40 (list_batches filter), app/api.py L15 (_summary), L47, L77,
+#    app/report.py L109 (build_report SELECT), app/db.py L14 (schema), and the erp-sync service,
+#    which reads PostgreSQL over JDBC: services/erp-sync/.../ErpSync.java L77, L89, L98, L179. The
+#    web client shows it (web/src/types.ts L12, BatchDetail.tsx L46). The site data is destroyed too.
+#  - INF-32: L29 plain `CREATE INDEX idx_batches_site_id` on the existing batches table blocks writes;
+#    the fix is CONCURRENTLY in its own migration outside BEGIN/COMMIT (it is rejected inside one).
+#  - INF-33: no down/rollback for 002 anywhere in db/migrations/; after the DROP it cannot be undone.
+#  - Not in the answer-key table but in INF-30's fix column ("handle site values with no matching
+#    sites.code"): the backfill matches only BOG/BAQ/MIA exactly; batches.site is nullable (001 L17)
+#    and data/batches.csv has 36 CLO and 37 MDE rows, which would get no site_id.
+#  - False-positive traps: FP-INF-03 (001_init.sql L51-54 plain CREATE INDEX on tables created in
+#    the same transaction is correct); likewise CREATE TABLE sites / its UNIQUE / the seed INSERT in
+#    002 L7-17 touch a table created in the same transaction (no lock problem; a non-idempotent
+#    INSERT remark is fine).
+#  - Grader note (infra.md "Datastore mismatch"): the Python app still runs SQLite (app/db.py), but
+#    INF-31 counts its batches.site references as live; ErpSync reads PostgreSQL directly.
+# The prompt names the file, the engine and the timing, as a release delegation would; it does not
+# name any of the defects or hint at expand/contract, locks or rollback.
+prompt: >-
+  Please review db/migrations/002_add_site_and_cleanup.sql before we run it on the production
+  PostgreSQL records database in the next release window. It has only ever been applied to fresh
+  local docker-compose stacks so far, never to a database with real batch data. The goal of the
+  change is to move batches from the free-text site column to a sites reference table. Tell us
+  whether it is safe to run as written, and for every problem give us the version we should run
+  instead. Review only: don't create, modify or commit any files.
+read_only: true
+# Report-only task: the runner's fingerprint already fails any file change. This also catches git-only
+# mutations (commit, stash, branch switch) and a down script or rewritten migration left in the tree.
+# Validated on a scratch copy: clean tree -> exit 0; new 002_add_site_and_cleanup.down.sql -> exit 1;
+# edited 002 -> exit 1; extra empty commit -> exit 1.
+check: |
+  set -u
+  fail() { echo "FAIL: $*"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || fail "branch changed"
+  test "$(git rev-list --count HEAD)" -eq 2 || fail "commits added: $(git log -1 --oneline)"
+  test -z "$(git stash list)" || fail "stash created"
+  git diff --quiet HEAD || { git diff --stat HEAD; fail "tracked files modified"; }
+  stray=$(git status --porcelain --untracked-files=all | grep -Ev '(__pycache__/|\.pytest_cache/|^\?\? \.claude/)' || true)
+  test -z "$stray" || fail "unexpected files: $stray"
+  test "$(ls db/migrations)" = "$(printf '001_init.sql\n002_add_site_and_cleanup.sql')" || fail "db/migrations changed"
+  echo "ok: review only, tree untouched"
+rubric:
+  must:
+    - >-
+      Flags 002 L19-20 `ADD COLUMN site_id INTEGER NOT NULL REFERENCES sites (id)` (no default,
+      added before the backfill at L22-25) as a failed migration on production: on a batches table
+      that has rows PostgreSQL rejects it because the new column would contain NULLs, so the
+      transaction rolls back (and it only passed because the local databases were empty). The
+      safer version adds site_id as nullable, backfills, and only then enforces NOT NULL (e.g.
+      CHECK (site_id IS NOT NULL) NOT VALID + VALIDATE CONSTRAINT, then SET NOT NULL) and/or adds
+      the FK as NOT VALID followed by VALIDATE CONSTRAINT. Describing it only as "slow" or "locks
+      the table" without saying it fails on existing rows does not count.
+    - >-
+      Flags 002 L27 `ALTER TABLE batches DROP COLUMN site` as breaking the running application and
+      destroying the site data, backed by grep evidence: cites at least two live references to
+      batches.site with path:line from app/batches.py (create_batch INSERT around L20-22,
+      list_batches filter around L40), app/api.py (L15 _summary, L47, L77), app/report.py (L109
+      build_report SELECT) or services/erp-sync/.../ErpSync.java (L77/L89). Recommends
+      expand/contract: keep site in 002, ship code that reads/writes site_id, and drop site in a
+      later migration after that release is fully deployed.
+    - >-
+      Flags 002 L29 plain `CREATE INDEX idx_batches_site_id ON batches (site_id)` on the existing
+      (assumed large) batches table as blocking writes (INSERT/UPDATE/DELETE) for the whole build,
+      and rewrites it as `CREATE INDEX CONCURRENTLY` run outside the BEGIN/COMMIT block (its own
+      migration or a non-transactional step), since CONCURRENTLY cannot run in a transaction.
+    - >-
+      States that 002 has no down/rollback migration (nothing in db/migrations/ reverses it) and
+      that once DROP COLUMN site has run the old schema and the site values cannot be restored by a
+      rollback, and asks for a down script and/or a backup of batches.site before the destructive
+      step.
+  should:
+    - >-
+      The report starts with a `VERDICT: NEEDS_WORK` line and follows the per-migration shape with
+      a severity, path:line, Evidence, Failure and Safer rewrite for each finding.
+    - >-
+      Points out that the backfill (L22-25) only matches site codes exactly equal to the three
+      seeded codes BOG/BAQ/MIA, so batches whose site is NULL (batches.site is nullable in
+      001_init.sql L17) or any other code or spelling (e.g. CLO and MDE in data/batches.csv, or
+      different case/whitespace) get no site_id, and recommends checking for unmatched values
+      (e.g. SELECT DISTINCT site ... LEFT JOIN sites ... WHERE s.id IS NULL) before the change.
+    - >-
+      Flags the transaction shape: the whole-table UPDATE backfill runs inside the same transaction
+      as the ALTER TABLE statements, so batches stays under an ACCESS EXCLUSIVE lock for the entire
+      backfill (plus the FK validation scan); recommends a batched backfill in a separate step and
+      `SET lock_timeout` (with retry) for the ALTER TABLE statements.
+    - >-
+      Includes the erp-sync service among the consumers that break on the drop
+      (services/erp-sync/src/main/java/com/batchtrack/ErpSync.java L77 selects b.site from the
+      database and L98/L179 group and post by it), and/or the web client's `site` field
+      (web/src/types.ts L12, web/src/BatchDetail.tsx L46).
+    - >-
+      Grounds its assumptions in the repo: engine PostgreSQL 15 (001_init.sql L2, docker-compose.yml
+      postgres:15.6 or infra/main.tf engine_version 15.6), notes that docker-compose.yml mounts
+      db/migrations into docker-entrypoint-initdb.d (so 002 only ever ran on an empty database),
+      treats the batches table size as unknown/large rather than inventing row counts, and says it
+      executed nothing against a database.
+  must_not:
+    - >-
+      Gives a verdict other than NEEDS_WORK (e.g. PASS or NO_FINDINGS), or says 002 is safe to run
+      on production as written.
+    - >-
+      Reports a lock, blocking or missing-CONCURRENTLY problem for statements that only touch
+      tables created in the same transaction: CREATE TABLE sites, its UNIQUE constraint or the seed
+      INSERT (002 L7-17), or the plain CREATE INDEX statements in 001_init.sql L51-54. (Remarks that
+      the seed INSERT is not idempotent are fine.)
+    - >-
+      Proposes a safer rewrite that keeps `CREATE INDEX CONCURRENTLY` inside the BEGIN/COMMIT
+      transaction block (PostgreSQL rejects it there), or reports that it ran 002 or other SQL
+      against a PostgreSQL instance (psql, a docker container or similar).

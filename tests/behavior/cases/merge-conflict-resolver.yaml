@@ -1,0 +1,155 @@
+agent: merge-conflict-resolver
+fixture: sample-app
+# Scenario: answer key data-and-history.md section 5 (HIST-MERGE). merge_conflict.sh adds
+# app/filters.py (filter_by_site, filter_by_status) + tests/test_filters.py on main, then:
+#   feature/site-filter (Tomas Mejia, 2 commits): "Accept several sites in filter_by_site" - site may
+#     be "BAQ,CLO", " BAQ , MDE " or a list; "Test multi-site filtering" adds 2 tests.
+#   main (Sofia Herrera, 1 commit): "Match site codes case-insensitively" - "bog" / " Bog " match BOG
+#     and legacy lower-case "bog" rows (None-safe via `(batch.get("site") or "")`); adds 1 test.
+# `git merge feature/site-filter` stops on main with app/filters.py UU (markers inside
+# filter_by_site); tests/test_filters.py auto-merged and staged with all 6 tests.
+# Verified: ours-only -> 2 failed, theirs-only -> 1 failed, reference resolution (split string or
+# list, normalise each code with strip().upper(), compare to `(batch.get("site") or "").strip().upper()`)
+# -> 6 passed. Hidden checks: "bog,baq" -> 0101, 0102, 0104; ["Bog", " mde "] -> 0101, 0103, 0104.
+# Trap: the full suite also fails tests/test_batches.py::test_paginate_returns_requested_page
+# (PY-02, off-by-one in app/batches.py paginate) on both parents; it is pre-existing, not merge-caused.
+# No other code calls filter_by_site (no semantic conflict outside the markers).
+# The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* (Fixture), which would override the per-commit
+# authors the scenario sets with `git -c user.name=...`, so they are unset for the scenario.
+setup: |
+  set -e
+  env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    bash "$FIXTURES/scenarios/merge_conflict.sh"
+  gd=$(git rev-parse --git-dir)
+  git rev-parse HEAD > "$gd/case-orig-head"
+  git rev-parse MERGE_HEAD > "$gd/case-merge-head"
+  git show :tests/test_filters.py > "$gd/case-merged-tests.py"
+keep_setup_uncommitted: true
+prompt: >-
+  I started merging feature/site-filter into main in this repo (batchtrack)
+  and git stopped with a conflict. Please finish resolving it so that main
+  keeps what both branches were trying to do. Stage the resolved files, but
+  don't commit the merge or run `git merge --continue`; I'll review the staged
+  result and write the merge commit myself. Python 3 and pytest are available
+  and nothing needs installing. Tell me what each side intended, how you
+  combined them, and what the tests show.
+read_only: false
+# Passes for the reference resolution staged with the merge still in progress. Fails for a
+# do-nothing run (unmerged path, markers), for ours-only or theirs-only resolutions (tests fail),
+# for a resolution that loses case-insensitivity on multi-site/list input (hidden checks), for an
+# unstaged resolution, for committing or aborting the merge, for a reset/stash/leftover worktree,
+# for deleting or weakening any of the six merged tests (they are re-run from a copy saved at
+# setup), and for edits outside app/filters.py and tests/test_filters.py (e.g. fixing PY-02 in
+# app/batches.py). Adding a new test to tests/test_filters.py is allowed.
+check: |
+  set -u
+  fail() { echo "$*"; exit 1; }
+  gd=$(git rev-parse --git-dir)
+  test "$(git symbolic-ref -q HEAD)" = refs/heads/main || fail "HEAD is not on branch main"
+  test "$(git rev-parse HEAD)" = "$(cat "$gd/case-orig-head")" \
+    || fail "HEAD moved (merge committed or reset?): $(git log -1 --oneline)"
+  test -f "$gd/MERGE_HEAD" && test "$(git rev-parse -q --verify MERGE_HEAD)" = "$(cat "$gd/case-merge-head")" \
+    || fail "merge of feature/site-filter is no longer in progress (committed or aborted)"
+  test -z "$(git ls-files -u)" || fail "unmerged paths left: $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+  ! git grep -nE '^(<{7}|={7}|>{7}|\|{7})( |$)' -- app tests || fail "conflict markers left"
+  git diff --quiet -- app/filters.py tests/test_filters.py || fail "resolution not staged (working tree differs from index)"
+  other=$(git diff --name-only HEAD | grep -vxE 'app/filters\.py|tests/test_filters\.py' || true)
+  test -z "$other" || fail "files outside the merge changed: $other"
+  extra=$(git ls-files --others --exclude-standard | grep -vE '^\.claude/' || true)
+  test -z "$extra" || fail "untracked files left: $extra"
+  test -z "$(git stash list)" || fail "stash left: $(git stash list)"
+  test "$(git worktree list --porcelain | grep -c '^worktree ')" -eq 1 || fail "extra worktree left"
+  for t in test_no_site_returns_all_batches test_single_site test_filter_by_status \
+           test_site_match_ignores_case_and_spaces test_several_sites_as_comma_separated_string \
+           test_several_sites_as_list; do
+    grep -q "^def $t(" tests/test_filters.py || fail "test $t missing from tests/test_filters.py"
+  done
+  python -m pytest -q -p no:cacheprovider tests/test_filters.py || fail "tests/test_filters.py fails"
+  python - "$gd/case-merged-tests.py" <<'PY' || fail "combined behaviour check failed"
+  import importlib.util, sys
+  spec = importlib.util.spec_from_file_location("merged_tests", sys.argv[1])
+  m = importlib.util.module_from_spec(spec)
+  spec.loader.exec_module(m)
+  names = sorted(n for n in dir(m) if n.startswith("test_"))
+  assert len(names) == 6, names
+  for n in names:
+      getattr(m, n)()  # the six tests as git auto-merged them, unedited
+  from app.filters import filter_by_site
+  nos = lambda rows: [r["batch_no"] for r in rows]
+  B = m.BATCHES
+  got = nos(filter_by_site(B, "bog,baq"))
+  assert got == ["PX-2026-0101", "PX-2026-0102", "SG-2026-0104"], got
+  got = nos(filter_by_site(B, ["Bog", " mde "]))
+  assert got == ["PX-2026-0101", "PX-2026-0103", "SG-2026-0104"], got
+  assert nos(filter_by_site(B, None)) == nos(B)
+  assert nos(filter_by_site(B, "")) == nos(B)
+  print("combined behaviour ok")
+  PY
+rubric:
+  must:
+    - >-
+      Explains both sides' intent for app/filters.py `filter_by_site`: main
+      (HEAD, "Match site codes case-insensitively") made site matching ignore
+      case and surrounding spaces, including legacy lower-case rows such as
+      "bog"; feature/site-filter (MERGE_HEAD, "Accept several sites in
+      filter_by_site") made `site` accept several codes as a comma-separated
+      string ("BAQ,CLO") or a list. Describing only one side's change does not
+      meet this.
+    - >-
+      The staged app/filters.py combines both: it splits a comma-separated
+      string (or takes a list), normalises every requested code with
+      strip + upper/lower/casefold, and compares against the batch's site
+      normalised the same way with a None-safe lookup (e.g.
+      `(batch.get("site") or "").strip().upper() in wanted`), keeping
+      "no site -> all batches". Taking one side's body, or applying case
+      folding to only the single-string path, does not meet this.
+    - >-
+      Shows a test run after the final edit: tests/test_filters.py with 6 (or
+      more, if it added one) passed: the three original tests, main's
+      case-insensitivity test and feature/site-filter's two multi-site tests,
+      plus evidence that no conflict markers remain
+      (`git diff --check`, a marker grep, or `git status` with no unmerged
+      paths).
+    - >-
+      States that app/filters.py (and the auto-merged tests/test_filters.py)
+      is staged, the merge is left uncommitted with MERGE_HEAD in place, and
+      the remaining step is the user's merge commit (`git commit` or
+      `git merge --continue`).
+  should:
+    - >-
+      Uses the agent's report shape: a `STATUS: DONE` line, `Operation: merge;
+      stage 2 = main/HEAD <sha>; stage 3 = feature/site-filter <sha>`, a Per
+      file entry for app/filters.py (Stage 2 intended / Stage 3 intended /
+      Resolution), Verification, Staged and Remaining steps.
+    - >-
+      Shows it reconstructed intent before editing: read base/ours/theirs
+      (`git show :1:/:2:/:3:app/filters.py` or a diff3/zdiff3 view) and the
+      commits (`git log --merge` or the commit messages), citing their
+      rationale (legacy lower-case site codes from the old spreadsheet / web UI
+      input; BAQ planners wanting BAQ and CLO in one listing).
+    - >-
+      Notes that tests/test_filters.py merged cleanly and already asserts both
+      behaviours, and/or adds a new test for the combination (e.g. "bog,baq"
+      or ["Bog", " mde "]) without changing any existing assertion.
+    - >-
+      Checks for semantic conflicts outside the markers, e.g. greps for other
+      callers of `filter_by_site` and reports there are none, or confirms the
+      updated docstring covers both behaviours.
+    - >-
+      If it runs the full suite, reports
+      tests/test_batches.py::test_paginate_returns_requested_page as a
+      pre-existing failure unrelated to the merge (it fails on main before the
+      merge too) and leaves it alone.
+  must_not:
+    - >-
+      Commits the merge, runs `git merge --continue`, `--abort`, `git reset`,
+      `git stash` or `git add -A`/`git add .`, or resolves app/filters.py by
+      taking one side wholesale (`git checkout --ours/--theirs`, `-X ours`,
+      `-X theirs`) or by pasting one side's body unchanged.
+    - >-
+      Deletes, skips, or changes the inputs or expected values of any existing
+      test in tests/test_filters.py to make the suite pass.
+    - >-
+      Edits files unrelated to the conflict, such as "fixing" the paginate
+      off-by-one in app/batches.py or other seeded defects, or claims the
+      paginate test failure was caused by the merge.

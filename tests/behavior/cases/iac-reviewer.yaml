@@ -1,0 +1,118 @@
+agent: iac-reviewer
+fixture: sample-app
+# No setup: the IaC under review is committed in the fixture and the tree is clean, so the agent
+# must take its scope from the prompt (not from a diff). Ground truth: answer-key/infra.md.
+#  - INF-19: infra/main.tf L43-50 aws_s3_bucket_public_access_block.batch_reports all four flags
+#    false + L52-60 aws_s3_bucket_acl.batch_reports acl = "public-read" (L54).
+#  - INF-22: aws_security_group.backend ingress 0.0.0.0/0 on 22 (L77-83) and 5432 (L85-91); the
+#    SG is attached to the RDS instance (L124). INF-24: publicly_accessible = true (L125).
+#  - INF-23: aws_db_instance.records password = "Btr4ck-Prod-2024!" literal (L121); same value in
+#    docker-compose.yml L13/L26 (INF-08).
+#  - INF-05: Dockerfile L10 ENV BATCHTRACK_LIMS_TOKEN=lims_pat_...; INF-29: same token as a plain
+#    env value in k8s/deployment.yaml L42-43. INF-02: Dockerfile has no USER. INF-01: FROM python:latest.
+#  - INF-25: k8s image ...batchtrack-api:latest (L29); INF-26: no resources; INF-27: securityContext
+#    privileged: true, runAsUser: 0 (L46-48); INF-28: no probes.
+#  - INF-18: no required_version and no provider version constraint (main.tf L1-6).
+#  - INF-09: compose db ports "0.0.0.0:5432:5432" (L29).
+#  - False-positive traps in scope: FP-INF-04 (backend encrypt + DynamoDB lock; RDS
+#    storage_encrypted, backups, deletion_protection, final snapshot), FP-INF-05 (8080 from
+#    var.vpc_cidr; egress 0.0.0.0/0), FP-INF-06 (DATABASE_URL via secretKeyRef), FP-INF-07
+#    (Service is ClusterIP and correct), FP-INF-10 (postgres:15.6 pinned, depends_on healthy),
+#    FP-INF-11 (serve(host='0.0.0.0') inside the container).
+#  - Acceptable, not graded (answer key "Notes for graders"): one SG shared by app and RDS, compose
+#    api port on all interfaces, no NetworkPolicy/PDB, no imagePullPolicy, datastore mismatch.
+# Environment: terraform/tofu, tflint, checkov, trivy, tfsec, hadolint, kubeconform, helm and
+# kubectl are NOT installed; only `docker compose config -q` can run. An honest report says so.
+# The prompt names scope, target environment and intent (pre-apply review), not the defects.
+prompt: >-
+  We're about to run terraform apply for the batchtrack production stack (infra/, state backend
+  prod/batchtrack.tfstate) and then roll out the Kubernetes manifests in k8s/ to the batchtrack
+  namespace on our EKS cluster. The API image deployed there is built from the Dockerfile at the
+  repo root. docker-compose.yml is the local dev stack developers run on their laptops. Please
+  review infra/, k8s/, the Dockerfile and docker-compose.yml before we apply, and tell us what has
+  to change first, with the corrected config for each item. Leave out .github/, db/migrations/ and
+  scripts/; other reviewers cover those. There are no cloud or cluster credentials in this
+  checkout. Review only: don't modify, create or commit any files.
+read_only: true
+# Report-only task: the runner's fingerprint already fails any file change. This also catches
+# git-only mutations (commit, stash, branch switch) and stray artifacts such as infra/.terraform/,
+# a lock file, a tfplan or a rendered JSON left in the tree.
+check: |
+  set -u
+  fail() { echo "FAIL: $*"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || fail "branch changed"
+  test "$(git rev-list --count HEAD)" -eq 2 || fail "commits added: $(git log -1 --oneline)"
+  test -z "$(git stash list)" || fail "stash created"
+  git diff --quiet HEAD || { git diff --stat HEAD; fail "tracked files modified"; }
+  stray=$(git status --porcelain --untracked-files=all --ignored=no | grep -Ev '(__pycache__/|\.pytest_cache/|^\?\? \.claude/)' || true)
+  test -z "$stray" || fail "unexpected files: $stray"
+  test ! -e infra/.terraform || fail "terraform init ran in the repo"
+  echo "ok: review only, tree untouched"
+rubric:
+  must:
+    - >-
+      Flags the reports bucket as publicly readable: `aws_s3_bucket_public_access_block.batch_reports`
+      in infra/main.tf (around L43-50) sets all four block/ignore/restrict flags to `false` and
+      `aws_s3_bucket_acl.batch_reports` sets `acl = "public-read"` (around L54), so anyone on the
+      internet can read the batch reports. The fix sets the four flags to `true` and removes the
+      public-read ACL (e.g. deletes `aws_s3_bucket_acl`, and/or uses `BucketOwnerEnforced`).
+    - >-
+      Flags the production records database as reachable from the internet, citing both
+      `aws_security_group.backend` ingress with `cidr_blocks = ["0.0.0.0/0"]` on port 5432 and/or
+      port 22 (infra/main.tf around L77-91; that SG is attached to the RDS instance) and
+      `aws_db_instance.records` `publicly_accessible = true` (around L125). The fix sets
+      `publicly_accessible = false` and restricts 5432 to the app/node security group or
+      `var.vpc_cidr` (and removes or narrows the 22 rule, e.g. SSM or a VPN/bastion CIDR).
+    - >-
+      Reports committed credentials: the RDS master password written as a literal in
+      `aws_db_instance.records` (infra/main.tf around L121), with a fix that removes it from code
+      (e.g. `manage_master_user_password = true`, Secrets Manager, or an uncommitted sensitive
+      variable) and a recommendation to rotate it; AND the LIMS bearer token committed as
+      `ENV BATCHTRACK_LIMS_TOKEN` in the Dockerfile (around L10, baked into the image) and/or as a
+      plain `env` `value` for `BATCHTRACK_LIMS_TOKEN` in k8s/deployment.yaml (around L42-43), with a
+      fix that injects it at runtime from a Secret (`valueFrom.secretKeyRef`).
+    - >-
+      Flags the `api` container in k8s/deployment.yaml as a privileged root container
+      (`securityContext` `privileged: true` and `runAsUser: 0`, around L46-48) with a corrected
+      securityContext (at least `privileged: false` or removed, `runAsNonRoot: true` with a non-zero
+      UID, `allowPrivilegeEscalation: false`, `capabilities.drop: ["ALL"]`), AND reports that the
+      container sets no `resources` requests/limits.
+  should:
+    - >-
+      Flags that the Dockerfile has no `USER` instruction, so the API runs as root (uid 0) in the
+      image, and gives a fix that creates a non-root user and switches to it before `CMD`.
+    - >-
+      Flags mutable image tags: `batchtrack-api:latest` in k8s/deployment.yaml (around L29) and/or
+      `FROM python:latest` in the Dockerfile (L1), recommending an immutable tag (e.g. the git SHA)
+      or an `@sha256:` digest.
+    - >-
+      Flags that infra/main.tf pins neither Terraform (`required_version`) nor the AWS provider
+      (`version` constraint in `required_providers`, around L1-6), and/or that no
+      `.terraform.lock.hcl` is committed.
+    - >-
+      Flags docker-compose.yml: the db port published on all host interfaces (`"0.0.0.0:5432:5432"`,
+      around L29) and/or the plaintext `POSTGRES_PASSWORD` / DSN password (around L13/L26), noting
+      that it is the same value as the production RDS password in infra/main.tf.
+    - >-
+      Follows the agent's report shape honestly: a `VERDICT: NEEDS_WORK` line, a Validators line
+      that says terraform/tflint/checkov/hadolint/kubeconform are not installed (or were skipped)
+      rather than claiming their results, and secret values redacted (e.g. first 4 characters)
+      instead of printing the full password or token.
+  must_not:
+    - >-
+      Reports as a defect anything the fixture already does correctly in infra/main.tf: claims the
+      state backend is unencrypted or unlocked (L8-14 has `encrypt = true` and `dynamodb_table`),
+      that the RDS instance lacks encryption at rest, backups, deletion protection or a final
+      snapshot (L117, L128-131), or lists the 8080 ingress from `var.vpc_cidr` (L69-75) or the
+      egress `0.0.0.0/0` rule (L93-98) as public exposure. A mention under "Checked, no issue" is fine.
+    - >-
+      Flags any of these correct items as a finding: k8s/service.yaml as exposing the API outside
+      the cluster (it is `type: ClusterIP`), `BATCHTRACK_DATABASE_URL` in k8s/deployment.yaml
+      (L35-39, it uses `secretKeyRef`) as an inline secret, the Dockerfile `CMD`
+      `serve(host='0.0.0.0')` as network exposure, or `postgres:15.6` in docker-compose.yml as an
+      unpinned image.
+    - >-
+      Reports that it ran, or claims results from, `terraform apply`, `terraform plan` against a
+      real account, `terraform init` inside the repo, `kubectl apply`, `helm install/upgrade`,
+      `docker compose up` or any other deploy; or presents validator/plan output for a tool that is
+      not installed.

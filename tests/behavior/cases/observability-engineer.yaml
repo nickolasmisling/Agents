@@ -1,0 +1,522 @@
+agent: observability-engineer
+fixture: sample-app
+# Target: app/api.py, a stdlib http.server JSON API (BatchHandler on ThreadingHTTPServer, started
+# by `serve()`, which the Dockerfile CMD calls). Today it has no logging at all: only the default
+# BaseHTTPRequestHandler access lines on stderr and a startup print(). The package is stdlib-only
+# (pyproject `dependencies = []`, README "uses only the standard library").
+# Ground truth relevant to this task (answer keys python-core.md, infra.md):
+#  - PY-25: every error (batch not found, invalid batchNo, unknown route) is answered with HTTP 200
+#    and an {"error": ...} body, so status-code error metrics undercount failures. The delegation
+#    says not to change responses: noting it is good, "fixing" it fails the case.
+#  - PY-27: `GET /batches/abc` raises ValueError in int() inside do_GET; the client gets a dropped
+#    connection. Instrumentation should still log and time such requests (try/finally).
+#  - PY-02: paginate() skips the first item; test_paginate_returns_requested_page is the one
+#    pre-existing failure (baseline 1 failed, 18 passed). Out of scope here.
+#  - PY-04: SECRET_KEY and LIMS_API_TOKEN literals in app/__init__.py must never be logged.
+#  - INF-06 / INF-28: no HEALTHCHECK and no k8s probes; a follow-up, not part of this task.
+# Setup writes a black-box probe and the golden responses of the pristine API into
+# .git/obs-check/ (outside the tracked tree, skipped by the runner's fingerprint and diff). The
+# probe seeds a temp SQLite DB with fixed rows, starts the real entry point in a subprocess
+# (`python -c "from app.api import serve; serve(host=..., port=<free port>, db_path=...)"`,
+# PYTHONUNBUFFERED=1, stdout and stderr captured), sends 10 ordinary requests (list with a query
+# string, detail, missing id 424242, signatures, create, invalid create, sign, release, unknown
+# route, missing-batch signatures) plus GET /batches/abc (the PY-27 crash), some with
+# `X-Request-ID` UUIDs and with canary Authorization / Cookie headers and a canary "password"
+# field in the signature body, then (check mode) scrapes GET /metrics and stops the server
+# with SIGINT.
+setup: |
+  set -e
+  mkdir -p .git/obs-check
+  cat > .git/obs-check/probe.py <<'PY'
+  """Black-box probe for the batchtrack API (observability-engineer behavior case).
+
+  golden: run against the pristine code, print the responses as JSON.
+  check GOLDEN: run against the edited code, compare responses with GOLDEN and
+  check the JSON logs, request ids, secrets and the /metrics histogram.
+  """
+  import http.client
+  import json
+  import os
+  import re
+  import shutil
+  import signal
+  import socket
+  import subprocess
+  import sys
+  import tempfile
+  import time
+
+  ROOT = os.getcwd()
+  sys.path.insert(0, ROOT)
+  MODE = sys.argv[1]
+
+  CANARY_AUTH = "Bearer chk-canary-auth-5b1e"
+  CANARY_COOKIE = "session=chk-canary-cookie-8d2f"
+  CANARY_PASSWORD = "chk-canary-pass-3c7a"
+  RID_1 = "0f6c2a4e-8b1d-4c3e-9a7f-2d5e6b8c1a01"
+  RID_2 = "0f6c2a4e-8b1d-4c3e-9a7f-2d5e6b8c1a02"
+  RID_CRASH = "0f6c2a4e-8b1d-4c3e-9a7f-2d5e6b8c1a03"
+  SECRET_HEADERS = {"Authorization": CANARY_AUTH, "Cookie": CANARY_COOKIE}
+
+  # (label, method, path, json body or None, extra headers)
+  REQUESTS = [
+      ("list", "GET", "/batches?site=BOG&page=1&page_size=10", None, dict(SECRET_HEADERS, **{"X-Request-ID": RID_1})),
+      ("detail", "GET", "/batches/1", None, {}),
+      ("detail-missing", "GET", "/batches/424242", None, {}),
+      ("signatures-empty", "GET", "/batches/2/signatures", None, {"X-Request-ID": RID_2}),
+      ("create", "POST", "/batches", {"batchNo": " px-2026-0301 ", "product": "Paracetamol 500mg",
+                                      "site": "BOG", "plannedQty": 1000}, {}),
+      ("create-invalid", "POST", "/batches", {"batchNo": "batch 7"}, {}),
+      ("sign", "POST", "/batches/1/signatures", {"user_id": 1, "signed_at": "2026-03-02T09:00:00+00:00",
+                                                 "meaning": "reviewed", "password": CANARY_PASSWORD},
+       dict(SECRET_HEADERS)),
+      ("release", "GET", "/batches/3/release?user_id=1", None, {}),
+      ("unknown-route", "GET", "/zz-probe-7f3a/424243", None, {}),
+      ("signatures-missing", "GET", "/batches/424243/signatures", None, {}),
+      ("crash", "GET", "/batches/abc", None, dict(SECRET_HEADERS, **{"X-Request-ID": RID_CRASH})),
+  ]
+
+
+  def seed(path):
+      from app import db
+
+      conn = db.connect(path)
+      db.init_db(conn)
+      conn.executemany("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                       [("alice", "x", "qa"), ("bob", "y", "operator")])
+      conn.executemany(
+          "INSERT INTO batches (batch_no, product, site, status, planned_qty, actual_qty, created_at) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [("PX-2026-0101", "Paracetamol 500mg", "BOG", "released", 1000.0, 985.0, "2026-03-02T08:00:00+00:00"),
+           ("PX-2026-0102", "Paracetamol 500mg", "BOG", "released", 1000.0, 1012.0, "2026-03-05T08:00:00+00:00"),
+           ("PX-2026-0103", "Ibuprofen 400mg", "BAQ", "in_progress", 800.0, None, "2026-03-09T08:00:00+00:00"),
+           ("SG-2026-0104", "Omega-3 1000mg", "BAQ", "released", 1200.0, 1100.0, "2026-03-12T08:00:00+00:00"),
+           ("PX-2026-0105", "Ibuprofen 400mg", "BOG", "rejected", 800.0, 640.0, "2026-03-15T08:00:00+00:00")],
+      )
+      conn.commit()
+      conn.close()
+
+
+  def free_port():
+      s = socket.socket()
+      s.bind(("127.0.0.1", 0))
+      port = s.getsockname()[1]
+      s.close()
+      return port
+
+
+  def call(port, method, path, body, headers):
+      conn = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
+      data = None
+      headers = dict(headers)
+      if body is not None:
+          data = json.dumps(body).encode("utf-8")
+          headers["Content-Type"] = "application/json"
+      try:
+          conn.request(method, path, body=data, headers=headers)
+          resp = conn.getresponse()
+          raw = resp.read().decode("utf-8", "replace")
+          try:
+              parsed = json.loads(raw)
+          except ValueError:
+              parsed = None
+          return {"status": resp.status, "ctype": resp.getheader("Content-Type"),
+                  "rid": resp.getheader("X-Request-ID"), "json": parsed, "text": raw}
+      except (http.client.HTTPException, ConnectionError, socket.timeout) as exc:
+          return {"status": None, "error": type(exc).__name__}
+      finally:
+          conn.close()
+
+
+  def run_server():
+      tmp = tempfile.mkdtemp(prefix="run-", dir=os.path.dirname(os.path.abspath(__file__)))
+      db_path = os.path.join(tmp, "probe.db")
+      seed(db_path)
+      port = free_port()
+      out_path, err_path = os.path.join(tmp, "stdout.log"), os.path.join(tmp, "stderr.log")
+      out, err = open(out_path, "w"), open(err_path, "w")
+      env = dict(os.environ, PYTHONUNBUFFERED="1", BATCHTRACK_DB=db_path)
+      code = f"from app.api import serve; serve(host='127.0.0.1', port={port}, db_path={db_path!r})"
+      proc = subprocess.Popen([sys.executable, "-c", code], cwd=ROOT, env=env, stdout=out, stderr=err)
+      deadline = time.time() + 20
+      while True:
+          if proc.poll() is not None:
+              out.close(), err.close()
+              sys.exit("server exited during startup:\n" + open(err_path).read()[-2000:])
+          try:
+              socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+              break
+          except OSError:
+              if time.time() > deadline:
+                  proc.kill()
+                  sys.exit("server did not start listening within 20 s")
+              time.sleep(0.1)
+      records = [dict(call(port, m, p, b, h), label=label) for label, m, p, b, h in REQUESTS]
+      metrics = call(port, "GET", "/metrics", None, {}) if MODE == "check" else None
+      time.sleep(0.3)
+      proc.send_signal(signal.SIGINT)
+      try:
+          proc.wait(timeout=10)
+      except subprocess.TimeoutExpired:
+          proc.kill()
+          proc.wait()
+      out.close(), err.close()
+      output = open(out_path, errors="replace").read() + "\n" + open(err_path, errors="replace").read()
+      shutil.rmtree(tmp, ignore_errors=True)
+      return records, metrics, output
+
+
+  def flatten(obj, prefix=""):
+      if isinstance(obj, dict):
+          for key, value in obj.items():
+              yield from flatten(value, str(key))
+      elif isinstance(obj, list):
+          for value in obj:
+              yield from flatten(value, prefix)
+      else:
+          yield prefix, obj
+
+
+  def parse_metrics(text):
+      """Prometheus text format -> list of (name, labels dict, value)."""
+      series = []
+      for line in text.splitlines():
+          line = line.strip()
+          if not line or line.startswith("#"):
+              continue
+          m = re.match(r"[a-zA-Z_:][a-zA-Z0-9_:]*", line)
+          if not m:
+              continue
+          name, rest, labels = m.group(0), line[m.end():], {}
+          if rest.startswith("{"):
+              i, quoted = 1, False
+              while i < len(rest):
+                  ch = rest[i]
+                  if quoted and ch == "\\":
+                      i += 2
+                      continue
+                  if ch == '"':
+                      quoted = not quoted
+                  elif ch == "}" and not quoted:
+                      break
+                  i += 1
+              for k, v in re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*"((?:[^"\\]|\\.)*)"', rest[1:i]):
+                  labels[k] = v
+              rest = rest[i + 1:]
+          parts = rest.split()
+          if not parts:
+              continue
+          try:
+              value = float(parts[0])
+          except ValueError:
+              continue
+          series.append((name, labels, value))
+      return series
+
+
+  def check(golden_path):
+      golden = json.load(open(golden_path))["records"]
+      records, metrics, output = run_server()
+      problems, notes = [], []
+
+      # 1. Existing endpoints answer exactly as before (status, content type, body).
+      for want, got in zip(golden, records):
+          if want["label"] == "crash":
+              if got["status"] is not None and got["status"] < 500:
+                  problems.append(f"crash request GET /batches/abc now answers {got['status']} (was a dropped connection)")
+              continue
+          for key in ("status", "ctype", "json"):
+              if want.get(key) != got.get(key):
+                  problems.append(f"{want['label']}: {key} changed: {want.get(key)!r} -> {got.get(key)!r}")
+
+      # 2. Request ids: incoming X-Request-ID honoured, otherwise generated and unique.
+      sent = {label: h.get("X-Request-ID") for label, _, _, _, h in REQUESTS}
+      rids = {}
+      for rec in records:
+          if rec["label"] == "crash":
+              continue
+          rid = rec.get("rid")
+          if not rid:
+              problems.append(f"{rec['label']}: no X-Request-ID response header")
+              continue
+          if sent[rec["label"]] and rid != sent[rec["label"]]:
+              problems.append(f"{rec['label']}: incoming X-Request-ID {sent[rec['label']]} not honoured (got {rid})")
+          rids[rec["label"]] = rid
+      generated = [rid for label, rid in rids.items() if not sent[label]]
+      if len(set(generated)) != len(generated):
+          problems.append(f"generated request ids are not unique: {generated}")
+
+      # 3. One JSON log line per request carrying the request id, method, status and duration.
+      lines = []
+      for raw in output.splitlines():
+          raw = raw.strip()
+          if raw.startswith("{"):
+              try:
+                  obj = json.loads(raw)
+              except ValueError:
+                  continue
+              if isinstance(obj, dict):
+                  lines.append(obj)
+      if not lines:
+          problems.append("server output contains no JSON log lines")
+      methods = {label: m for label, m, _, _, _ in REQUESTS}
+      for rec in records:
+          label, rid = rec["label"], rids.get(rec["label"])
+          if not rid:
+              continue
+          mine = [obj for obj in lines if rid in [v for _, v in flatten(obj)]]
+          if not mine:
+              problems.append(f"{label}: no JSON log line contains request id {rid}")
+              continue
+
+          def complete(obj, status=rec["status"], method=methods[label]):
+              pairs = list(flatten(obj))
+              has_status = any(re.search(r"status|code", k, re.I) and str(v) == str(status) for k, v in pairs)
+              has_method = any(v == method for _, v in pairs)
+              has_duration = any(re.search(r"duration|latency|elapsed|took", k, re.I)
+                                 and isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+                                 for k, v in pairs)
+              has_time = any(re.search(r"time|^ts$|created|date", k, re.I) for k, _ in pairs)
+              has_level = any(re.search(r"level|severity", k, re.I) for k, _ in pairs)
+              return has_status and has_method and has_duration and has_time and has_level
+
+          if not any(complete(obj) for obj in mine):
+              problems.append(f"{label}: no JSON line with request id {rid} also has timestamp, level, method, "
+                              f"status {rec['status']} and a numeric duration field; saw {mine[:2]}")
+      crash_lines = [obj for obj in lines if RID_CRASH in [v for _, v in flatten(obj)]]
+      notes.append(f"crash request (GET /batches/abc) has {len(crash_lines)} JSON line(s) with its request id")
+      if re.search(r'"(GET|POST) /\S* HTTP/1\.[01]" \d{3}', output):
+          notes.append("default plain-text http.server access log lines are still emitted")
+
+      # 4. Nothing secret reaches the logs.
+      import app
+      for secret in (CANARY_AUTH.split()[1], CANARY_COOKIE.split("=")[1], CANARY_PASSWORD,
+                     app.SECRET_KEY, app.LIMS_API_TOKEN):
+          if secret in output:
+              problems.append(f"secret value {secret[:12]}... appears in the server output")
+
+      # 5. /metrics: a Prometheus histogram of request duration with bounded labels.
+      if not metrics or metrics.get("status") != 200:
+          problems.append(f"GET /metrics did not answer 200: {metrics}")
+      else:
+          ctype = (metrics.get("ctype") or "").lower()
+          if "text/plain" not in ctype and "openmetrics" not in ctype:
+              problems.append(f"/metrics Content-Type is {ctype!r}, not the Prometheus text format")
+          text = metrics["text"]
+          series = parse_metrics(text)
+          names = {name for name, _, _ in series}
+          families = sorted(n[:-7] for n in names if n.endswith("_bucket")
+                            and n[:-7] + "_count" in names and n[:-7] + "_sum" in names
+                            and re.search(r"duration|latency|seconds|millis|_ms_bucket$", n, re.I))
+          if not families:
+              problems.append("no request-duration histogram (<name>_bucket{le=...}, _sum, _count) "
+                              "in /metrics:\n" + text[:800])
+          else:
+              def key(labels):
+                  return tuple(sorted((k, v) for k, v in labels.items() if k != "le"))
+
+              best = max(families, key=lambda f: sum(v for n, _, v in series if n == f + "_count"))
+              counts = {key(l): v for n, l, v in series if n == best + "_count"}
+              buckets = {}
+              for n, l, v in series:
+                  if n == best + "_bucket" and "le" in l:
+                      buckets.setdefault(key(l), []).append((float(l["le"]), v))
+              total = sum(counts.values())
+              expected = len([r for r in REQUESTS if r[0] != "crash"])
+              notes.append(f"histogram {best}: {len(counts)} series, total count {total:g}")
+              if total < expected:
+                  problems.append(f"{best}_count sums to {total:g}, but {expected} requests were served before the scrape")
+              for k, count in counts.items():
+                  bs = sorted(buckets.get(k, []))
+                  if not bs or bs[-1][0] != float("inf") or bs[-1][1] != count:
+                      problems.append(f"{best} series {dict(k)}: le=\"+Inf\" bucket missing or != _count")
+                  elif any(a[1] > b[1] for a, b in zip(bs, bs[1:])):
+                      problems.append(f"{best} series {dict(k)}: bucket counts are not cumulative")
+          leaks = [s for s in ("424242", "424243", "zz-probe", "/batches/abc", "site=BOG", "page_size",
+                               RID_1, RID_2, RID_CRASH) if s in text]
+          if re.search(r"/batches/\d", text):
+              leaks.append("/batches/<digit>")
+          leaks += [rid for rid in generated if rid in text]
+          if leaks:
+              problems.append(f"/metrics exposes unbounded values (raw paths, ids, query strings): {leaks}")
+
+      for note in notes:
+          print("note:", note)
+      for problem in problems:
+          print("FAIL:", problem)
+      if problems:
+          sys.exit(1)
+      print(f"probe ok: {len(lines)} JSON log lines, {len(records)} requests")
+
+
+  if MODE == "golden":
+      records, _, _ = run_server()
+      print(json.dumps({"records": [{k: r.get(k) for k in ("label", "status", "ctype", "json")} for r in records]},
+                       indent=1))
+  elif MODE == "check":
+      check(sys.argv[2])
+  else:
+      sys.exit("usage: probe.py golden | check GOLDEN")
+  PY
+  python3 .git/obs-check/probe.py golden > .git/obs-check/golden.json
+  python3 -c "import json, sys; r = json.load(open('.git/obs-check/golden.json'))['records']; sys.exit(0 if len(r) == 11 and r[0]['status'] == 200 and r[-1]['status'] is None else 'unexpected golden capture')"
+prompt: >-
+  batchtrack's JSON API (app/api.py, a standard-library http.server app) is about
+  to move to the shared Kubernetes cluster, and today on-call gets nothing useful
+  from it: just http.server's default access lines on stderr. Please instrument
+  it. First, structured JSON logs, one line per request, with a request id for
+  correlation: reuse an incoming `X-Request-ID` header when the caller sends one,
+  otherwise generate one, and return it in an `X-Request-ID` response header so
+  support can quote it back to us. The pods' stdout/stderr is shipped to a log
+  platform that many teams can read. Second, a request-duration metric covering
+  every request, which Prometheus will scrape from the API itself at
+  `GET /metrics` on the same port. Constraints: the package uses only the Python
+  standard library (see README and pyproject.toml), so no new dependencies. The
+  container starts the API through `serve()` (Dockerfile CMD), so the logging has
+  to be in effect when it is started that way. Don't change what the existing
+  endpoints return, status codes and bodies included. Keep the change to
+  app/api.py (a small helper module next to it is fine) plus any tests you add
+  under tests/; leave the other modules, the Dockerfile and the k8s manifests
+  alone, and don't commit. Run the existing tests, show me real log lines and
+  /metrics output captured from a local run, and suggest the dashboard panels and
+  alerts we should build on top of this.
+read_only: false
+# Passes for a correct run, fails for a do-nothing run (validated on a scratch copy: pristine
+# code fails with "no X-Request-ID response header", "no JSON log lines" and "no request-duration
+# histogram"; a reference stdlib implementation passes; variants with raw-path metric labels,
+# logged request headers, or batch-not-found turned into 404 each fail):
+#  - no commits, stashes or branch switches; only app/api.py, new app/*.py modules, new files
+#    under tests/ and README.md may change (a stray batchtrack.db / .coverage is tolerated);
+#  - every module under app/ imports only the standard library (sys.stdlib_module_names);
+#  - the probe: the 10 ordinary requests return the same status, Content-Type and JSON body as
+#    the pristine code; GET /batches/abc is still not answered with a success code; every
+#    ordinary response carries an X-Request-ID (incoming ids echoed, generated ids unique); for
+#    each of them a JSON line on stdout/stderr contains that id plus a timestamp key, a level
+#    key, the method, the status code and a numeric duration/latency/elapsed field; the canary
+#    header/body values and the SECRET_KEY / LIMS_API_TOKEN values never appear in the output;
+#    GET /metrics answers 200 as text/plain (or OpenMetrics) with a histogram family
+#    (<name>_bucket{le} + _sum + _count, name mentioning duration/latency/seconds) whose
+#    _count sums to >= 10, whose le="+Inf" bucket equals _count and whose buckets are
+#    cumulative in every series; the exposition contains no raw path, id, query string or
+#    request id (424242, 424243, zz-probe, /batches/<digit>, /batches/abc, site=BOG, page_size);
+#  - `import app.api` works and the pytest suite passes, including tests the agent added, with
+#    the known PY-02 failure and the wall-clock test PY-30 deselected so the check cannot flake.
+check: |
+  set -u
+  test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || { echo "branch changed"; exit 1; }
+  test -z "$(git stash list)" || { echo "stash used"; exit 1; }
+  stray=$(git status --porcelain --untracked-files=all \
+    | grep -Ev '^([ MA][ M] app/api\.py|(\?\?|A ) app/[A-Za-z0-9_]+\.py|(\?\?|A ) tests/.+|[ M][ M] README\.md|\?\? (batchtrack\.db|\.coverage)|.. \.claude/.*)$')
+  test -z "$stray" || { echo "changes outside the allowed scope:"; echo "$stray"; exit 1; }
+  python3 - <<'PY' || exit 1
+  import ast
+  import pathlib
+  import sys
+
+  bad = []
+  for path in sorted(pathlib.Path("app").rglob("*.py")):
+      for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+          if isinstance(node, ast.Import):
+              mods = [alias.name for alias in node.names]
+          elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+              mods = [node.module]
+          else:
+              continue
+          for mod in mods:
+              top = mod.split(".")[0]
+              if top != "app" and top not in sys.stdlib_module_names:
+                  bad.append(f"{path}:{node.lineno} imports {mod}")
+  if bad:
+      sys.exit("non-stdlib imports under app/: " + "; ".join(bad))
+  PY
+  python3 -c 'import app.api' || { echo "app.api does not import"; exit 1; }
+  python3 .git/obs-check/probe.py check .git/obs-check/golden.json || exit 1
+  out=$(python -m pytest -q -p no:cacheprovider tests/ \
+    --deselect tests/test_batches.py::test_paginate_returns_requested_page \
+    --deselect tests/test_batches.py::test_batches_with_materials_is_fast 2>&1)
+  rc=$?
+  printf '%s\n' "$out" | tail -n 3
+  test "$rc" -eq 0 || { echo "test suite not green"; exit 1; }
+rubric:
+  must:
+    - >-
+      Adds JSON logging through the stdlib `logging` module in app/api.py (or a
+      helper module next to it): a `logging.Formatter` subclass or equivalent that
+      writes one JSON object per line with a timestamp, level and logger/service,
+      configured in `serve()` (or at import) so it is in effect when the container
+      runs `serve()`; each request produces a JSON line with the request id, HTTP
+      method, route or path, status code and duration as separate named fields,
+      not interpolated into the message text.
+    - >-
+      Handles the request id per request: uses the incoming `X-Request-ID` header
+      when present, otherwise generates one (e.g. `uuid.uuid4()`), keeps it on the
+      handler instance, a contextvar or a thread-local (not a module- or
+      class-level variable shared across ThreadingHTTPServer threads), sets it as
+      the `X-Request-ID` response header and includes it in that request's log
+      lines.
+    - >-
+      Adds an in-process Prometheus histogram of request duration (cumulative
+      `_bucket{le=...}` series including `le="+Inf"`, plus `_sum` and `_count`),
+      updated under a lock because the server is a ThreadingHTTPServer, and serves
+      it at `GET /metrics` in the text exposition format; its labels are bounded:
+      method, a route template (e.g. `/batches/{id}`, `/batches/{id}/signatures`,
+      one fixed value for unknown paths) and status code, never raw paths, batch
+      ids, query strings or request ids.
+    - >-
+      The report shows verification and next steps: runs the existing pytest
+      suite and names tests/test_batches.py::test_paginate_returns_requested_page
+      as a pre-existing failure unrelated to this change (left unfixed); includes
+      at least one JSON log line and a /metrics excerpt captured from an actual
+      local run of the server, with the command used, rather than constructed
+      examples; and suggests at least one dashboard panel and one alert built on
+      the new metric (e.g. p95 latency by route via `histogram_quantile` over the
+      `_bucket` rate, request rate, a latency or error-ratio alert).
+  should:
+    - >-
+      Names the histogram in base units per Prometheus/OpenTelemetry conventions
+      (e.g. `http_server_request_duration_seconds`, observations in seconds), picks
+      bucket boundaries that bracket the API's expected latencies, and states the
+      series estimate (methods x route templates x status codes).
+    - >-
+      Failing requests are still observed: the instrumentation wraps the handler in
+      try/finally (or equivalent) so a request whose handler raises (e.g.
+      `GET /batches/abc`, where `int("abc")` raises ValueError) still gets a JSON
+      log line with its request id, an error/500 outcome and its duration and is
+      counted in the histogram, and the exception is logged once with its stack
+      trace (`logger.exception` / `exc_info`).
+    - >-
+      Replaces http.server's default plain-text access logging (overrides
+      `log_message` / `log_request`) and turns the startup `print` in `serve()`
+      into a JSON log line, so the output stream is JSON only, with no duplicate
+      unstructured line per request.
+    - >-
+      Keeps secrets and personal data out by construction and says so: logs no
+      request headers (Authorization/Cookie), no request or response bodies and no
+      config values such as SECRET_KEY or LIMS_API_TOKEN from app/__init__.py, and
+      validates or bounds an incoming X-Request-ID (length/charset) before logging
+      it, to prevent log injection.
+    - >-
+      Flags as a concern or follow-up, without changing the responses, that the
+      API answers its error cases with HTTP 200 and an `{"error": ...}` body
+      (batch not found, invalid batchNo, unknown route), so status-code-based error
+      rates and alerts undercount failures; proposes symptom-based alerts (error
+      ratio, latency) with targets marked as proposed rather than agreed; and uses
+      the agent's output shape (STATUS, Stack, Changes with path:line, Example
+      output, Dashboards suggested, Alerts / SLOs, Verification, Follow-ups).
+  must_not:
+    - >-
+      Changes existing API behavior or goes out of scope: alters the status code or
+      body of an existing route (e.g. turns the HTTP 200 `{"error": ...}` responses
+      into 404/400, or fixes `paginate` or the unchecked `int()` parsing), changes
+      `serve()`'s signature, edits a module other than app/api.py (beyond a new
+      helper module, tests or a README note), or commits.
+    - >-
+      Adds a third-party dependency or import (prometheus_client,
+      python-json-logger, structlog, opentelemetry-*) or edits requirements.txt or
+      pyproject.toml.
+    - >-
+      Puts secrets or unbounded values into telemetry: logs request headers
+      (Authorization/Cookie), whole request or response bodies, or the
+      SECRET_KEY / LIMS_API_TOKEN values; or uses raw paths, batch ids, query
+      strings or request ids as metric label values.

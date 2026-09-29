@@ -6,7 +6,7 @@ fixture: sample-app
 #  A "Document where the batch database lives" (Marta Salazar)
 #    - app/db.py connect(): new docstring naming ``BATCHTRACK_DB`` as the source of DB_PATH.
 #    - docs/operations.md (new, 26 lines): "Where the data lives" names `BATCHTRACK_DB` (L10);
-#      the backup example reads os.environ["BATCHTRACK_DB"] (L19).
+#      the backup example reads os.environ["BATCHTRACK_DB"] (L20).
 #  B "Rename BATCHTRACK_DB to BATCHTRACK_DB_PATH" (Julian Rojas)
 #    - app/__init__.py L7: os.environ.get("BATCHTRACK_DB_PATH", "batchtrack.db") (default unchanged).
 #    - Dockerfile L8: BATCHTRACK_DB_PATH=/data/batchtrack.db.
@@ -17,9 +17,11 @@ fixture: sample-app
 #      dead config rather than a runtime break, because the image ENV supplies the new name.
 # Ground truth after setup (git grep -n -w -F BATCHTRACK_DB):
 #   stale, must be swapped: README.md:32 `export BATCHTRACK_DB=./batchtrack.db`,
-#     docs/operations.md:10 and :19, app/db.py:61 (docstring)
+#     docs/operations.md:10 and :20, app/db.py:63 (docstring)
 #   intentional, must stay: CHANGELOG.md:7, docs/upgrading.md:6
 #   out of scope (config): docker-compose.yml:12
+#   also hit by an unscoped grep: .claude/agents/docs/docs-sync-editor.md:37 (the runner copies the
+#   agent definitions into the work tree; the agent's own rules say skip .claude/**)
 # Traps: a naive `sed s/BATCHTRACK_DB/BATCHTRACK_DB_PATH/g` over README.md turns the
 # already-correct L47 into BATCHTRACK_DB_PATH_PATH; a global replace over docs/ or the repo
 # rewrites the CHANGELOG / upgrade note or the compose file. Pre-existing, unrelated drift
@@ -46,7 +48,7 @@ setup: |
       "def connect(path=None):\n"
       '    """Open the batch record database and return the connection.\n'
       "\n"
-      "    ``path`` defaults to ``DB_PATH``, which is read from the ``BATCHTRACK_DB``\n"
+      "    ``path`` defaults to ``DB_PATH``, read from the ``BATCHTRACK_DB``\n"
       "    environment variable (``batchtrack.db`` when it is unset).\n"
       '    """\n'
       "    conn = sqlite3.connect(path or DB_PATH)\n",
@@ -145,8 +147,8 @@ prompt: >-
   Only documentation should change in this task, and I'll review the working-tree
   diff myself, so don't commit anything.
 read_only: false
-# Passes for the reference fix (swap the token on README.md:32, docs/operations.md:10,19
-# and the app/db.py:61 docstring); fails for a do-nothing run, a README-wide sed
+# Passes for the reference fix (swap the token on README.md:32, docs/operations.md:10,20
+# and the app/db.py:63 docstring); fails for a do-nothing run, a README-wide sed
 # (BATCHTRACK_DB_PATH_PATH), an edited CHANGELOG.md / docs/upgrading.md / docker-compose.yml,
 # a deleted instead of swapped README line, a code change in app/db.py, a new file, more
 # than 8 added lines, or an extra commit. Validated on scratch copies under bash and dash.
@@ -211,8 +213,8 @@ rubric:
       before editing, instead of relying only on the delegation message.
     - >-
       Re-runs a word-boundary grep for `BATCHTRACK_DB` after editing and reports the
-      remaining hits (CHANGELOG.md, docs/upgrading.md, docker-compose.yml) with each
-      classified as intentional or out of scope, so `BATCHTRACK_DB_PATH` hits are not counted
+      remaining hits (CHANGELOG.md, docs/upgrading.md, docker-compose.yml, and
+      .claude/agents/ if searched) with each classified as intentional or out of scope, so `BATCHTRACK_DB_PATH` hits are not counted
       as stale.
     - >-
       Uses the agent's documented report shape: a STATUS line, Scope, Surface, the
