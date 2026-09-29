@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**23 agents** in 4 categories.
+**24 agents** in 4 categories.
 
 ### Code review & auditing
 
@@ -89,7 +89,7 @@ To pin every agent to one model (for example, on a budget), set
 | --- | --- | --- | --- |
 | [`change-verifier`](.claude/agents/testing/change-verifier.md) | Skeptically verifies a claimed fix or feature works before it is called done: rebuild, relevant tests re-run after the last edit, lint/typecheck, direct exercise (CLI, script, curl), each acceptance criterion checked with evidence. | sonnet | read-only |
 | [`e2e-test-writer`](.claude/agents/testing/e2e-test-writer.md) | Writes browser end-to-end tests (Playwright preferred; Cypress, Selenium or WebdriverIO only if the repo already uses them) for a critical user journey and its key error states, with role/label/test-id locators, auto-waiting assertions and isolated data, then runs them headless. | sonnet | read/write |
-| [`flaky-test-investigator`](.claude/agents/testing/flaky-test-investigator.md) | Diagnoses intermittent (flaky) tests: reproduces with repeated, shuffled, isolated and time-shifted runs, finds the nondeterminism (timing, test order/shared state, unseeded randomness, clock/time zone, unordered results, network, leaks, parallel races, float) and makes the test deterministic, with before/after pass rates. | sonnet | read/write |
+| [`flaky-test-investigator`](.claude/agents/testing/flaky-test-investigator.md) | Diagnoses intermittent (flaky) tests: reproduces with repeated, shuffled, isolated and time-shifted runs, finds the nondeterminism (timing, order/shared state, unseeded randomness, clock/time zone, unordered results, network, leaks, parallel races, float) and makes the test deterministic, with before/after pass rates. | sonnet | read/write |
 | [`release-readiness-gate`](.claude/agents/testing/release-readiness-gate.md) | Go/no-go gate before tagging, cutting a release or deploying: re-runs tests on the release commit, checks build, version bumps, CHANGELOG vs. commits since the last tag, migrations, config/env vars, feature flags, added TODOs, dependency audit, rollback plan and monitoring. | opus | read-only |
 | [`test-gap-analyzer`](.claude/agents/testing/test-gap-analyzer.md) | Finds what is NOT tested in the current diff or named modules, ranked by risk: maps functions and branches to the tests that exercise them (grep, coverage tools) and flags weak tests (no assertions, mocking the unit under test, can't-fail, snapshot-only, time/random-dependent). | sonnet | read-only |
 | [`test-runner`](.claude/agents/testing/test-runner.md) | Runs the project's tests (detected runner, narrowest relevant subset first) and returns a compact digest: command, exit code, pass/fail/skip counts, and each failure's test id, first error line and file:line. | haiku | read-only |
@@ -110,6 +110,7 @@ To pin every agent to one model (for example, on a budget), set
 | --- | --- | --- | --- |
 | [`code-simplifier`](.claude/agents/architecture/code-simplifier.md) | Behavior-preserving cleanup of recently changed or named code: guard clauses for deep nesting, splitting long functions, removing duplication, dead code and needless abstraction, clearer names, simpler conditionals; tests run before and after. | inherit | read/write |
 | [`dependency-upgrader`](.claude/agents/architecture/dependency-upgrader.md) | Upgrades a library, framework, runtime or SDK across major versions (React 17->18, Django 3->5, Spring Boot 2->3, Node 16->22, Python 3.8->3.12, Angular, EF Core) from official migration guides, with codemods, lockfile, CI and docs updated and tests green per step. | sonnet | read/write + web |
+| [`manufacturing-integration-engineer`](.claude/agents/architecture/manufacturing-integration-engineer.md) | Designs and reviews ISA-95 Level 2-4 integrations: MES<->ERP/SAP (B2MML), OPC UA, MQTT/Sparkplug B, historians (PI), ISA-88 batch, LIMS, label printing, serialization; checks buffering, idempotency, ordering, timestamps, reconciliation. | opus | read/write |
 <!-- catalog:end -->
 
 ## What's deliberately not here
