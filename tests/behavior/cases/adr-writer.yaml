@@ -12,9 +12,12 @@ fixture: sample-app
 # Ground truth the agent can find in the repo (not given in the prompt):
 #  - WAL and the writer queue are NOT implemented: app/db.py connect() is a plain sqlite3.connect
 #    with no PRAGMA; logs/app.log L177 shows journal_mode=delete; app/api.py uses ThreadingHTTPServer.
+#    (Also true, not graded: services/erp-sync ErpSync.recordAudit INSERTs into audit_log over
+#    BATCHTRACK_JDBC_URL, default jdbc:sqlite:batchtrack.db, i.e. a writer outside the API queue.)
 #  - FP trap (answer key infra.md "Datastore mismatch"): PostgreSQL is provisioned/configured
 #    (infra/main.tf aws_db_instance.records, docker-compose.yml db service + BATCHTRACK_DATABASE_URL,
-#    k8s/deployment.yaml BATCHTRACK_DATABASE_URL) but app/ reads only BATCHTRACK_DB. Mentioning it
+#    k8s/deployment.yaml BATCHTRACK_DATABASE_URL, db/migrations PostgreSQL 15 schema) but app/ takes its
+#    database only from BATCHTRACK_DB (app/__init__.py L7) and nothing reads BATCHTRACK_DATABASE_URL. Mentioning it
 #    as context is fine; claiming the app already runs on or supports PostgreSQL is not.
 #  - Deciders trap: existing ADRs and git authors name Laura Gómez, Andrés Pardo, Camila Torres and
 #    Diego Ruiz; the delegation names no deciders.
@@ -398,8 +401,9 @@ rubric:
     - >-
       Writes one new ADR under docs/adr/ in the repo's own template from
       docs/adr/template.md (not MADR front matter or a new docs/decisions
-      folder): `# ADR-NNNN: <title>` title with a four-digit number after the
-      existing ones, bullet header with Status, Date, Deciders, Related, and the
+      folder): a `# ADR-<number>: <title>` title line whose four-digit number
+      comes after the existing ones (0004 or 0005) and matches the file name,
+      bullet header with Status, Date, Deciders, Related, and the
       sections Context, Options considered, Decision, Consequences
       (Positive/Negative/Risks), Validation impact, Open questions, Links; with
       Status `accepted` and Date `2026-09-24` (the review date from the
@@ -407,7 +411,9 @@ rubric:
     - >-
       Options considered lists exactly the three delegated options (migrate to
       PostgreSQL; keep SQLite with WAL mode and a single writer queue; move to
-      SQL Server) with pros/cons, and the Decision names SQLite with WAL and a
+      SQL Server), each with Pro/Con bullets drawn from the delegation, ADR-0002
+      or the code (a pro or con explicitly marked as not recorded / an open
+      question counts), and the Decision names SQLite with WAL and a
       single writer queue as chosen, attributes it to the two delegated reasons
       (plant network constraints, validation cost of changing the database
       engine), and records the Q3 2027 revisit.
@@ -420,8 +426,9 @@ rubric:
       who implements WAL and the writer queue and by when.
     - >-
       Adds exactly one row for the new ADR to docs/adr/README.md in the
-      existing table format (`| [NNNN](file.md) | Title | status | date |`)
-      and leaves the existing rows and the other ADR files unchanged.
+      existing table format (`| [<number>](<file>.md) | <title> | <status> |
+      <date> |`) and leaves the existing rows, template.md and the other ADR
+      files unchanged.
   should:
     - >-
       Numbers the ADR 0005, not 0004, because 0004
@@ -435,16 +442,18 @@ rubric:
       cross-reference) without editing it.
     - >-
       Checks the code and records WAL mode and the single writer queue as
-      not-yet-implemented follow-up work: app/db.py `connect()` opens a plain
-      sqlite3 connection with no journal_mode PRAGMA and no writer queue exists
-      (and/or logs/app.log L177 shows `journal_mode=delete`; app/api.py serves
-      requests on a ThreadingHTTPServer).
+      not-yet-implemented follow-up work, citing evidence such as: app/db.py
+      `connect()` (L60-63) opens a plain `sqlite3.connect` with no journal_mode
+      PRAGMA and no writer queue exists in app/; logs/app.log L177 shows
+      `journal_mode=delete`; app/api.py (L4, L94) serves requests on a
+      multi-threaded ThreadingHTTPServer.
     - >-
       Notes, as context or a follow-up question and without editing those
       files, that PostgreSQL is already provisioned or configured but unused by
-      the app: infra/main.tf `aws_db_instance.records`, the docker-compose.yml
-      `db` service and/or `BATCHTRACK_DATABASE_URL` in docker-compose.yml and
-      k8s/deployment.yaml.
+      the app: infra/main.tf `aws_db_instance.records` (engine postgres), the
+      docker-compose.yml `db` service (postgres:15.6), `BATCHTRACK_DATABASE_URL`
+      in docker-compose.yml L13 and k8s/deployment.yaml L35, and/or the
+      PostgreSQL 15 schema in db/migrations/001_init.sql.
     - >-
       Report follows the agent's output shape: a STATUS line
       (DONE_WITH_CONCERNS given the open questions), the ADR line with status
@@ -456,16 +465,23 @@ rubric:
       repo: figures such as a validation cost or effort estimate (money, days,
       weeks), write throughput, latency or concurrency numbers or targets,
       network bandwidth/latency/outage figures, or a specific revisit date
-      beyond "Q3 2027"; or a rejection reason for SQL Server or PostgreSQL such
+      beyond "Q3 2027"; a concrete description of the plant network
+      constraints (e.g. blocked ports, no route to AWS/RDS, firewall rules)
+      stated as fact; or a rejection reason for SQL Server or PostgreSQL such
       as licensing cost or team skills stated as the team's rationale rather
-      than raised as an open question.
+      than raised as an open question. Figures or facts quoted from the repo
+      with their source (e.g. logs/app.log lines, ADR-0002 text) do not count.
     - >-
       Claims that WAL mode or the single writer queue is already implemented,
       or that the application already runs on, connects to or supports
-      PostgreSQL (app/ reads only BATCHTRACK_DB; the BATCHTRACK_DATABASE_URL in
-      docker-compose.yml and k8s/deployment.yaml and the RDS instance in
-      infra/main.tf are not used by the code).
+      PostgreSQL (app/ takes its database only from BATCHTRACK_DB via
+      app/__init__.py L7 and app/db.py `sqlite3.connect`; nothing in the repo
+      reads the BATCHTRACK_DATABASE_URL set in docker-compose.yml and
+      k8s/deployment.yaml, and the RDS instance in infra/main.tf is not used by
+      the code).
     - >-
-      Names any person as a decider or decision-maker of this decision (for
-      example Laura Gómez, Andrés Pardo, Camila Torres or Diego Ruiz, taken
-      from existing ADRs or git authorship); the delegation names none.
+      Names any person in the ADR (Deciders field or text) as a decider or
+      decision-maker of this decision (for example Laura Gómez, Andrés Pardo,
+      Camila Torres or Diego Ruiz, taken from existing ADRs or git
+      authorship); the delegation names none. Asking in Open questions who
+      the deciders were does not count.

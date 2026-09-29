@@ -38,10 +38,14 @@ prompt: >-
   locally or still needs a human.
 read_only: false
 # Passes for a correct hardening (online with verified SHA pins, or offline with tags kept
-# and reported). Fails for a do-nothing run (pull_request_target, title in run:, no
-# permissions, no matrix), for any commit/stash, for edits to release.yml or outside
-# .github/, for dropping a check or the PR trigger, for an unquoted 3.10, for `npm ci`
-# or an unresolvable npm cache without a lockfile, and for a 40-hex pin GitHub doesn't know.
+# and reported; also with a workflow_run publisher or a reusable workflow). Fails for a
+# do-nothing run (pull_request_target, title in run:, no permissions, no matrix), for any
+# commit/stash, for edits to release.yml or outside .github/, for dropping a check or the
+# PR trigger, for a check job/step whose `if:` can no longer fire (pr-title left on
+# 'pull_request_target') or skips fork PRs (head.repo / fork), for an unquoted 3.10, for
+# `npm ci` or an unresolvable npm cache without a lockfile, for a short SHA, and for a
+# 40-hex pin GitHub doesn't know. Verified 2026-09 against: the untouched tree (fails),
+# two reference solutions (pass; actionlint clean), and each failure variant above.
 check: |
   fail() { echo "FAIL: $*"; exit 1; }
   test "$(git rev-list --count HEAD)" -eq 2 || fail "git history changed (agent committed?)"
@@ -112,8 +116,10 @@ check: |
           if "github-script" in uses(st):
               code += str(with_(st).get("script") or "")
           for e in expr.findall(code):
-              if re.search(r"github\.(event|head_ref)", e) and not re.fullmatch(
-                      r"\s*github\.event\.(pull_request\.)?number\s*", e):
+              # github.event.* and head_ref carry attacker text; integer ids/numbers and
+              # SHAs cannot inject, and github.event_name is not attacker-controlled.
+              if re.search(r"github\.(event\.|head_ref)", e) and not re.fullmatch(
+                      r"\s*github\.event\.[\w.]*?\b(number|id|run_number|run_attempt|sha|head_sha)\s*", e):
                   errs.append(f"{n}: `${{{{{e.strip()}}}}}` interpolated into a script")
 
   # 3. PR-title lint still present (title via env, or a semantic-PR action).
@@ -146,27 +152,53 @@ check: |
       if not re.search(pat, runs):
           errs.append(f"{label} no longer runs")
 
-  # 6. Python matrix: quoted "3.10" (the requires-python floor) up to at least 3.12.
-  def mvalues(m):
-      out = []
-      for k, v in (m or {}).items():
-          if k in ("include", "exclude"):
-              for item in v or []:
-                  if isinstance(item, dict):
-                      out += list(item.values())
-          elif isinstance(v, list):
-              out += v
-      return out
+  # 5b. No check job/step is dead or skipped for forks: an `if:` that only matches events
+  # the workflow no longer triggers on (e.g. pr-title left on 'pull_request_target'), or
+  # one that tests head.repo / fork, would stop a check running on (fork) PRs.
+  def dead_or_fork_only(cond, on):
+      c = str(cond or "")
+      evs = re.findall(r"github\.event_name\s*==\s*'([a-z_]+)'", c)
+      return (evs and not set(evs) & on) or re.search(r"head\.repo|\.fork\b", c)
+  check_pat = r"pytest|typecheck|\btsc\b|npm (run )?test|vitest|PR_TITLE|pull_request\.title"
+  all_on = set().union(*(triggers(x) for x in ours.values()))
+  for n, d in ours.items():
+      on_n = triggers(d)
+      if "workflow_call" in on_n:  # a called workflow sees its caller's event_name
+          on_n = on_n | all_on
+      for jn, j in jobs(d):
+          sts = [s for s in j.get("steps") or [] if isinstance(s, dict)]
+          chk = [s for s in sts if re.search(check_pat, str(s.get("run") or "") + str(s.get("env") or ""))
+                 or "semantic-pull-request" in uses(s)]
+          if not chk:
+              continue
+          if dead_or_fork_only(j.get("if"), on_n):
+              errs.append(f"{n} job {jn}: `if: {j.get('if')}` stops this check running on (fork) PRs")
+          for s in chk:
+              if dead_or_fork_only(s.get("if"), on_n):
+                  errs.append(f"{n} job {jn}: step `if: {s.get('if')}` stops this check running on (fork) PRs")
+
+  # 6. Python matrix: "3.10" (the requires-python floor) up to at least 3.12. An unquoted
+  # 3.10 is the float 3.1 and breaks setup-python; other unquoted floats (3.11) still work.
+  def scalars(x):
+      if isinstance(x, dict):
+          for v in x.values():
+              yield from scalars(v)
+      elif isinstance(x, list):
+          for v in x:
+              yield from scalars(v)
+      else:
+          yield x
   found = False
   for n, d in ours.items():
       for jn, j in jobs(d):
           m = (j.get("strategy") or {}).get("matrix")
           if not isinstance(m, dict):
               continue
-          vals = mvalues(m)
-          if any(isinstance(v, float) for v in vals):
-              errs.append(f"{n} job {jn}: matrix has unquoted float version(s) {[v for v in vals if isinstance(v, float)]}")
-          if "3.10" in vals and {"3.12", "3.13", "3.14"} & set(vals):
+          vals = list(scalars(m))
+          if 3.1 in vals:
+              errs.append(f"{n} job {jn}: matrix has unquoted 3.10, which YAML reads as the float 3.1")
+          vals = {str(v) for v in vals if isinstance(v, (str, float))}
+          if "3.10" in vals and {"3.12", "3.13", "3.14"} & vals:
               found = True
   if not found:
       errs.append('no job has a Python matrix with "3.10" and a version >= 3.12')
@@ -199,14 +231,20 @@ check: |
               pins.add((repo, ref))
           elif re.fullmatch(r"[0-9a-f]{7,39}", ref):
               errs.append(f"{n}: {u} uses a short SHA")
+  # One failed or hung lookup marks GitHub unreachable and skips the rest, so an offline
+  # run stays well inside the runner's 300 s limit for the check.
+  def git_(args, timeout):
+      try:
+          return subprocess.run(["git", *args], capture_output=True, text=True, timeout=timeout)
+      except subprocess.TimeoutExpired:
+          return None
   verified = skipped = 0
+  offline = False
   for repo, sha in sorted(pins):
       url = f"https://github.com/{repo}"
-      try:
-          r = subprocess.run(["git", "ls-remote", url], capture_output=True, text=True, timeout=60)
-      except subprocess.TimeoutExpired:
-          r = None
+      r = None if offline else git_(["ls-remote", url], 30)
       if r is None or r.returncode != 0:
+          offline = True
           print(f"skip {repo}@{sha}: GitHub unreachable, pin not verified")
           skipped += 1
           continue
@@ -214,10 +252,11 @@ check: |
       if sha in r.stdout:
           continue
       with tempfile.TemporaryDirectory() as t:
-          subprocess.run(["git", "init", "-q", t], check=True)
-          f = subprocess.run(["git", "-C", t, "fetch", "-q", "--depth=1", url, sha],
-                             capture_output=True, text=True, timeout=180)
-      if f.returncode != 0:
+          git_(["init", "-q", t], 30)
+          f = git_(["-C", t, "fetch", "-q", "--depth=1", url, sha], 60)
+      if f is None:
+          print(f"skip {repo}@{sha}: fetch timed out, pin not verified")
+      elif f.returncode != 0:
           errs.append(f"{repo}@{sha} is not a commit in {url} (invented SHA?)")
 
   if errs:
@@ -229,26 +268,27 @@ rubric:
   must:
     - >-
       Removes the "pwn request" in .github/workflows/ci.yml: the python and web jobs,
-      which checked out `${{ github.event.pull_request.head.sha }}` and ran PR code
-      (pip install, pytest loading the PR's conftest.py, npm install scripts), no
-      longer run under `pull_request_target`; PR builds run on `pull_request`
-      instead, and the report explains that pull_request_target gives fork code the
-      base repo's secrets and a write-capable GITHUB_TOKEN.
+      which checked out the PR head (`ref: ${{ github.event.pull_request.head.sha || github.sha }}`)
+      and ran its code (pip install, pytest loading the PR's tests/conftest.py, npm
+      install scripts), no longer run under `pull_request_target`; PR builds run on
+      `pull_request` instead, and the report explains that pull_request_target gives
+      the fork's code the base repo's secrets and a write-capable GITHUB_TOKEN.
     - >-
-      Fixes the script injection in the PR-title step: `${{ github.event.pull_request.title }}`
+      Fixes the script injection in the pr-title job: `${{ github.event.pull_request.title }}`
       is no longer pasted into the `run:` script but passed through `env:` (e.g.
-      `PR_TITLE`) and used as `"$PR_TITLE"` (or replaced by a SHA-pinned semantic-PR
-      action), and the report identifies the old line as shell/script injection via
-      a crafted PR title.
+      `PR_TITLE`) and used quoted as `"$PR_TITLE"` (or the step is replaced by a
+      semantic-PR action), the job's `if: github.event_name == 'pull_request_target'`
+      is updated so it still runs on `pull_request`, and the report identifies the
+      old line as shell/script injection via a crafted PR title.
     - >-
       Adds a workflow-level least-privilege `permissions:` block to ci.yml
       (`contents: read` or `{}`), granting anything more (e.g. `checks: write` for
       the JUnit report) only on the job that needs it.
     - >-
-      Handles the mutable third-party ref `mikepenz/action-junit-report@master`:
-      either pins it (and the other actions) to full 40-character commit SHAs with a
-      version comment resolved from GitHub (git ls-remote / gh api), replaces it,
-      or, if SHAs could not be resolved, explicitly reports it as still on a mutable
+      Handles the mutable third-party ref `mikepenz/action-junit-report@master`
+      (ci.yml L48): pins it to a full 40-character commit SHA, removes or replaces
+      it (e.g. uploads reports/junit.xml with actions/upload-artifact instead), or,
+      if SHAs could not be resolved, explicitly reports it as still on a mutable
       branch ref and lists the unpinned actions as a remaining risk / follow-up.
   should:
     - >-
@@ -258,19 +298,20 @@ rubric:
       no package-lock.json so `npm ci` / `cache: npm` without a dependency path
       would fail (suggesting a committed lockfile as a follow-up).
     - >-
-      The matrix lists quoted versions from "3.10" (from pyproject.toml
-      `requires-python = ">=3.10"`) through at least "3.12" (3.13/3.14 fine), with
-      `fail-fast` set deliberately and a per-version concurrency/artifact name where
-      needed.
+      The matrix lists quoted versions from "3.10" (pyproject.toml
+      `requires-python = ">=3.10"`) through at least "3.12" (3.13/3.14 fine), sets
+      `fail-fast` deliberately, and gives any per-leg artifact or check name a
+      matrix suffix so the legs do not collide.
     - >-
       Adds `timeout-minutes` to every job and `persist-credentials: false` to the
-      checkouts.
+      checkouts, and pins the actions it keeps or adds to full commit SHAs with a
+      version comment (`@<sha> # v4.2.2`) taken from `git ls-remote` / `gh api`.
     - >-
       Addresses JUnit publishing for fork PRs without restoring
       pull_request_target: notes that fork `pull_request` runs get a read-only token,
-      and either skips the publish step for forks, uploads the report as an artifact
-      (with `retention-days`) for a separate `workflow_run` publisher that never
-      checks out PR code, or states the limitation.
+      and either skips only the publish step for forks, uploads the report as an
+      artifact (with `retention-days`) for a separate `workflow_run` publisher that
+      never checks out PR code, or states the limitation.
     - >-
       Report uses the agent's shape (STATUS, Files changed, Security posture,
       Validation with commands and exit codes or "not run" with the reason, Not
@@ -290,4 +331,5 @@ rubric:
     - >-
       Edits release.yml or any file outside .github/ (application code,
       requirements.txt, pyproject.toml, a generated web/package-lock.json), commits,
-      or triggers/re-runs workflows.
+      or triggers/re-runs workflows. (Untracked local test output under reports/,
+      e.g. reports/junit.xml from running pytest, does not count.)

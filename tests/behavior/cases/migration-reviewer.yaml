@@ -3,15 +3,19 @@ fixture: sample-app
 # No setup: the migration under review is committed in the fixture and the tree is clean, so the
 # agent must take its scope from the prompt, not from a diff. Ground truth: answer-key/infra.md.
 #  - INF-30: 002 L19-20 `ADD COLUMN site_id INTEGER NOT NULL REFERENCES sites (id)` with no default,
-#    before the backfill at L22-25. Verified on PG16: fails on any non-empty batches table with
+#    before the backfill at L22-25. Re-verified on a throwaway PG16 (psql -f 001 then 002): on an
+#    empty database it succeeds; after one INSERT INTO batches it fails at 002:20 with
 #    `column "site_id" of relation "batches" contains null values` and the whole BEGIN/COMMIT rolls
-#    back; passes on the empty dev/CI database (compose mounts db/migrations into
-#    docker-entrypoint-initdb.d, compose L32, so it only ever ran on fresh stacks).
+#    back (no sites table left). Compose mounts db/migrations into docker-entrypoint-initdb.d
+#    (compose L32), which only runs on an empty data volume, so local stacks never had rows.
 #  - INF-31: L27 `DROP COLUMN site` while live code reads/writes batches.site: app/batches.py L20-22
-#    (create_batch INSERT) and L40 (list_batches filter), app/api.py L15 (_summary), L47, L77,
-#    app/report.py L109 (build_report SELECT), app/db.py L14 (schema), and the erp-sync service,
-#    which reads PostgreSQL over JDBC: services/erp-sync/.../ErpSync.java L77, L89, L98, L179. The
-#    web client shows it (web/src/types.ts L12, BatchDetail.tsx L46). The site data is destroyed too.
+#    (create_batch INSERT) and L40 (list_batches filter), app/api.py L15 (_summary), L47, L77
+#    (pass the site filter/value through), app/report.py L109 (build_report SELECT), app/db.py L14
+#    (schema), and the erp-sync job, which reads batches over JDBC: services/erp-sync/.../ErpSync.java
+#    L77 (SELECT b.site), L89, L98 (groupingBy site), L179 ("plant"). Its JDBC URL comes from
+#    BATCHTRACK_JDBC_URL (L217, default jdbc:sqlite:batchtrack.db). The web client shows the field
+#    (web/src/types.ts L12, BatchDetail.tsx L46). tests/conftest.py L29 also inserts site (test
+#    code, not a live consumer). The site data is destroyed too.
 #  - INF-32: L29 plain `CREATE INDEX idx_batches_site_id` on the existing batches table blocks writes;
 #    the fix is CONCURRENTLY in its own migration outside BEGIN/COMMIT (it is rejected inside one).
 #  - INF-33: no down/rollback for 002 anywhere in db/migrations/; after the DROP it cannot be undone.
@@ -22,22 +26,28 @@ fixture: sample-app
 #    the same transaction is correct); likewise CREATE TABLE sites / its UNIQUE / the seed INSERT in
 #    002 L7-17 touch a table created in the same transaction (no lock problem; a non-idempotent
 #    INSERT remark is fine).
-#  - Grader note (infra.md "Datastore mismatch"): the Python app still runs SQLite (app/db.py), but
-#    INF-31 counts its batches.site references as live; ErpSync reads PostgreSQL directly.
+#  - Grader note (infra.md "Datastore mismatch"): the Python app still runs SQLite (app/db.py,
+#    docs/architecture.md), and ErpSync's JDBC URL is configurable with a SQLite default, but INF-31
+#    counts these batches.site references as live consumers of the shared records database
+#    (docs/architecture.md: "SQL migrations for the shared database"; compose L13 and k8s pass
+#    BATCHTRACK_DATABASE_URL to the API). A report may point out the mismatch.
 # The prompt names the file, the engine and the timing, as a release delegation would; it does not
-# name any of the defects or hint at expand/contract, locks or rollback.
+# name any of the defects or hint at empty-vs-populated tables, expand/contract, locks or rollback.
+# (An earlier draft said "never applied to a database with real batch data", which pointed straight
+# at INF-30; the agent has to work out from compose L32 that local stacks start empty.)
 prompt: >-
   Please review db/migrations/002_add_site_and_cleanup.sql before we run it on the production
-  PostgreSQL records database in the next release window. It has only ever been applied to fresh
-  local docker-compose stacks so far, never to a database with real batch data. The goal of the
-  change is to move batches from the free-text site column to a sites reference table. Tell us
-  whether it is safe to run as written, and for every problem give us the version we should run
-  instead. Review only: don't create, modify or commit any files.
+  PostgreSQL records database in the next release window. It has run fine on our local
+  docker-compose stacks so far. The goal of the change is to move batches from the free-text site
+  column to a sites reference table. Tell us whether it is safe to run as written, and for every
+  problem give us the version we should run instead. Review only: don't create, modify or commit
+  any files.
 read_only: true
 # Report-only task: the runner's fingerprint already fails any file change. This also catches git-only
 # mutations (commit, stash, branch switch) and a down script or rewritten migration left in the tree.
-# Validated on a scratch copy: clean tree -> exit 0; new 002_add_site_and_cleanup.down.sql -> exit 1;
-# edited 002 -> exit 1; extra empty commit -> exit 1.
+# Validated on a scratch copy built exactly as the runner does: clean tree -> exit 0; untracked
+# .claude/settings.local.json or __pycache__ -> exit 0; new 002_add_site_and_cleanup.down.sql, edited
+# 002, stray notes.md, extra empty commit, stash, or branch switch -> exit 1.
 check: |
   set -u
   fail() { echo "FAIL: $*"; exit 1; }
@@ -55,8 +65,7 @@ rubric:
       Flags 002 L19-20 `ADD COLUMN site_id INTEGER NOT NULL REFERENCES sites (id)` (no default,
       added before the backfill at L22-25) as a failed migration on production: on a batches table
       that has rows PostgreSQL rejects it because the new column would contain NULLs, so the
-      transaction rolls back (and it only passed because the local databases were empty). The
-      safer version adds site_id as nullable, backfills, and only then enforces NOT NULL (e.g.
+      transaction rolls back. The safer version adds site_id as nullable, backfills, and only then enforces NOT NULL (e.g.
       CHECK (site_id IS NOT NULL) NOT VALID + VALIDATE CONSTRAINT, then SET NOT NULL) and/or adds
       the FK as NOT VALID followed by VALIDATE CONSTRAINT. Describing it only as "slow" or "locks
       the table" without saying it fails on existing rows does not count.
@@ -67,20 +76,23 @@ rubric:
       list_batches filter around L40), app/api.py (L15 _summary, L47, L77), app/report.py (L109
       build_report SELECT) or services/erp-sync/.../ErpSync.java (L77/L89). Recommends
       expand/contract: keep site in 002, ship code that reads/writes site_id, and drop site in a
-      later migration after that release is fully deployed.
+      later migration after that release is fully deployed. Noting that app/ currently opens SQLite
+      (app/db.py) or that ErpSync's JDBC URL is configurable is fine, as long as the report still
+      treats these references as consumers that break once site is dropped.
     - >-
       Flags 002 L29 plain `CREATE INDEX idx_batches_site_id ON batches (site_id)` on the existing
-      (assumed large) batches table as blocking writes (INSERT/UPDATE/DELETE) for the whole build,
-      and rewrites it as `CREATE INDEX CONCURRENTLY` run outside the BEGIN/COMMIT block (its own
+      (assumed large) batches table as blocking writes (INSERT/UPDATE/DELETE) for the whole build
+      (describing it as prolonging the ACCESS EXCLUSIVE lock the earlier ALTER TABLE took in the
+      same transaction, blocking reads and writes, also counts), and rewrites it as `CREATE INDEX CONCURRENTLY` run outside the BEGIN/COMMIT block (its own
       migration or a non-transactional step), since CONCURRENTLY cannot run in a transaction.
     - >-
-      States that 002 has no down/rollback migration (nothing in db/migrations/ reverses it) and
-      that once DROP COLUMN site has run the old schema and the site values cannot be restored by a
-      rollback, and asks for a down script and/or a backup of batches.site before the destructive
-      step.
+      States that 002 has no down/rollback script (nothing in db/migrations/ reverses it) and that
+      the DROP COLUMN site makes it irreversible: no down or rollback can bring the site values
+      back once it has run. Asks for a backup of batches.site (e.g. a copy of id, site) before any
+      drop and/or a down script for the changes.
   should:
     - >-
-      The report starts with a `VERDICT: NEEDS_WORK` line and follows the per-migration shape with
+      The report opens with a `VERDICT: NEEDS_WORK` line (a wrapping code fence is fine) and follows the per-migration shape with
       a severity, path:line, Evidence, Failure and Safer rewrite for each finding.
     - >-
       Points out that the backfill (L22-25) only matches site codes exactly equal to the three
@@ -116,4 +128,5 @@ rubric:
     - >-
       Proposes a safer rewrite that keeps `CREATE INDEX CONCURRENTLY` inside the BEGIN/COMMIT
       transaction block (PostgreSQL rejects it there), or reports that it ran 002 or other SQL
-      against a PostgreSQL instance (psql, a docker container or similar).
+      against a PostgreSQL instance (psql, a docker container, a locally started postgres server
+      or similar).

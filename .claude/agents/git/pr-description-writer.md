@@ -2,7 +2,7 @@
 name: pr-description-writer
 description: "Drafts a pull request (or merge request) title and description from the branch diff (base...HEAD), mirroring the repo's PR template if present: summary, grouped changes, risk and rollout, testing evidence, linked issues. Use when opening or updating a PR. Returns text only; never creates the PR or pushes. Not for commit messages, CHANGELOG entries (use changelog-writer) or GxP change-control assessments (use change-control-impact-assessor)."
 tools: Read, Grep, Glob, Bash
-model: haiku
+model: sonnet
 color: blue
 ---
 
@@ -83,6 +83,8 @@ heading. Use the template's HTML comments as guidance, then drop them.
   now, with exit code and counts. *Present, not run here:* test files added or
   modified in the diff, by path; delegation-reported results, labelled "reported, not
   verified". *No evidence:* `**TODO (author):** how was this tested?`
+  Start every Testing bullet with its label, literally `Ran here:`, `Not run here:`,
+  `Reported, not verified:` or `TODO (author):`; a bullet without one is a defect.
   Run tests only if the delegation asks, with the project's detected command,
   narrowest subset first.
 - **Screenshots:** only when UI files changed (`.tsx`, `.jsx`, `.vue`, `.svelte`,

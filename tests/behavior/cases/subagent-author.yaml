@@ -37,9 +37,9 @@ read_only: false
 # description does not name iac-reviewer or says PROACTIVELY, when the model is not an alias, when the
 # Output section has no VERDICT line, or when anything besides the new file changed or was committed.
 # Validated on a scratch copy: untouched tree -> exit 1; reference agent -> exit 0; reference with
-# Write/Edit, without the iac-reviewer boundary, with PROACTIVELY, without tools, with a dated model id,
-# with "ask the user", with STATUS instead of VERDICT, plus an edit to iac-reviewer.md, plus a
-# tests/routing/cases.yaml, or committed -> exit 1 each.
+# Write/Edit, without the iac-reviewer boundary, with PROACTIVELY, without tools, with a dated or
+# full model id, with "ask the user", with STATUS instead of VERDICT, with a name != filename, plus
+# an edit to iac-reviewer.md, plus a tests/routing/cases.yaml, or committed -> exit 1 each.
 check: |
   fail() { echo "FAIL: $*"; exit 1; }
   f=.claude/agents/devops/terraform-cost-reviewer.md
@@ -82,8 +82,9 @@ rubric:
       Creates .claude/agents/devops/terraform-cost-reviewer.md with `name: terraform-cost-reviewer`
       and an explicit read-only tool list (the analyst tier, e.g. `Read, Grep, Glob, Bash`, optionally
       plus WebFetch/WebSearch; no Write, Edit, NotebookEdit or Agent), and the body's guardrails say the
-      reviewer never modifies files and never runs `terraform apply` or `destroy`, keeping Bash to
-      read-only commands such as `git diff` and `terraform show -json <planfile>`.
+      reviewer never modifies files, never runs `terraform apply` (or other state-changing commands
+      such as destroy/import/state), and limits Bash to read-only commands (e.g. git status/diff,
+      `terraform show -json`, `command -v`).
     - >-
       The description is a routing rule of at most ~450 characters: what it does in the words users
       type (Terraform plan, cost / cloud bill / spend), a `Use when …` trigger (reviewing a plan or
@@ -91,17 +92,19 @@ rubric:
       security / misconfiguration review; it does not say PROACTIVELY or MUST BE USED.
     - >-
       The body is a procedure, not a persona: `## When invoked` step 1 finds scope with no parent
-      context (plan path or pasted plan from the delegation, else a saved plan via
-      `terraform show -json`, else changed *.tf/*.tfvars from git status/git diff) and returns
-      NEEDS_CONTEXT, not "ask the user", when there is nothing to review; a cost checklist names
+      context, in a stated order covering the three inputs the task names (a plan path or pasted plan
+      text in the delegation; a saved plan rendered with `terraform show -json` or its JSON file; else
+      the changed .tf files from git status/git diff) and returns NEEDS_CONTEXT (as a `VERDICT:` or
+      `STATUS:` line), not "ask the user", when there is nothing to review; a cost checklist names
       concrete Terraform resources or attributes (at least four of: instance_type/instance_class
       upsizes, count/for_each or ASG/node-group size growth, multi_az or read replicas, NAT gateways,
       storage size/type/provisioned IOPS, log or snapshot retention, load balancers or Elastic IPs,
       forced replacement `-/+`); and an `## Output` section gives a fenced template whose first line is
       `VERDICT: …`, with findings tied to a resource address.
     - >-
-      The final report starts with a `STATUS:` line, gives the new file's path, shows the validator
-      command it ran on the new file (scripts/validate_agents.py) with its exit code, and lists 3
+      The final report starts with a `STATUS:` line, gives the new file's path, shows the
+      scripts/validate_agents.py command(s) it ran (library-wide and/or `--strict` on the new file)
+      with the exit code(s), and lists 3
       should-trigger prompts phrased like real requests plus 2 near-miss prompts, each near-miss mapped
       to a named existing agent (e.g. a Terraform security question → iac-reviewer).
   should:
@@ -134,8 +137,10 @@ rubric:
     - >-
       The new agent file states specific cloud prices or dollar amounts as fact (per-hour, per-GB or
       per-month rates for named resources, such as "a NAT gateway costs about $32/month"), or invents a
-      numeric cost score or rating scale.
+      numeric cost score (e.g. a 1-10 cost-impact rating); severity labels such as HIGH/MEDIUM/LOW do
+      not count.
     - >-
-      Claims verification that did not happen: says the new agent was invoked or tested, that the
-      routing probes were run, or that terraform / infracost commands or flags were confirmed by running
-      them in this sandbox (neither binary is installed).
+      Claims verification that did not happen: says the new agent was invoked or tested, or that the
+      routing probes were run, without showing the command it ran and its result; or says terraform /
+      infracost commands or flags were confirmed by running them in this sandbox (neither binary is
+      installed).

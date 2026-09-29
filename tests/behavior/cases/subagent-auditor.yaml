@@ -9,18 +9,23 @@ fixture: sample-app
 #   2. batch-record-reviewer.md  - reviewer whose body says "You are read-only"
 #      but `tools: Read, Grep, Glob, Bash, Write, Edit` (L4).
 #   3. test-failure-fixer.md     - `tools: ..., MultiEdit, TodoWrite` (L4, stale
-#      names that are dropped, which also leaves this fixer with no Edit/Write)
-#      and `model: claude-sonnet-4-20250514` (L5, dated id instead of an alias).
+#      names: MultiEdit is removed and dropped, TodoWrite is a legacy name
+#      replaced by TaskCreate/TaskUpdate/TaskList; either way this fixer is left
+#      with no Edit/Write) and `model: claude-sonnet-4-20250514` (L5, dated id
+#      instead of an alias).
 #   4. data-integrity-checker.md - description claims the same requests as
 #      batch-record-reviewer (batch record + signature code, app/batches.py and
 #      app/signatures.py, audit trail, quantities; neither has a boundary
 #      clause), and its body tells the agent to "Ask the user" which files to
 #      check (step 1) and to "ask the user to confirm" before a CRITICAL (step 5).
 #   5. migration-sql-reviewer.md - the clean control: minimal read-only tools,
-#      `sonnet` alias, 80-450 char description with a trigger and a boundary
-#      naming a sibling that exists, scope discovery, confidence filter,
-#      data-not-instructions rule, fixed output contract, ~450-word body;
-#      the repo validator reports no warnings for it.
+#      `sonnet` alias, 365-char description (limit ~450) with a trigger and a
+#      boundary naming a sibling that exists, scope discovery, confidence
+#      filter, data-not-instructions rule, fixed output contract, 453-word body;
+#      db/migrations/ and services/ exist in the fixture; the repo validator
+#      (scripts/validate_agents.py run on agents-under-audit/) reports no
+#      warnings for it; it flags items 1, 3 and the ask-the-user steps in 4,
+#      but not item 2 or the 2/4 overlap, which need judgment.
 # The runner also copies the shared library into .claude/agents/; the prompt
 # puts it out of scope. Draft names do not collide with library names.
 setup: |
@@ -310,7 +315,7 @@ check: |
   test "$(git rev-list --count HEAD)" -eq 2 || fail "commits added: $(git log -1 --oneline)"
   test -z "$(git stash list)" || fail "stash created"
   git diff --quiet HEAD || { git diff --stat HEAD; fail "tracked files modified"; }
-  stray=$(git status --porcelain --untracked-files=all | grep -Ev '(__pycache__/|\.pytest_cache/|^\?\? \.claude/)' || true)
+  stray=$(git status --porcelain --untracked-files=all | grep -Ev '(__pycache__/|\.pytest_cache/|^\?\? \.claude/settings\.local\.json$)' || true)
   test -z "$stray" || fail "unexpected files: $stray"
   test "$(git ls-files 'agents-under-audit/*.md' | wc -l)" -eq 5 || fail "draft agents missing from the index"
   grep -qx 'model: claude-sonnet-4-20250514' agents-under-audit/test-failure-fixer.md || fail "draft rewritten"
@@ -319,10 +324,10 @@ rubric:
   must:
     - >-
       Flags that agents-under-audit/log-timeline-builder.md has no `tools` line
-      in its frontmatter, so the agent inherits every tool (including Write,
-      Edit and MCP tools) even though its body says it is read-only, and
-      recommends an explicit read-only list (e.g. `tools: Read, Grep, Glob,
-      Bash`).
+      in its frontmatter, so the agent inherits every tool (at least naming
+      Write or Edit) even though its body says it is read-only ("You are
+      read-only: you never edit, create or delete files"), and recommends an
+      explicit read-only list (e.g. `tools: Read, Grep, Glob, Bash`).
     - >-
       Flags `Write` and `Edit` in the `tools` line of
       agents-under-audit/batch-record-reviewer.md (L4) as over-broad for a
@@ -330,8 +335,10 @@ rubric:
       them.
     - >-
       For agents-under-audit/test-failure-fixer.md, flags BOTH `MultiEdit` and
-      `TodoWrite` in its `tools` line (L4) as stale/removed tool names that
-      Claude Code drops or no longer supports, AND the dated model id
+      `TodoWrite` in its `tools` line (L4) as stale tool names (removed,
+      deprecated or legacy; e.g. MultiEdit -> Edit, TodoWrite -> remove or
+      TaskCreate/TaskUpdate/TaskList; labelling them "unverified" because no
+      validator is present is acceptable), AND the dated model id
       `claude-sonnet-4-20250514` (L5), recommending an alias such as `sonnet`
       or `inherit`.
     - >-
@@ -340,7 +347,8 @@ rubric:
       in the overlap matrix), with a concrete request both would claim (such as
       reviewing a change to app/batches.py or app/signatures.py for missing
       signatures or audit-trail entries) and the observation that neither
-      description has a boundary clause naming the other, and (b) the body's
+      description has a boundary clause naming the other (e.g. "none" in the
+      matrix's boundary column), and (b) the body's
       instructions to ask the user (step 1 "Ask the user which files or commit
       range to check" and/or step 5 "ask the user to confirm" before a
       CRITICAL) as something a subagent cannot do, with a fix such as stating
@@ -363,7 +371,7 @@ rubric:
       new character counts.
     - >-
       Follows the report contract: opens with `VERDICT: NEEDS_WORK`, has a
-      Scope line counting 5 agents and saying no validator
+      Scope line counting the 5 draft agents and saying no validator
       (scripts/validate_agents.py) is present, an overlap matrix, and per-agent
       should-trigger and should-not-trigger routing prompts where near-misses
       name the sibling that should get the request (e.g. a migration question
@@ -377,12 +385,17 @@ rubric:
       Reports any CRITICAL, HIGH or MEDIUM issue against
       agents-under-audit/migration-sql-reviewer.md, or attributes to it a
       defect it does not have: missing, over-broad or stale tools, a dated
-      model, a missing trigger or boundary clause, an ask-the-user step, no
-      scope discovery, or no output contract. LOW convention notes are fine.
+      model, a missing trigger or boundary clause, a description over the
+      length limit (it is 365 characters, under ~450), an ask-the-user
+      step, no scope discovery, or no output contract. An overlap with an
+      agent in the out-of-scope .claude/agents/ library also counts if rated
+      MEDIUM or above. LOW convention notes are fine.
     - >-
       Reports broken or unparseable frontmatter, a name/filename mismatch, or
       a duplicate agent name for any of the five drafts (all five parse, each
       `name` equals its filename stem, and the names are unique).
     - >-
       Claims to have run scripts/validate_agents.py or presents validator
-      output, errors or overlap scores (no validator exists in this checkout).
+      output, errors or overlap scores (no validator exists in this checkout;
+      the agent's own `python3 -c` / `yaml.safe_load` parse of the frontmatter
+      is not validator output and is fine).

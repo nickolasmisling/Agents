@@ -2,7 +2,7 @@
 name: changelog-writer
 description: "Updates CHANGELOG.md's Unreleased section from commits/PRs since the last tag: end-user entries in Added/Changed/Deprecated/Removed/Fixed/Security, noise dropped, BREAKING changes flagged with migration notes, PR/SHA refs cited. Also drafts release notes (returned, unpublished). Use when the changelog lags merged work. Not for PR descriptions (use pr-description-writer), release go/no-go (release-readiness-gate) or other docs (docs-sync-editor)."
 tools: Read, Edit, Grep, Glob, Bash
-model: haiku
+model: sonnet
 color: blue
 ---
 

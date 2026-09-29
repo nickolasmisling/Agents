@@ -11,7 +11,7 @@ fixture: sample-app
 #    app/signatures.py sign_batch L8: `SELECT id FROM batches WHERE id = ?` L10; None -> `raise
 #    LookupError` L11-12; `INSERT INTO signatures (batch_id, user_id, meaning, signed_at)` L13-16;
 #    `db.write_audit(conn, "signatures", cur.lastrowid, "insert", None, json.dumps(...), user_id)`
-#    L17-25 -> db.py write_audit L85-98 `INSERT INTO audit_log ... at = utils.utc_now_iso()`;
+#    L17-25 -> db.py write_audit L85-98 `INSERT INTO audit_log ...`, at = utc_now_iso() (L96);
 #    `conn.commit()` L26; `return cur.lastrowid` L27. The session then commits again and closes.
 #  - Nothing on this route catches exceptions. Verified by running the handler on a scratch DB:
 #    valid body -> 201 {"signature_id": 1}; unknown batch -> LookupError, session rolls back,
@@ -32,10 +32,15 @@ fixture: sample-app
 #  - Drift trap: db/migrations is a second (PostgreSQL) schema; 002 adds `sites` and replaces
 #    batches.site with site_id, which app/ does not use (INF-31). Not the API's schema.
 # Check validated on a scratch copy: untouched tree -> exit 1; reference docs/diagrams.md (both
-# diagrams also pass mermaid-cli 11) -> exit 0; site_id instead of site, extra sites table, missing
-# or invented column, alt without end, ER relationship without label, missing users-signatures edge,
-# stray batchtrack.db, edited app/api.py, extra commit -> exit 1; upper-case or aliased entity names,
-# front matter, one-line relationships, an extra labelled migrations ER after the correct one -> exit 0.
+# diagrams pass mermaid-cli 11.17, run with the Playwright Chromium) -> exit 0; site_id instead of
+# site, a sites table (as a block or only in a relationship), missing or invented column, alt
+# without end, ER relationship without label, missing users-signatures edge, no sign_batch, stray
+# batchtrack.db, edited app/api.py, extra commit, a migrations-only ER -> exit 1; aliased
+# (tbl_batches["batches"]), type-prefixed (tbl_batches, as the agent's grammar checklist asks),
+# upper-case or plain entity names, front matter, ~~~ fences, .claude/ and __pycache__ litter, an
+# extra labelled migrations ER after the correct one -> exit 0. mmdc also confirmed that a `;` in
+# a sequence message, `end` as a participant id, `NUMERIC(14, 3)` as an ER type and an unlabelled
+# ER relationship are parse errors (must_not 3).
 prompt: >-
   We're adding a diagrams page for the batchtrack Python backend (app/). Please create
   docs/diagrams.md with two Mermaid diagrams: (1) a sequence diagram of signing a batch
@@ -138,11 +143,20 @@ check: |
       if cur is not None:
           bad.append(f"entity {cur} not closed with }}")
       def table(eid):
-          return eid.lower() if eid.lower() in want else alias.get(eid, eid.lower())
+          # table name from the id, its ["alias"], the alias's first word, or a type-prefixed
+          # id such as tbl_batches / e_audit_log (the agent's grammar checklist prefixes ids)
+          low, al = eid.lower(), alias.get(eid, "")
+          for c in (low, al, (al.split() or [""])[0], re.sub(r"^[a-z]{1,5}_", "", low)):
+              if c in want:
+                  return c
+          return al or low
       got = {table(e): cols for e, cols in ents.items()}
       diffs = []
       if set(got) != set(want):
           diffs.append(f"tables {sorted(got)} != {sorted(want)}")
+      only_in_rels = {table(x) for r in rels for x in r} - set(want) - set(got)
+      if only_in_rels:
+          diffs.append(f"relationships to tables outside the schema: {sorted(only_in_rels)}")
       for t, cols in want.items():
           if t in got and got[t] != cols:
               diffs.append(f"{t}: missing {sorted(cols - got[t])}, extra {sorted(got[t] - cols)}")
@@ -169,14 +183,17 @@ rubric:
       The sequence diagram follows the real call chain of the signing route, in this order:
       the POST /batches/<id>/signatures request handled by BatchHandler.do_POST (app/api.py
       L66, branch L80), `db.session(...)` opened (api.py L81 / db.py L72),
-      `signatures.sign_batch` called with the path id and `data["user_id"]`,
-      `data["signed_at"]`, `data.get("meaning")` from the JSON body (api.py L82-84), the
-      `SELECT id FROM batches` existence check (signatures.py L10), `INSERT INTO signatures`
-      (L13-16), `db.write_audit` inserting an `audit_log` row with action "insert" (L17-25,
-      db.py L85-98), `conn.commit()` (L26), and the 201 response with `{"signature_id": ...}`
-      via `_send` (api.py L85). Participants and messages use names that exist in these files
-      (one SQLite participant, or collapsing `_route`/`_read_json` into one step, is fine),
-      and the report's source map cites path:line entries that point at these lines.
+      `signatures.sign_batch` called with the batch id from the URL path and user_id,
+      signed_at and meaning from the JSON body (api.py L82-84), the `SELECT id FROM batches`
+      existence check (signatures.py L10), `INSERT INTO signatures` (L13-16), `write_audit`
+      inserting an `audit_log` row (signatures.py L17-25, db.py L85-98), `conn.commit()`
+      (signatures.py L26), and the 201 response with `{"signature_id": ...}` (api.py L85).
+      Participants and messages use names that exist in these files (one SQLite participant,
+      or collapsing `_route`/`_read_json` into one step, is fine). A source map, in the
+      report or in docs/diagrams.md, gives path:line for these steps, and its line numbers
+      match the ones cited here (within about 2 lines; a range that covers the line counts).
+      Line numbers beyond the end of the file (app/signatures.py has 60 lines, app/db.py 98)
+      or pointing at unrelated code do not count.
     - >-
       The failure path is drawn as it really behaves: when the batch does not exist,
       `sign_batch` raises `LookupError` (signatures.py L11-12) and app/api.py does not catch
@@ -188,11 +205,15 @@ rubric:
       actual_qty, created_at), materials (id, batch_id, lot_no, name, qty), signatures (id,
       batch_id, user_id, meaning, signed_at), users (id, username, password_hash, role),
       audit_log (id, table_name, record_id, action, old_value, new_value, user_id, at).
-      Upper-case or aliased entity names and SQLite or generic types are fine.
+      Upper-case, aliased or type-prefixed entity names (e.g. `tbl_batches["batches"]` or
+      `tbl_batches`) and SQLite or generic types are fine.
     - >-
       The ER diagram draws the relationships batches-materials (via materials.batch_id),
       batches-signatures (signatures.batch_id) and users-signatures (signatures.user_id) as
-      one-to-many with batches/users on the "one" side, each with a source-map entry.
+      one-to-many with batches/users on the "one" side (e.g. `batches ||--o{ materials`, or
+      the same written from the child side as `materials }o--|| batches`), each with a
+      source-map entry (report or file) citing the column in app/db.py or a query/REFERENCES
+      that uses it.
   should:
     - >-
       States that app/db.py declares no FOREIGN KEY / REFERENCES constraints (so SQLite
@@ -210,9 +231,9 @@ rubric:
     - >-
       Makes visible in the sequence that `user_id` and `signed_at` are taken from the
       request body (client-supplied) and `meaning` is optional, and/or that the only
-      server-generated timestamp is audit_log.at via `utils.utc_now_iso()` (db.py L96);
-      and/or shows sign_batch's own `conn.commit()` followed by db.session's commit and
-      close (db.py L77, L82).
+      server-generated timestamp is audit_log.at via `utc_now_iso()` (app/utils.py, called at
+      db.py L96); and/or shows sign_batch's own `conn.commit()` followed by db.session's
+      commit and close (db.py L77, L82).
     - >-
       On the failure path, shows db.session rolling back and closing (db.py L78-82) and
       states that the client gets no HTTP response (connection closed); and/or covers the
@@ -227,8 +248,10 @@ rubric:
       The sequence diagram contains steps the code does not have: authentication or
       re-authentication (a password check, users.authenticate / verify_password / find_user),
       a user-existence or role check, validation of `meaning` against a list, server-side
-      generation of signed_at, a service/repository/cache/LIMS participant, or an HTTP error
-      response for a failure on this route (404, 400, 409, 422, 500 or an `{"error": ...}`
+      generation of signed_at, a participant this route never touches (app/cache.py, the
+      LIMS client, app/users.py, the web UI, or an invented service/repository layer; the
+      app/signatures.py module itself counts as touched however it is labelled), or an HTTP
+      error response for a failure on this route (404, 400, 409, 422, 500 or an `{"error": ...}`
       body); or it describes db.session() as not rolling back or not closing on error (it
       does both; answer key FP-04).
     - >-

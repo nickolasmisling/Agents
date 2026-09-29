@@ -20,8 +20,8 @@ fixture: sample-app
 #     docs/operations.md:10 and :20, app/db.py:63 (docstring)
 #   intentional, must stay: CHANGELOG.md:7, docs/upgrading.md:6
 #   out of scope (config): docker-compose.yml:12
-#   also hit by an unscoped grep: .claude/agents/docs/docs-sync-editor.md:37 (the runner copies the
-#   agent definitions into the work tree; the agent's own rules say skip .claude/**)
+#   nothing else: the agent definitions the runner copies into .claude/agents/ do not
+#   mention the variable, so an unscoped grep returns exactly these 7 hits.
 # Traps: a naive `sed s/BATCHTRACK_DB/BATCHTRACK_DB_PATH/g` over README.md turns the
 # already-correct L47 into BATCHTRACK_DB_PATH_PATH; a global replace over docs/ or the repo
 # rewrites the CHANGELOG / upgrade note or the compose file. Pre-existing, unrelated drift
@@ -142,8 +142,9 @@ keep_setup_uncommitted: false
 prompt: >-
   Julian's commit "Rename BATCHTRACK_DB to BATCHTRACK_DB_PATH" is on main (the most
   recent commit with changes; see git log). It renames the environment variable the
-  API reads its SQLite database path from, and app/ and the Dockerfile are already
-  updated. Please bring the repository's documentation in line with that commit.
+  API reads its SQLite database path from; the code that reads it and the Dockerfile
+  already use the new name. Please bring the repository's documentation in line with
+  that commit.
   Only documentation should change in this task, and I'll review the working-tree
   diff myself, so don't commit anything.
 read_only: false
@@ -151,7 +152,9 @@ read_only: false
 # and the app/db.py:63 docstring); fails for a do-nothing run, a README-wide sed
 # (BATCHTRACK_DB_PATH_PATH), an edited CHANGELOG.md / docs/upgrading.md / docker-compose.yml,
 # a deleted instead of swapped README line, a code change in app/db.py, a new file, more
-# than 8 added lines, or an extra commit. Validated on scratch copies under bash and dash.
+# than 8 added lines, staged changes (the delegator reviews the unstaged diff; the agent's
+# guardrails forbid git add), or an extra commit. A comment-only or re-wrapped-docstring
+# variant still passes. Validated on scratch copies under bash and dash.
 check: |
   fail() { echo "FAIL: $*"; exit 1; }
   stale=$(git grep -n -w -F -e BATCHTRACK_DB -- README.md docs app ':(exclude)docs/upgrading.md')
@@ -180,12 +183,13 @@ check: |
   old = subprocess.run(["git", "show", "HEAD:app/db.py"], capture_output=True, text=True, check=True).stdout
   sys.exit(0 if strip(old) == strip(open("app/db.py", encoding="utf-8").read()) else 1)
   EOF
+  git diff --cached --quiet || fail "changes staged in the index (asked to leave a working-tree diff)"
   [ "$(git rev-list --count HEAD)" -eq 4 ] && [ "$(git log -1 --format=%s)" = setup ] || fail "commits changed"
   echo "docs synced: 4 stale mentions swapped, intentional mentions and config untouched"
 rubric:
   must:
     - >-
-      Swaps the old name for `BATCHTRACK_DB_PATH` in every stale prose mention: README.md
+      Swaps the old name for `BATCHTRACK_DB_PATH` at every stale doc mention: README.md
       "Running the API locally" (`export BATCHTRACK_DB=./batchtrack.db` becomes
       `export BATCHTRACK_DB_PATH=./batchtrack.db`) and both mentions in docs/operations.md
       (the "Where the data lives" sentence and `os.environ["BATCHTRACK_DB"]` in the backup
@@ -194,9 +198,10 @@ rubric:
       Also fixes the `connect()` docstring in app/db.py, which says DB_PATH is read from
       ``BATCHTRACK_DB``, changing only the docstring text and no code.
     - >-
-      Edits are minimal token swaps on those lines: no rewording, reflowing, added notes or
-      restructuring elsewhere in README.md, docs/operations.md or app/db.py, and the README
-      config-table row the commit already renamed stays `BATCHTRACK_DB_PATH` (not
+      Edits are minimal token swaps on those four lines: no rewording, added notes, or
+      changes to any other line of README.md, docs/operations.md or app/db.py (re-wrapping
+      only the edited docstring sentence is acceptable), and the README config-table row
+      the commit already renamed (line 47) stays `BATCHTRACK_DB_PATH` (not
       `BATCHTRACK_DB_PATH_PATH`).
     - >-
       The final report lists each edited file with the changed line(s) and
@@ -213,9 +218,9 @@ rubric:
       before editing, instead of relying only on the delegation message.
     - >-
       Re-runs a word-boundary grep for `BATCHTRACK_DB` after editing and reports the
-      remaining hits (CHANGELOG.md, docs/upgrading.md, docker-compose.yml, and
-      .claude/agents/ if searched) with each classified as intentional or out of scope, so `BATCHTRACK_DB_PATH` hits are not counted
-      as stale.
+      remaining hits (CHANGELOG.md, docs/upgrading.md and docker-compose.yml), each
+      classified as intentional or out of scope, without counting `BATCHTRACK_DB_PATH`
+      hits as stale.
     - >-
       Uses the agent's documented report shape: a STATUS line, Scope, Surface, the
       edited/skipped/unverified JSON block, and a Verification section.

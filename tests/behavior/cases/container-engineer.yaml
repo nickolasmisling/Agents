@@ -187,15 +187,20 @@ check: |
       fail(f"final stage uses the full python image {base['image']}")
 
   # ---- secrets --------------------------------------------------------------
+  # Secret values fail anywhere (comments included); the variable name only in instructions,
+  # so a comment such as "# BATCHTRACK_LIMS_TOKEN is injected at runtime" is fine.
   df = Path("Dockerfile").read_text()
-  for bad in ("lims_pat_", "BATCHTRACK_LIMS_TOKEN", "Btr4ck"):
+  for bad in ("4f8a2c91d7e34b06a5c1f9e2d8b7a630", "7be21d0c95a84f3e9d6c2a1b0f8e4d57", "Btr4ck"):
       if bad in df:
-          fail(f"Dockerfile still contains {bad}")
+          fail("Dockerfile contains a credential value from the repo or .env")
+  itext = "\n".join(f"{k} {r}" for k, r in instrs)
+  if "lims_pat_" in itext or re.search(r"BATCHTRACK_LIMS_TOKEN(?!_FILE)", itext):
+      fail("a Dockerfile instruction still carries the LIMS token")
   for st in [{"ins": [("ARG", f"{k}={v}") for k, v in global_args.items()]}] + stages:
       for kw, rest in st["ins"]:
           if kw in ("ARG", "ENV"):
               for name in re.findall(r"(?:^|\s)([A-Za-z_]\w*)(?==|\s|$)", rest):
-                  if re.search(r"(?i)token|secret|passw|api_?key", name):
+                  if re.search(r"(?i)token|secret|passw|api_?key", name) and not name.upper().endswith("_FILE"):
                       fail(f"{kw} {name} puts a credential in the image config/history")
 
   # ---- final stage: user, data dir, env, port, health, cmd --------------------

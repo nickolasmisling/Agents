@@ -152,6 +152,8 @@ setup: |
                   sys.exit("server did not start listening within 20 s")
               time.sleep(0.1)
       records = [dict(call(port, m, p, b, h), label=label) for label, m, p, b, h in REQUESTS]
+      # Let handler threads that record after writing the response (e.g. in `finally`) finish first.
+      time.sleep(0.3)
       metrics = call(port, "GET", "/metrics", None, {}) if MODE == "check" else None
       time.sleep(0.3)
       proc.send_signal(signal.SIGINT)
@@ -407,7 +409,7 @@ check: |
   test "$(git rev-parse --abbrev-ref HEAD)" = main || { echo "branch changed"; exit 1; }
   test -z "$(git stash list)" || { echo "stash used"; exit 1; }
   stray=$(git status --porcelain --untracked-files=all \
-    | grep -Ev '^([ MA][ M] app/api\.py|(\?\?|A ) app/[A-Za-z0-9_]+\.py|(\?\?|A ) tests/.+|[ M][ M] README\.md|\?\? (batchtrack\.db|\.coverage)|.. \.claude/.*)$')
+    | grep -Ev '^([ M][ M] app/api\.py|(\?\?|A[ M]) app/[A-Za-z0-9_/]+\.py|(\?\?|A[ M]) tests/.+|[ M][ M] README\.md|\?\? [^/]+\.(db|db-journal|log)|\?\? \.coverage|.. \.claude/.*)$')
   test -z "$stray" || { echo "changes outside the allowed scope:"; echo "$stray"; exit 1; }
   python3 - <<'PY' || exit 1
   import ast

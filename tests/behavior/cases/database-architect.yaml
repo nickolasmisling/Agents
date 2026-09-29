@@ -20,6 +20,7 @@ fixture: sample-app
 #  - Site drift: 002 replaces batches.site with site_id -> sites, but app/batches.py and app/db.py
 #    still use batches.site TEXT (infra.md INF-31).
 #  - app/batches.py release_batch has no deviation/approval check (python-core.md "not seeded" note).
+#  - app/users.py ROLES = operator, qa, supervisor, admin (no QA head); 001 users.role is free TEXT.
 #  - FP-INF-03: 001's CREATE INDEX without CONCURRENTLY is correct (new, empty tables in the same
 #    transaction); CONCURRENTLY is rejected inside BEGIN/COMMIT.
 # The prompt gives the domain, rules, access patterns and volumes as a QA delegation would. It does
@@ -67,17 +68,21 @@ rubric:
   must:
     - >-
       Gives proposed PostgreSQL DDL (engine taken from the repo, e.g. db/migrations/001_init.sql
-      "PostgreSQL 15", docker-compose.yml postgres:15.6 or infra/main.tf) for deviations,
-      investigations, CAPAs and approvals/e-signatures, in which deviations link to the existing
-      batches(id) through a junction table (or equivalent) that allows several batches or none,
-      people columns (raised by, investigator, CAPA owner, signer) are FKs to the existing
-      users(id), those FK columns are BIGINT to match the BIGSERIAL keys, and the deviation number
-      is UNIQUE and status/classification are restricted by CHECK or a lookup-table FK.
+      "PostgreSQL 15", docker-compose.yml postgres:15.6 or infra/main.tf engine_version "15.6")
+      for deviations, investigations, CAPAs and approvals/e-signatures that models the stated
+      cardinalities with FKs: deviations link to the existing batches(id) through a junction table
+      that allows several batches or none; CAPAs link to deviations many-to-many through a junction
+      table (one CAPA addresses several deviations); at most one investigation per deviation is
+      enforced (UNIQUE or PK on investigations.deviation_id, or the investigation held in the
+      deviation row); people columns (raised by, investigator, CAPA owner, signer) are FKs to the
+      existing users(id) typed BIGINT to match its BIGSERIAL key; the deviation number is UNIQUE;
+      and status and classification are restricted by CHECK or a lookup-table FK.
     - >-
       Designs the full change history for PostgreSQL, which has no system-versioned temporal
       tables: a trigger-written history table (or per-table history tables) or an append-only
-      event table that records who made the change (user FK), a server-side timestamp, the old and
-      new values (row or field level) and a reason for the change, and makes it append-only (REVOKE
+      event table (a new one, or the existing audit_log extended) that records who made the change
+      (the acting user's users.id), a server-side timestamp, the old and new values (row or field
+      level) and a reason for the change, and makes it append-only (REVOKE
       UPDATE/DELETE/TRUNCATE from the application role and/or a trigger that raises on UPDATE or
       DELETE).
     - >-
@@ -85,14 +90,18 @@ rubric:
       through an enforceable reference (a FK per record type, an exclusive arc with a CHECK that
       exactly one FK is set, a per-entity signature table, or a common supertype table), not only
       an unconstrained (table_name, record_id) pair; with the signer as a NOT NULL FK to users, the
-      meaning NOT NULL and limited to a controlled list (CHECK or lookup table, e.g. classification
-      approval, investigation approval, closure, CAPA effectiveness), and signed_at NOT NULL set by
-      the database server (e.g. DEFAULT now()) rather than supplied by the client.
+      signature meaning (or approval type, whatever the column is called) required (NOT NULL, or a
+      CHECK requiring it for the new record types if the existing signatures table is extended) and
+      limited to a controlled list (CHECK or lookup table, e.g. classification approval,
+      investigation approval, closure, CAPA effectiveness), and the signing time required and set by
+      the database server (e.g. DEFAULT now() or a trigger) rather than supplied by the client.
     - >-
       Lists the access patterns (at least the delegated ones) and ties each proposed index to one,
-      including an index that serves the release check "non-closed deviations for batch X" (leading
-      with batch_id on the deviation-batch link), open deviations per site by classification and
-      age, and open CAPAs per owner by due date; and includes a Mermaid erDiagram of the new
+      including an index or PK leading with batch_id on the deviation-batch link for the release
+      check "non-closed deviations for batch X", and, for open deviations per site by
+      classification and age and for open CAPAs per owner by due date, either a matching index
+      (e.g. site_id/classification/date, owner_id/due_date, optionally partial on open status) or an
+      explicit volume-based reason why a scan suffices; and includes a Mermaid erDiagram of the new
       entities whose relationships match the DDL, including the links to the existing batches and
       users tables.
   should:
@@ -118,12 +127,13 @@ rubric:
       Handles the delegated rules that a column constraint cannot express, saying where each is
       enforced and why: no batch release while a linked deviation is not closed (trigger on the
       batches status change, or app-level, noting app/batches.py release_batch has no such check
-      today) and the extra QA-head approval for critical deviations (noting users.role has no
-      QA-head role), and captures the acting user for trigger-written history (e.g. SET LOCAL
+      today) and the extra QA-head approval for critical deviations (noting app/users.py ROLES is
+      operator, qa, supervisor, admin, with no QA-head role), and captures the acting user for trigger-written history (e.g. SET LOCAL
       app.user_id read with current_setting) or writes history from the app in the same
       transaction.
     - >-
-      Migration plan is additive (a new 003_ migration creating the tables in FK-dependency order,
+      Migration plan is additive (new migration file(s) numbered from 003 creating the tables in
+      FK-dependency order,
       001 and 002 left unchanged, nothing executed), and declines partitioning at about 1,500
       deviations a year (or justifies it only for the history table) while still addressing the
       10-year retention.
@@ -137,7 +147,8 @@ rubric:
       WITH SYSTEM VERSIONING) or a claim that PostgreSQL supports system-versioned temporal tables
       natively; a built-in uuidv7() call (PostgreSQL 18+); or an extension such as temporal_tables,
       pgaudit or pgcrypto used in the DDL without a CREATE EXTENSION or a note that it is not
-      installed.
+      installed. (Built-ins gen_random_uuid() (13+), sha256() (11+) and NULLS NOT DISTINCT (15+)
+      are available and do not count.)
     - >-
       Puts CREATE INDEX CONCURRENTLY inside a BEGIN/COMMIT block in the proposed migration
       (PostgreSQL rejects it there), or claims the plain CREATE INDEX statements in 001_init.sql

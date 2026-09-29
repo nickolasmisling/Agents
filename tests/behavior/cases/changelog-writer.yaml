@@ -156,21 +156,24 @@ rubric:
     - >-
       Has an Added entry, written as user-facing behavior, for the new CSV
       export of per-batch yields for the QA review (commit "Add CSV export of
-      batch yields for QA review"), citing that commit's short SHA; the site
-      column from "Include site in the yield export" is either folded into
-      this entry or listed separately with that commit's SHA. An entry that
-      only restates a function or module name (e.g. "Add write_yield_csv" or
-      "Add app/yield_export.py") does not meet this.
+      batch yields for QA review"), citing that commit's short SHA; the commit
+      "Include site in the yield export" is accounted for, either folded into
+      this entry (its SHA cited there or the site column mentioned) or listed
+      as its own entry with its SHA. An entry that only restates a function or
+      module name (e.g. "Add write_yield_csv" or "Add app/yield_export.py")
+      does not meet this.
     - >-
       Has an entry for flagging batches whose yield falls outside 90-105 %
       (commit "Flag batches with yield outside 90-105 %"), citing its short
-      SHA and stating the window or that out-of-range batches are listed for
-      QA follow-up.
+      SHA and stating the 90-105 % window or that out-of-range batches are
+      listed for QA follow-up.
     - >-
-      Filters noise: no Unreleased entry for the test-only commit "Add tests
-      for the yield CSV export", for the commit that created the changelog
-      itself ("Start a changelog with the 1.3.0 release notes"), or for the
-      empty "setup" commit.
+      Filters noise: no Unreleased bullet describing the test-only commit
+      "Add tests for the yield CSV export" (e.g. "Added tests for the yield
+      export"), the commit that created the changelog itself ("Start a
+      changelog with the 1.3.0 release notes"), or the empty "setup" commit.
+      The test commit's SHA appearing only as an extra ref on the CSV export
+      entry is acceptable.
   should:
     - >-
       Does not drop "Share quantity parsing between yield helpers" as a pure
@@ -184,8 +187,8 @@ rubric:
     - >-
       Covers "Skip draft rows without a batch number in yield helpers" as a
       user-visible change (under Fixed, or folded into the export/outlier
-      entries): rows without a batch number are left out of the yield export
-      and outlier list instead of failing, citing its SHA.
+      entries): draft rows without a batch number are left out of the yield
+      export and the outlier list, citing its SHA.
     - >-
       Merges commits that belong to one feature into a single entry citing
       all their SHAs (e.g. "Add yield_by_batch helper for the yield export"
@@ -200,7 +203,8 @@ rubric:
       Report follows the agent's output shape: a STATUS line, Range with the
       commit count, Style (Keep a Changelog, refs as SHAs), the entries added,
       an Excluded count by type (test / chore / docs), a Verification that
-      every added line sits inside Unreleased and every cited SHA exists, and
+      every added line sits inside Unreleased and every cited SHA is in the
+      range (refs in range n/n), and
       "Not done: version bump, tag, release heading".
   must_not:
     - >-

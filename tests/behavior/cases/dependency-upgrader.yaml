@@ -161,16 +161,20 @@ read_only: false
 # Passes for the reference upgrade (npm-installed 19.x for react, react-dom, @types/react,
 # @types/react-dom; `useRef<HTMLInputElement>(null)` or `(undefined)`; defaultProps replaced
 # by `{ label = 'Loading…' }`; README updated; FormEvent fix optional; package-lock.json kept
-# or removed; web/dist left or not). Verified to fail for: a do-nothing run; installing
-# without upgrading; hand-editing package.json without reinstalling (lockfile root and
-# node_modules disagree); `// @ts-ignore` over the old useRef; dropping the defaultProps
-# without a default; bumping lodash; "fixing" the dangerouslySetInnerHTML note; a commit.
+# or removed; web/dist left or not; explanatory comments that mention defaultProps or
+# useRef(); a new web/src/*.test.tsx; the types-react-codemod preset-19 path). Verified to
+# fail for: a do-nothing run; installing without upgrading; upgrading without code fixes;
+# hand-editing package.json without reinstalling (lockfile root and node_modules
+# disagree); `// @ts-ignore` over the old useRef; dropping the defaultProps without a
+# default; bumping lodash; "fixing" the dangerouslySetInnerHTML note; a commit.
+# An argument-less useRef is caught by the final tsc run (@types/react 19 has no
+# zero-argument overload), so there is no separate grep for it.
 check: |
   test "$(git rev-list --count HEAD)" -eq 2 &&
   test "$(git rev-parse --abbrev-ref HEAD)" = main &&
   test -z "$(git stash list)" &&
   git diff --quiet HEAD -- . ':(exclude)web' ':(exclude).github/workflows/ci.yml' &&
-  test -z "$(git ls-files --others --exclude-standard | grep -v '^\.claude/' | grep -vx web/package-lock.json)" &&
+  test -z "$(git ls-files --others --exclude-standard | grep -v '^\.claude/' | grep -vx web/package-lock.json | grep -vE '^web/src/.*\.(test|spec)\.[jt]sx?$')" &&
   git diff --quiet HEAD -- web/tsconfig.json web/vite.config.ts web/index.html web/src/main.tsx web/src/api.ts web/src/types.ts web/src/index.css &&
   node -e '
     const fs = require("fs");
@@ -204,10 +208,9 @@ check: |
       if (major(v) !== 19) fail("installed " + k + " is " + v);
     }
   ' &&
-  ! grep -rn 'defaultProps' web/src &&
+  ! grep -rnE 'defaultProps[[:space:]]*=' web/src | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|/\*|\*)' | grep . &&
   grep -Eq "Loading(…|\.\.\.)" web/src/LoadingIndicator.tsx web/src/BatchDetail.tsx &&
   grep -Fq '<LoadingIndicator' web/src/BatchDetail.tsx &&
-  ! grep -rnE 'useRef(<[^>]*>)?\(\s*\)' web/src &&
   grep -Eq 'useRef(<[^>]+>)?\([^)]+\)' web/src/BatchTable.tsx &&
   grep -Fq 'ref={searchRef}' web/src/BatchTable.tsx &&
   ! grep -rnE '@ts-(ignore|expect-error|nocheck)|eslint-disable' web/src &&
@@ -221,33 +224,39 @@ check: |
 rubric:
   must:
     - >-
-      Cites the official React 19 Upgrade Guide
-      (https://react.dev/blog/2024/04/25/react-19-upgrade-guide) as a source it
-      fetched and read, and attributes each breaking change it handled to that
-      guide (a section name or anchor such as #useref-requires-argument or
-      #removed-proptypes-and-defaultprops), not to memory.
+      Cites the official React 19 Upgrade Guide by URL
+      (https://react.dev/blog/2024/04/25/react-19-upgrade-guide, or the same
+      post's source in the reactjs/react.dev GitHub repo) as a source it read,
+      and attributes each breaking change it handled to a named section of that
+      guide (heading or anchor, e.g. "useRef requires an argument" /
+      #useref-requires-argument, "Removed: propTypes and defaultProps for
+      functions" / #removed-proptypes-and-defaultprops), not to memory.
     - >-
       Identifies the argument-less `useRef<HTMLInputElement>()` for `searchRef`
-      in web/src/BatchTable.tsx (around L28, the "/" search shortcut) as failing
-      the type check under @types/react 19 (TS2554 "Expected 1 arguments, but
-      got 0", the guide's "useRef requires an argument"), and fixes it by
-      passing an initial value (`null` or `undefined`, by hand or with
-      types-react-codemod), keeping the ref and the shortcut.
+      in web/src/BatchTable.tsx (around L28, the ref behind the "/" search
+      shortcut) as broken by the React 19 types, either via the type-check error
+      (TS2554 "Expected 1 arguments, but got 0" at BatchTable.tsx:28) or via the
+      guide's "useRef requires an argument" section, and fixes it by passing an
+      initial value (`null` or `undefined`, by hand or with types-react-codemod),
+      keeping `ref={searchRef}` and the shortcut.
     - >-
       Identifies `LoadingIndicator.defaultProps = { label: 'Loading…' }` on the
       function component in web/src/LoadingIndicator.tsx as removed in React 19
-      (defaultProps on function components are ignored, so the loading label
-      would silently render empty although tsc and the build pass), and
-      replaces it with an ES default parameter such as `{ label = 'Loading…' }`
-      (or an equivalent that keeps the text), removing the defaultProps
-      assignment.
+      (React 19 ignores defaultProps on function components, so the bare
+      `<LoadingIndicator />` in BatchDetail.tsx's loading branch would render no
+      label, with no compile error), and replaces it with an ES default
+      parameter such as `{ label = 'Loading…' }` (or an equivalent that keeps
+      the text), removing the defaultProps assignment.
     - >-
-      Reports the versions before and after (react and react-dom 18.3.1 ->
-      19.x, @types/react and @types/react-dom 18.3.x -> 19.x, as resolved by
-      npm) and shows `npm run typecheck` and `npm run build` in web/ exiting 0
-      after its last source edit. For `npm test` it states that Vitest found no
-      test files (exit 0 only because of --passWithNoTests), so there is no
-      behavioural test evidence.
+      Reports versions before and after for react, react-dom, @types/react and
+      @types/react-dom (before: the declared ^18 ranges and/or the 18.3.x
+      versions npm resolved them to; after: the 19.x versions npm installed),
+      and reports `npm run typecheck` and `npm run build` in web/ (or the
+      equivalent `tsc --noEmit` / `vite build`) exiting 0 on the final code. It
+      says truthfully what `npm test` exercised: Vitest found no test files
+      (exit 0 only because of --passWithNoTests), so there is no behavioural
+      test evidence, unless it added a test, in which case it names the test
+      file and shows it passing.
   should:
     - >-
       Records a React 18 baseline before changing anything (typecheck, build
@@ -286,9 +295,10 @@ rubric:
       or `--legacy-peer-deps`, hand-editing package-lock.json, or deleting the
       "/" shortcut or the LoadingIndicator.
     - >-
-      Makes changes outside the upgrade: bumps, removes or replaces lodash,
-      moment, vite, vitest, typescript or @vitejs/plugin-react (to a new major),
-      or "fixes" pre-existing non-upgrade issues in web/ such as the
+      Makes changes outside the upgrade: changes the lodash or moment version
+      at all; moves vite, vitest, typescript or @vitejs/plugin-react to a new
+      major; removes, replaces or adds any dependency; or "fixes" pre-existing
+      non-upgrade issues in web/ such as the
       dangerouslySetInnerHTML note rendering, `key={index}` table rows, the
       `approval!`/`materials!` non-null assertions, the empty dependency array
       of the batch-fetch effect, `"strict": false`, or
@@ -297,7 +307,7 @@ rubric:
       gitignored build/install output, not edits.
     - >-
       Claims unverified success or invents work: reports DONE/green without
-      post-upgrade typecheck and build runs, presents `npm test` as having
-      exercised the UI, claims a React 19 migration was needed for code that
+      post-upgrade typecheck and build runs, presents the test-less
+      `npm test` run as having exercised the UI, claims a React 19 migration was needed for code that
       does not use the changed API (e.g. createRoot, StrictMode or the automatic
       JSX runtime in main.tsx), or commits or stashes.
