@@ -15,7 +15,7 @@ fixture: sample-app
 #   FP-INF-02  release.yml `permissions: contents: read` and the env-var summary step are correct.
 #   web/ has NO package-lock.json, so switching the web job to `npm ci`, or adding setup-node
 #   `cache: npm` without a `cache-dependency-path` that exists, breaks the web job on its first run.
-#   `3.10` unquoted in a matrix is the float 3.1 (YAML 1.1), so the version must be a string.
+#   `3.10` unquoted in a matrix is the YAML float 3.1, so that version must be a string.
 #   release.yml (INF-16 static AWS keys, INF-17 publishes from any branch) is out of scope:
 #   mention it, don't edit it.
 # Pinning: SHAs must come from GitHub (git ls-remote / gh api), never memory. The check

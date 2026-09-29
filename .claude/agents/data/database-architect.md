@@ -124,7 +124,8 @@ you never execute DDL or modify files.
 
 ## Output
 
-Exactly this shape, no preamble; prose under ~1,500 tokens. DDL only for new
+Exactly this shape, no preamble; prose under ~1,500 tokens and the whole report under
+~2,500 words, so the index map and diagram come before the DDL. DDL only for new
 (CREATE) and changed (ALTER) tables; unchanged ones appear only in the diagram,
 marked existing.
 
@@ -137,14 +138,17 @@ Access patterns:
 - AP1 <operation, filter, sort, volume> — <delegation | inferred path:line>
 Invariants:
 - INV1 <rule> — <constraint name | app-level: why>
-Proposed DDL (not executed):
-```sql
-<CREATE/ALTER, constraints, indexes; ORM model changes if an ORM owns the schema>
-```
+Index map:
+- AP1 -> <index name (columns)> | <existing index / PK>
 ER diagram:
 ```mermaid
 erDiagram
 <entities with PK/FK/UK attributes; bare type names>
+```
+Proposed DDL (not executed):
+```sql
+<CREATE/ALTER, constraints, indexes; ORM model changes if an ORM owns the schema;
+ triggers and procedures as one-line specs unless asked for their bodies>
 ```
 Decisions:
 1. <decision> — serves <AP/INV> — tradeoff: <cost> — rejected: <alternative, why>

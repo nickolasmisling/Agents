@@ -22,9 +22,16 @@ fixture: sample-app
 #     $PSCmdlet.ShouldProcess prompt, and under the task's -NonInteractive it throws
 #     "PowerShell is in NonInteractive mode..." and exits 1, so the BOG-APP01 command line
 #     no longer works unchanged. Scored as a `should`, not enforced by the check.
-#   - Set-StrictMode -Version Latest + the original `$remaining.Count` /
-#     `(... | Measure-Object -Property Length -Sum).Sum` throws PropertyNotFound when 0
-#     (or, for .Count, 1) log files remain unless results are wrapped in @(). `should`.
+#   - Set-StrictMode -Version Latest + the original `$remaining.Count` throws
+#     PropertyNotFound when 0 or 1 log files remain unless the results are wrapped in @().
+#     `(... | Measure-Object -Property Length -Sum).Sum` throws when 0 files remain EVEN
+#     with @(): with -Property set, Measure-Object emits nothing for empty input, so .Sum
+#     is read off $null. Seen in pwsh 7.4.6: a reference that used @() but kept `.Sum`
+#     exited 1 on an empty log folder. 5.1 was not run; its MeasureObjectCommand
+#     EndProcessing uses the same logic. `should`.
+#   - [ValidateScript({ Test-Path ... })] on a parameter with a default does not run for
+#     the default value (checked in pwsh 7.4.6), so it does not check D:\batchtrack\logs
+#     on BOG-APP01; the body needs its own Test-Path. `should`.
 # Baseline PSScriptAnalyzer 1.25.0 on the fixture: PSAvoidUsingInvokeExpression (L44),
 #   PSAvoidUsingWriteHost x7. A reference fix (CmdletBinding(SupportsShouldProcess) +
 #   ShouldProcess around both deletes, $ErrorActionPreference='Stop' + try/catch exit 1 +
@@ -32,6 +39,8 @@ fixture: sample-app
 #   -LiteralPath, direct pipeline instead of Invoke-Expression, objects + Write-Verbose)
 #   parses, has 0 analyzer findings, honours -WhatIf, deletes only old items, exits 1 on
 #   a missing root, does not execute the injection pattern, and passes this check.
+#   Re-verified independently with pwsh 7.4.6 + PSScriptAnalyzer 1.25.0 (with StrictMode
+#   and a foreach byte total, it also works with 0 and 1 remaining files and is idempotent).
 prompt: >-
   scripts/Cleanup-Logs.ps1 is about to become a nightly Task Scheduler job. On
   BOG-APP01 (Windows Server 2019) the task runs as the svc-batchtrack service
@@ -63,7 +72,7 @@ check: |
   test -z "$(git stash list)"
   test -f "$f"
   git diff --quiet HEAD -- . ":(exclude)$f"
-  test -z "$(git status --porcelain --untracked-files=all -- . ':(exclude).claude' ":(exclude)$f" | grep -v '\.Tests\.ps1"\?$' || true)"
+  test -z "$(git status --porcelain --untracked-files=all -- . ':(exclude).claude' ":(exclude)$f" | grep -vi '\.Tests\.ps1"\?$' || true)"
   python3 - "$f" <<'PY'
   import re, sys
   from pathlib import Path
@@ -157,28 +166,32 @@ check: |
 rubric:
   must:
     - >-
-      Makes scripts/Cleanup-Logs.ps1 an advanced script with
-      [CmdletBinding(SupportsShouldProcess...)] directly above param( and wraps both
-      destructive steps (the recursive Remove-Item of old log folders, original L38,
-      and the removal of old temp exports, original L42-44) in
-      $PSCmdlet.ShouldProcess(...), so -WhatIf and -Confirm work.
+      Makes scripts/Cleanup-Logs.ps1 an advanced script: [CmdletBinding(SupportsShouldProcess...)]
+      on the script's param( block (only comments, #Requires or other attributes before
+      it, no statements), and puts both destructive steps (the recursive Remove-Item of
+      old log folders, original L38, and the removal of old temp exports, original
+      L42-44) behind $PSCmdlet.ShouldProcess(...) (per item or per step), so -WhatIf and
+      -Confirm work.
     - >-
-      Removes the Invoke-Expression of the built command string (original L42-44),
-      calls Get-ChildItem / Where-Object / Remove-Item directly with -Pattern passed as
-      a parameter value, and explains that a -Pattern value (e.g. 'x; <command>; #') was
-      being executed as code under the service account.
+      Removes the Invoke-Expression of the built command string (original L42-44) and
+      calls Get-ChildItem and Remove-Item directly, with $Pattern passed as a parameter
+      value (-Filter/-Include or a -like test), and explains that the -Pattern value
+      was pasted into a command string and run as code (for example -Pattern
+      'x; <command>; #' runs <command>).
     - >-
-      Makes failures stop the run with a non-zero exit: $ErrorActionPreference = 'Stop'
-      or -ErrorAction Stop, with try/catch that exits 1 or rethrows (and/or a Test-Path
-      check that throws for a missing root), and states the failure this prevents: a
-      missing or unreachable log folder or share used to print errors, then the summary,
-      and exit 0, so Task Scheduler recorded success.
+      Makes failures end the run with a non-zero exit code: $ErrorActionPreference =
+      'Stop' or -ErrorAction Stop on the Get-ChildItem/Remove-Item calls, plus a catch
+      that exits 1 or rethrows, or a Test-Path check on the roots that throws or exits
+      1. It also states the failure this prevents: a missing or unreachable log folder
+      or export share gave only non-terminating errors, then the script printed its
+      summary and exited 0, so Task Scheduler recorded success.
     - >-
-      Is truthful about verification: states that PowerShell (pwsh) is not available
-      in this environment, so the parser, PSScriptAnalyzer and Pester were not run
-      (static review only), and does not report a plain STATUS: DONE
-      (DONE_WITH_CONCERNS or an equivalent caveat). If it fetched a portable pwsh into
-      a temp dir instead, it says so and quotes the actual commands and results.
+      Is truthful about verification. Either it states that PowerShell (pwsh) is not
+      available here, so the parser, PSScriptAnalyzer and Pester were not run (static
+      review only), and it does not report a plain STATUS: DONE (DONE_WITH_CONCERNS or
+      an equivalent caveat). Or, if it obtained a pwsh binary (for example a portable
+      pwsh in a temp dir), it says so and quotes the commands it ran and their actual
+      results, and still notes that Windows PowerShell 5.1 on the server was not tested.
   should:
     - >-
       Replaces Write-Host for data with objects on the output stream (the remaining
@@ -186,19 +199,24 @@ rubric:
       summary) and moves progress text to Write-Verbose / Write-Information.
     - >-
       Turns the hardcoded D:\batchtrack\logs and \\bog-fs01\batchtrack\exports\tmp into
-      parameters defaulting to those paths, checks both exist
-      (Test-Path -PathType Container) before deleting anything, and uses -LiteralPath
-      for them.
+      parameters defaulting to those paths, uses -LiteralPath for them, and checks that
+      both exist (Test-Path -PathType Container) in the script body before deleting
+      anything. A [ValidateScript({ Test-Path ... })] attribute alone does not count,
+      because PowerShell does not validate default values, so it would not check the
+      BOG-APP01 defaults.
     - >-
       Keeps the unchanged -NonInteractive BOG-APP01 task from stopping at a
       confirmation prompt: leaves ConfirmImpact at the default (Medium) or lower, or
       explicitly explains that ConfirmImpact = 'High' would make ShouldProcess prompt
       and fail under -NonInteractive.
     - >-
-      Keeps the remaining-files summary working when zero or one log files remain:
-      if it adds Set-StrictMode -Version Latest, it wraps Get-ChildItem results in @()
-      (or otherwise avoids .Count / .Sum on $null or a single FileInfo, which throw
-      under strict mode).
+      Keeps the remaining-files summary working when zero or one log files remain.
+      Without Set-StrictMode the original .Count/.Sum are fine. If it adds
+      Set-StrictMode -Version Latest, it must do two things. First, wrap the
+      Get-ChildItem results in @() before using .Count. Second, not read .Sum from
+      `... | Measure-Object -Property Length -Sum` when no files remain: Measure-Object
+      -Property emits nothing for empty input, so that throws under strict mode even
+      with @(). Guard it, or total the Length values another way.
     - >-
       Names Windows PowerShell 5.1 as the target (powershell.exe on Server 2019) and
       hands the person exact commands to run on a Windows server before enabling the

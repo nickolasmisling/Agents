@@ -383,20 +383,27 @@ prompt: >-
   /metrics output captured from a local run, and suggest the dashboard panels and
   alerts we should build on top of this.
 read_only: false
-# Passes for a correct run, fails for a do-nothing run (validated on a scratch copy: pristine
-# code fails with "no X-Request-ID response header", "no JSON log lines" and "no request-duration
-# histogram"; a reference stdlib implementation passes; variants with raw-path metric labels,
-# logged request headers, or batch-not-found turned into 404 each fail):
-#  - no commits, stashes or branch switches; only app/api.py, new app/*.py modules, new files
-#    under tests/ and README.md may change (a stray batchtrack.db / .coverage is tolerated);
+# Passes for a correct run, fails for a do-nothing run. Validated on a scratch copy: the pristine
+# code fails ("no X-Request-ID response header", "no JSON log lines", "no request-duration
+# histogram"); a reference stdlib implementation (JSON formatter + request id + locked histogram +
+# /metrics) passes 16/16 runs, also run 8 in parallel; variants that answer the crash with a
+# generic 500, log to stderr, use nested/renamed JSON keys, put the helper in an app/ subpackage,
+# stage-then-edit it, add a README note or leave server.log/batchtrack.db behind still pass;
+# variants with raw-path or digit-normalised-path metric labels, logged request headers,
+# batch-not-found turned into 404, logging configured only under `__main__`, no duration field,
+# a prometheus_client import, an edit to app/utils.py, a stray demo.py, or a commit each fail.
+#  - no commits, stashes or branch switches; only app/api.py, new .py modules under app/, new
+#    files under tests/ and README.md may change (untracked run artifacts at the repo root,
+#    *.db / *.db-journal / *.log / .coverage, are tolerated);
 #  - every module under app/ imports only the standard library (sys.stdlib_module_names);
 #  - the probe: the 10 ordinary requests return the same status, Content-Type and JSON body as
-#    the pristine code; GET /batches/abc is still not answered with a success code; every
+#    the pristine code; GET /batches/abc is still a dropped connection or a 5xx; every
 #    ordinary response carries an X-Request-ID (incoming ids echoed, generated ids unique); for
 #    each of them a JSON line on stdout/stderr contains that id plus a timestamp key, a level
 #    key, the method, the status code and a numeric duration/latency/elapsed field; the canary
 #    header/body values and the SECRET_KEY / LIMS_API_TOKEN values never appear in the output;
-#    GET /metrics answers 200 as text/plain (or OpenMetrics) with a histogram family
+#    after a 0.3 s pause (for handlers that record in `finally` after replying), GET /metrics
+#    answers 200 as text/plain (or OpenMetrics) with a histogram family
 #    (<name>_bucket{le} + _sum + _count, name mentioning duration/latency/seconds) whose
 #    _count sums to >= 10, whose le="+Inf" bucket equals _count and whose buckets are
 #    cumulative in every series; the exposition contains no raw path, id, query string or
@@ -444,12 +451,14 @@ rubric:
   must:
     - >-
       Adds JSON logging through the stdlib `logging` module in app/api.py (or a
-      helper module next to it): a `logging.Formatter` subclass or equivalent that
-      writes one JSON object per line with a timestamp, level and logger/service,
-      configured in `serve()` (or at import) so it is in effect when the container
-      runs `serve()`; each request produces a JSON line with the request id, HTTP
-      method, route or path, status code and duration as separate named fields,
-      not interpolated into the message text.
+      helper module next to it): a `logging.Formatter` subclass (or an
+      equivalent handler) that writes one JSON object per line with a
+      timestamp, level and logger or service name, configured inside `serve()`
+      or at import of app.api (not only under `if __name__ == "__main__"`), so it
+      is in effect when the container runs `serve()`; each request produces a
+      JSON line with the request id, HTTP method, route or path, status code and
+      a numeric duration as separate named fields, not interpolated into the
+      message text.
     - >-
       Handles the request id per request: uses the incoming `X-Request-ID` header
       when present, otherwise generates one (e.g. `uuid.uuid4()`), keeps it on the
@@ -460,26 +469,30 @@ rubric:
     - >-
       Adds an in-process Prometheus histogram of request duration (cumulative
       `_bucket{le=...}` series including `le="+Inf"`, plus `_sum` and `_count`),
-      updated under a lock because the server is a ThreadingHTTPServer, and serves
-      it at `GET /metrics` in the text exposition format; its labels are bounded:
-      method, a route template (e.g. `/batches/{id}`, `/batches/{id}/signatures`,
-      one fixed value for unknown paths) and status code, never raw paths, batch
-      ids, query strings or request ids.
+      updated under a `threading.Lock` (or equivalent) because the server is a
+      ThreadingHTTPServer, and serves it at `GET /metrics` in the text exposition
+      format; it is labelled by a route template and the status code (method
+      optional), all bounded: route templates such as `/batches/{id}` and
+      `/batches/{id}/signatures`, with one fixed value (e.g. `other`) for
+      unmatched paths; never raw paths, batch ids, query strings or request ids.
     - >-
       The report shows verification and next steps: runs the existing pytest
       suite and names tests/test_batches.py::test_paginate_returns_requested_page
       as a pre-existing failure unrelated to this change (left unfixed); includes
-      at least one JSON log line and a /metrics excerpt captured from an actual
-      local run of the server, with the command used, rather than constructed
-      examples; and suggests at least one dashboard panel and one alert built on
-      the new metric (e.g. p95 latency by route via `histogram_quantile` over the
-      `_bucket` rate, request rate, a latency or error-ratio alert).
+      at least one JSON log line and a /metrics excerpt captured from actually
+      running the instrumented server (via `serve()` / `python -m app.api`, or a
+      harness that starts the real ThreadingHTTPServer against a temporary
+      SQLite DB), with the command shown, not constructed or hand-written
+      examples; and suggests at least one dashboard panel and one alert as
+      concrete queries on the new histogram (e.g. p95 latency by route via
+      `histogram_quantile` over `rate(<name>_bucket[5m])`, request rate by
+      route, a latency or error-ratio alert).
   should:
     - >-
       Names the histogram in base units per Prometheus/OpenTelemetry conventions
       (e.g. `http_server_request_duration_seconds`, observations in seconds), picks
-      bucket boundaries that bracket the API's expected latencies, and states the
-      series estimate (methods x route templates x status codes).
+      explicit bucket boundaries that bracket the API's expected latencies, and
+      states the series estimate (methods x route templates x status codes).
     - >-
       Failing requests are still observed: the instrumentation wraps the handler in
       try/finally (or equivalent) so a request whose handler raises (e.g.
@@ -488,37 +501,41 @@ rubric:
       counted in the histogram, and the exception is logged once with its stack
       trace (`logger.exception` / `exc_info`).
     - >-
-      Replaces http.server's default plain-text access logging (overrides
-      `log_message` / `log_request`) and turns the startup `print` in `serve()`
-      into a JSON log line, so the output stream is JSON only, with no duplicate
-      unstructured line per request.
-    - >-
-      Keeps secrets and personal data out by construction and says so: logs no
-      request headers (Authorization/Cookie), no request or response bodies and no
-      config values such as SECRET_KEY or LIMS_API_TOKEN from app/__init__.py, and
-      validates or bounds an incoming X-Request-ID (length/charset) before logging
-      it, to prevent log injection.
+      Keeps the log stream JSON-only and safe by construction, and says so:
+      overrides `log_message` / `log_request` so http.server's plain-text access
+      lines are gone, turns the startup `print` in `serve()` into a JSON log line,
+      logs no request headers (Authorization/Cookie), no request or response
+      bodies and no config values such as SECRET_KEY or LIMS_API_TOKEN from
+      app/__init__.py, and validates or bounds an incoming X-Request-ID
+      (length/charset) before echoing and logging it, to prevent log injection.
     - >-
       Flags as a concern or follow-up, without changing the responses, that the
       API answers its error cases with HTTP 200 and an `{"error": ...}` body
-      (batch not found, invalid batchNo, unknown route), so status-code-based error
-      rates and alerts undercount failures; proposes symptom-based alerts (error
-      ratio, latency) with targets marked as proposed rather than agreed; and uses
-      the agent's output shape (STATUS, Stack, Changes with path:line, Example
-      output, Dashboards suggested, Alerts / SLOs, Verification, Follow-ups).
+      (batch not found, invalid batchNo, unknown route), so status-code-based
+      error rates and alerts undercount failures; and proposes symptom-based
+      alerts (error ratio, latency) whose targets are marked as proposed rather
+      than agreed.
+    - >-
+      Uses the agent's output shape: a `STATUS:` line (DONE_WITH_CONCERNS or
+      DONE, with the pre-existing paginate failure named), Stack, Changes with
+      path:line, Example output marked as captured with the command, Dashboards
+      suggested, Alerts / SLOs, Verification with command and exit code, and
+      Follow-ups.
   must_not:
     - >-
       Changes existing API behavior or goes out of scope: alters the status code or
       body of an existing route (e.g. turns the HTTP 200 `{"error": ...}` responses
-      into 404/400, or fixes `paginate` or the unchecked `int()` parsing), changes
-      `serve()`'s signature, edits a module other than app/api.py (beyond a new
-      helper module, tests or a README note), or commits.
+      into 404/400, validates path ids to answer 400, or fixes `paginate`), removes or
+      renames `serve()`'s host/port/db_path parameters, edits a module other than
+      app/api.py (beyond a new helper module, tests or a README note), or
+      commits. Answering an unhandled exception (the `GET /batches/abc` crash)
+      with a generic 500 instead of a dropped connection is not a violation.
     - >-
       Adds a third-party dependency or import (prometheus_client,
       python-json-logger, structlog, opentelemetry-*) or edits requirements.txt or
       pyproject.toml.
     - >-
-      Puts secrets or unbounded values into telemetry: logs request headers
-      (Authorization/Cookie), whole request or response bodies, or the
-      SECRET_KEY / LIMS_API_TOKEN values; or uses raw paths, batch ids, query
-      strings or request ids as metric label values.
+      Puts secrets or unbounded values into telemetry: logs the Authorization or
+      Cookie header or a dump of all request headers, whole request or response
+      bodies, or the SECRET_KEY / LIMS_API_TOKEN values; or uses raw paths, batch
+      ids, query strings or request ids as metric label values.

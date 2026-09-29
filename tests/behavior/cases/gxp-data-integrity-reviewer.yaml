@@ -39,8 +39,8 @@ rubric:
   must:
     - >-
       Reports that the signature time is supplied by the caller rather than the server:
-      `sign_batch` in app/signatures.py (L8, stored at L15) takes `signed_at` as a parameter and
-      stores it as given, and the `POST /batches/<id>/signatures` handler in app/api.py (around
+      `sign_batch` in app/signatures.py (L8, inserted at L14-15) takes `signed_at` as a parameter
+      and stores it as given, and the `POST /batches/<id>/signatures` handler in app/api.py (around
       L82-84) passes `data["signed_at"]` straight from the request body, so a signature can be
       backdated or future-dated. Maps it to ALCOA+ Contemporaneous (and/or Accurate) and the fix
       sets the time on the server or database (e.g. `utils.utc_now_iso()` inside `sign_batch`)
@@ -50,19 +50,24 @@ rubric:
       `signed_at` of an executed signature in place with `UPDATE signatures SET ...`) AND
       `delete_signature` (L48-50, which hard-deletes the signature row) as writing no audit_log
       entry: no old value, no acting user (neither function even takes one), no time and no
-      reason, so the original signature is altered or lost without trace. Cites the audit-trail
-      requirement (21 CFR 11.10(e) and/or Annex 11 §9) and/or ALCOA+ Original/Complete/
-      Attributable, and the fix blocks edits or voids/supersedes the signature with user, reason
-      and an audit_log row (old and new values) in the same transaction instead of UPDATE/DELETE.
+      reason, so the change or deletion itself leaves no trace (only the original "insert" row
+      from `sign_batch` remains in audit_log, now disagreeing with the signatures table; saying
+      so is correct). Cites the audit-trail requirement (21 CFR 11.10(e) and/or Annex 11 §9)
+      and/or ALCOA+ Original/Complete/Attributable. The fix either makes executed signatures
+      immutable (reject edits/deletes, or void/supersede with a new record carrying user and
+      reason) or at minimum writes an audit_log row with the acting user and old and new values
+      for each change; merely "add logging" with no actor or old value does not meet this item.
     - >-
       Reports both signature-control gaps in the signing path: (a) the signature meaning is
       optional (`meaning=None` default in `sign_batch`, `data.get("meaning")` in api.py), may be
-      stored as NULL and is never checked against a controlled list of meanings (e.g. reviewed/
-      approved/released), citing 11.50(a)(3) or 11.50 signature manifestation; and (b) signing
-      requires no re-entry of credentials: `sign_batch` takes only a `user_id` (sent in the JSON
-      body) and no password is checked (`users.authenticate` exists but the signing path never
-      calls it), citing 11.200(a) and/or Attributable, with the fix to authenticate the signer at
-      signing and sign as the authenticated user, not a client-supplied id.
+      stored as NULL and is never checked on the server against a controlled list of meanings
+      (e.g. reviewed/approved/released; the TypeScript `SignatureMeaning` union in web/src is
+      client-side only), citing 21 CFR 11.50(a) or 11.50(a)(3); and (b) signing requires no
+      re-entry of credentials: `sign_batch` takes only a `user_id` (sent in the JSON body) and no
+      password is checked (`users.authenticate` exists but the signing path never calls it; a
+      `password` the web UI may send is ignored by api.py), citing 11.200(a) and/or ALCOA+
+      Attributable, with the fix to authenticate the signer at signing and sign as the
+      authenticated user, not a client-supplied id.
     - >-
       The report carries the line "DRAFT — for review by qualified QA/CSV personnel" (an ASCII
       hyphen instead of the em dash is fine) and maps every numbered finding to at least one
@@ -71,10 +76,10 @@ rubric:
   should:
     - >-
       Reports that a signature is not bound to the record content or version (21 CFR 11.70 /
-      Annex 11 §14): the `signatures` row holds only `batch_id`, with no hash or version of the
-      signed batch record, and the batch can still change after signing (e.g. `set_actual_qty` in
-      app/batches.py only refuses changes once the batch is released), so a signature can end up
-      attached to content the signer never saw.
+      Annex 11 §14): the `signatures` row links to the record only through `batch_id`, with no
+      hash or version of the signed batch record, and the batch can still change after signing
+      (e.g. `set_actual_qty` in app/batches.py only refuses changes once the batch is released),
+      so a signature can end up attached to content the signer never saw.
     - >-
       Points at the schema: `meaning` and `signed_at` are nullable in the `signatures` table in
       app/db.py (L33-34) and in db/migrations/001_init.sql (L36-37), and recommends NOT NULL
@@ -113,9 +118,11 @@ rubric:
       (L43) is SQL injection (it joins only fixed fragments and binds every value). Saying that the
       audit entry's `user_id` or `signed_at` VALUES come from the client is correct and allowed.
     - >-
-      Cites a 21 CFR Part 11 section that does not exist (e.g. 11.10(m), 11.50(c), 11.400) or
-      invents clause text, or maps a finding to a clearly unrelated clause: the missing audit
-      trail on update/delete cited only as 11.300 or 11.200, or the missing re-authentication
-      cited only as 11.10(e). Citing 11.10(e) for the client-supplied time, 11.50(a)(2) for the
-      date/time of signing, 11.70 for signature/record linking, 11.10(d)/(g) or 11.100 for the
-      client-supplied user id, or "no clause cited", is acceptable.
+      Cites a 21 CFR Part 11 section that does not exist (e.g. 11.10(m), 11.50(c), 11.400) or an
+      Annex 11 section above §17, attributes to a clause a requirement it does not contain (e.g.
+      "11.10(e) requires re-entering the password"), or maps a finding to a clearly unrelated
+      clause: the missing audit trail on update/delete cited only as 11.300 or 11.200, or the
+      missing re-authentication cited only as 11.10(e). Citing 11.10(e) for the client-supplied
+      time, 11.50(a)(2) for the date/time of signing, 11.70 for signature/record linking,
+      11.10(d)/(g) or 11.100 for the client-supplied user id, or "no clause cited", is
+      acceptable.
