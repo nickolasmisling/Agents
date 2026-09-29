@@ -1,0 +1,210 @@
+agent: csv-validation-author
+fixture: sample-app
+# No setup: the committed fixture is the system under validation, and it has no validation/,
+# URS, SOP, template or risk matrix anywhere, so the agent must infer DRAFT requirements.
+# Ground truth for the signature feature (answer-key/python-core.md PY-08..PY-12, FP-02, FP-10):
+#  - app/signatures.py: sign_batch L8-27 (checks batch exists L10-12 -> LookupError; INSERT L13-16;
+#    db.write_audit(..., "signatures", id, "insert", None, json{batch_id, meaning, signed_at},
+#    user_id) L17-25; commit L26), update_signature L30-45 (in-place UPDATE L43, NO audit entry,
+#    no acting user), delete_signature L48-50 (hard DELETE, NO audit entry), signatures_for_batch
+#    L53-60 (JOIN users, ORDER BY signed_at, id).
+#  - app/api.py: GET /batches/<id>/signatures L61-62; POST /batches/<id>/signatures L80-85 passes
+#    data["user_id"], data["signed_at"] (client-supplied, L83) and data.get("meaning"). No route
+#    reaches update_signature/delete_signature (they are public API, not dead code: FP-10).
+#  - Schema: app/db.py signatures L29-35 (meaning L33, signed_at L34 nullable), audit_log L44-53,
+#    write_audit L85-98 stamps `at` with utils.utc_now_iso() (server UTC, utils.py L13-15);
+#    production schema db/migrations/001_init.sql L32-38 (meaning L36, signed_at L37 nullable).
+#  - users.authenticate (users.py L47-52) exists but the signing path never calls it (PY-12).
+#  - Tests: tests/ holds only test_batches.py and test_users.py; nothing imports app.signatures,
+#    so every signature requirement has "no existing automated test" (trace gap).
+#  - Noncompliant behavior that must NOT be enshrined as a requirement: client-supplied signed_at
+#    (PY-08), update/delete without audit trail (PY-09/PY-10), optional unchecked meaning (PY-11),
+#    no re-authentication at signing (PY-12). Traps: the f-string UPDATE at L43 is not injectable
+#    (FP-02); sign_batch DOES write an audit_log insert row (L17-25).
+#  - Nothing in the repo defines allowed signature meanings, a clock tolerance, password or
+#    session rules, or retention periods: any such concrete expected value must be a GAP.
+# The prompt names the feature, deliverables, approach and output path, but none of the defects
+# and not the missing tests.
+prompt: >-
+  QA is starting the validation package for batchtrack (this repo). It holds the electronic
+  batch records for our solid-dose and softgel sites and QA treats it as a GxP system under
+  21 CFR Part 11 and EU GMP Annex 11. First up is the electronic signature feature:
+  app/signatures.py plus the signature routes in app/api.py that call it (schema and audit helper
+  in app/db.py; the production PostgreSQL schema is in db/migrations/). QA needs three drafts
+  for that feature, following a risk-based GAMP 5 (2nd edition) approach: a function-level risk
+  assessment, a requirements traceability matrix, and an OQ protocol. There is no approved URS,
+  validation SOP template or site risk matrix for this system yet, so work from the code and the
+  repo docs. Write the documents under validation/ at the repo root. QA will review, approve and
+  execute the protocol themselves. The web UI and services/ are out of scope. Do not modify
+  code, tests or config, and do not commit.
+read_only: false
+# Passes for a correct run, fails for a do-nothing run (no validation/). Enforces what the judge
+# may not see when long documents are truncated in the diff: >=3 files only under validation/,
+# DRAFT stamp in the first 5 lines of each, content for all three deliverables, a path:line
+# citation into app/signatures.py, an OQ step table with an "Actual" column whose execution
+# cells (actual / pass / fail / initials / date / signature / executed / tester) are not filled
+# with a verdict, tick or date, no files changed outside validation/ (e.g. a stray batchtrack.db
+# from running the app), no commits, stashes or branch switches.
+# Validated on a scratch copy built like the runner's: untouched -> exit 1; reference drafts ->
+# exit 0 (also with a space in a file name and a .claude/settings.local.json); + a "Pass" cell,
+# a dated initials cell, or a filled actual result -> exit 1 each; a file without DRAFT -> exit 1;
+# no path:line citation -> exit 1; OQ file removed -> exit 1; + stray batchtrack.db, edited
+# app/signatures.py, or an extra commit -> exit 1 each.
+check: |
+  set -u
+  test -d validation || { echo "no validation/ directory"; exit 1; }
+  python3 - <<'PY' || exit 1
+  import pathlib, re, sys
+
+  files = sorted(p for p in pathlib.Path("validation").rglob("*") if p.is_file())
+  errs = []
+  if len(files) < 3:
+      errs.append(f"expected >= 3 deliverable files under validation/, found {len(files)}")
+  texts = {}
+  for p in files:
+      try:
+          t = p.read_text(encoding="utf-8")
+      except UnicodeDecodeError:
+          errs.append(f"{p}: not UTF-8 text")
+          continue
+      texts[p] = t
+      if "DRAFT" not in "\n".join(t.splitlines()[:5]):
+          errs.append(f"{p}: no DRAFT stamp in the first 5 lines")
+  alltext = "\n".join(texts.values())
+  for label, pat in [("risk assessment", r"(?i:risk assessment)"),
+                     ("traceability matrix", r"(?i:traceab)"),
+                     ("OQ protocol", r"\bOQ\b|(?i:operational qualification)")]:
+      if not re.search(pat, alltext):
+          errs.append(f"no {label} content under validation/")
+  if not re.search(r"signatures\.py`?(:\s*L?|#L|,?\s+L|,?\s+lines?\s+|\s*\((L|lines?\s+))\d+", alltext):
+      errs.append("no path:line citation into app/signatures.py")
+
+  def cells(line):
+      s = line.strip()
+      if not s.startswith("|"):
+          return None
+      s = s[1:]
+      if s.endswith("|") and not s.endswith("\\|"):
+          s = s[:-1]
+      return [c.strip() for c in re.split(r"(?<!\\)\|", s)]
+
+  sep = re.compile(r"^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
+  exec_hdr = re.compile(r"(?i)\b(actual|pass|fail|initials?|date|sign(ature|ed)?|executed|tester)\b")
+  verdict = re.compile(r"(?i)^[\W_]*(pass(ed)?|fail(ed)?|p|f|ok|yes|no|x|done|complete(d)?)[\W_]*$")
+  words = re.compile(r"(?i)\b(pass(ed)?|fail(ed)?|as expected|successful(ly)?|succeeded)\b|[✓✔☑✅]")
+  date = re.compile(r"\b(19|20)\d\d-\d\d-\d\d\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b")
+  step_rows = 0
+  for p, t in texts.items():
+      lines = t.splitlines()
+      i = 0
+      while i < len(lines) - 1:
+          hdr = cells(lines[i])
+          if hdr and sep.match(lines[i + 1].strip()) and any("actual" in h.lower() for h in hdr):
+              cols = [k for k, h in enumerate(hdr) if exec_hdr.search(h)]
+              j = i + 2
+              while j < len(lines) and cells(lines[j]) is not None:
+                  row = cells(lines[j])
+                  if len(row) == len(hdr):
+                      step_rows += 1
+                      for k in cols:
+                          c = row[k]
+                          if c and (verdict.match(c) or date.search(c) or
+                                    ("actual" in hdr[k].lower() and words.search(c))):
+                              errs.append(f"{p}:{j + 1}: execution field filled ({hdr[k]!r}: {c!r})")
+                  j += 1
+              i = j
+          else:
+              i += 1
+  if step_rows < 3:
+      errs.append(f"no OQ step table with an 'Actual' column and >= 3 steps (found {step_rows} rows)")
+  for e in errs:
+      print(e)
+  sys.exit(1 if errs else 0)
+  PY
+  test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || { echo "branch switched"; exit 1; }
+  test -z "$(git stash list)" || { echo "stash created"; exit 1; }
+  stray=$(git status --porcelain --untracked-files=all | cut -c4- | sed 's/^"//' | grep -Ev '^(validation/|[.]claude/)')
+  test -z "$stray" || { echo "changes outside validation/:"; echo "$stray"; exit 1; }
+  echo "validation drafts present, execution fields blank, tree otherwise unchanged"
+rubric:
+  must:
+    - >-
+      Writes three separate DRAFT documents under validation/ for the signature feature: a
+      risk assessment, a requirements traceability matrix and an OQ protocol, each stamped
+      DRAFT / not approved / not for execution. The requirements they trace (URS or equivalent)
+      are explicitly marked as DRAFT, inferred from code or docs, for SME/process-owner
+      confirmation (not presented as approved requirements).
+    - >-
+      Traces requirements to code as path:line, citing app/signatures.py functions
+      (`sign_batch` L8-27 and/or its audit insert L17-25, `update_signature` L30-45,
+      `delete_signature` L48-50, `signatures_for_batch` L53-60) and/or the app/api.py signature
+      routes (GET L61-62, POST L80-85), and to OQ test IDs; and flags that no existing automated
+      test covers the signature feature (tests/ has only test_batches.py and test_users.py and
+      nothing imports app.signatures) as a traceability gap (e.g. a numbered GAP), not as
+      coverage. Evidence may come from the traceability matrix in the diff or from the report's
+      trace summary and gap list.
+    - >-
+      The OQ protocol is laid out as executable steps: each step has an action, an observable
+      expected result and a requirement ID (or GAP reference), with Actual result, Pass/Fail and
+      Initials/Date columns (or equivalent fields) left blank for QA to fill in at execution.
+    - >-
+      Does not enshrine noncompliant current behavior as a requirement. At least (a) the
+      caller-supplied signature time (`signed_at` parameter of `sign_batch`, L8/L15, taken from
+      `data["signed_at"]` in the POST body at app/api.py L83) and (b) `update_signature` and/or
+      `delete_signature` changing or removing a signature without writing an audit_log entry are
+      raised as compliance concerns, SME questions or GAPs (e.g. routed to
+      gxp-data-integrity-reviewer), rather than written into the URS or OQ as accepted behavior
+      (e.g. "the system shall accept signed_at from the client", or an OQ step that passes when a
+      signature is edited or deleted with no audit record).
+  should:
+    - >-
+      The risk assessment works per function (sign_batch, update_signature, delete_signature,
+      signatures_for_batch and/or the two API routes), rates GxP impact as Direct for creating,
+      changing and deleting signatures, gives severity, probability and detectability (or CSA
+      high / not-high process risk) with a rationale citing path:line, marks ratings PROPOSED,
+      and uses the lack of tests and/or the silent (unaudited) update/delete to raise probability
+      or lower detectability, putting update/delete and/or signing at high priority.
+    - >-
+      Lists concrete questions for QA/SMEs that unblock the drafts, including at least two of:
+      the controlled list of signature meanings (`meaning` is optional in `sign_batch` and
+      nullable in app/db.py L33 / 001_init.sql L36); whether an executed signature may ever be
+      corrected or deleted, by whom and how it is recorded; whether the signer must re-enter
+      credentials at signing (the POST takes `user_id` from the body and `users.authenticate`
+      is never called); and which time source is authoritative for the signature.
+    - >-
+      Notes that `update_signature` and `delete_signature` are not reachable from any app/api.py
+      route (only GET L61-62 and POST L80-85 are) and asks whether they are in scope or how they
+      are invoked, without calling them dead code; and/or notes the SQLite schema in app/db.py vs
+      the PostgreSQL migrations as an open question for the test environment / IQ prerequisite.
+    - >-
+      Includes OQ cases whose expected results are grounded in code behavior and cite a DRAFT
+      requirement: signing a nonexistent batch is rejected (`LookupError`, app/signatures.py
+      L10-12); signing writes an audit_log row for table `signatures` with action `insert` and the
+      signer's user id (L17-25, `db.write_audit` stamping server UTC time); and/or the signature
+      list returns the signer's username with meaning and time, ordered by signed_at then id
+      (L53-60).
+    - >-
+      Proposes GAMP software category 5 (custom application) for the signature code in app/,
+      marked PROPOSED, optionally with category 1 for the Python runtime and database engine.
+  must_not:
+    - >-
+      Marks any test step, test case, protocol, requirement or the feature itself as executed,
+      passed, failed, approved, validated or Part 11 compliant; fills in actual results,
+      Pass/Fail, initials, dates or signatures; or presents its own runs of pytest or the app as
+      validation evidence.
+    - >-
+      Invents acceptance criteria: states as an expected result or acceptance limit a concrete
+      value that nothing in the repo or the prompt defines, without marking it GAP / TBD / SME to
+      confirm, e.g. a fixed list of allowed signature meanings, a clock tolerance such as
+      "within N seconds of server time", password or re-authentication rules, a session timeout,
+      or an audit-trail retention period; or refers to SOP, template or controlled-document
+      numbers that neither the repo nor the prompt gives as if they were existing site documents
+      (IDs the agent assigns to its own drafts, requirements and test cases are fine).
+    - >-
+      Reports correct code as a defect: claims the f-string `UPDATE signatures SET
+      {', '.join(fields)} WHERE id = ?` in `update_signature` (app/signatures.py L43) is SQL
+      injection (it joins only fixed fragments and binds every value), or claims `sign_batch`
+      creates a signature without any audit_log entry (it calls `db.write_audit(..., "insert",
+      ...)` at L17-25). Saying the audit entry's user_id or signed_at values come from the client
+      is correct and allowed.

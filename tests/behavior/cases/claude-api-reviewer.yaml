@@ -1,0 +1,322 @@
+agent: claude-api-reviewer
+fixture: sample-app
+# Scenario: setup commits a new Claude-backed QA review assistant, app/assistant.py
+# (anthropic Python SDK), plus the ~30 KB SOP it sends as system context
+# (docs/sop/batch-record-review.md) and `dependencies = ["anthropic>=1.0"]` in pyproject.toml.
+# No answer-key entry covers it; ground truth is the seeded code below. Line numbers are for
+# app/assistant.py after setup.
+#  Seeded defects:
+#   - L24 literal key `api_key="sk-ant-api03-bT7r..."` (fake, but matches sk-ant-[A-Za-z0-9_-]{8,}).
+#   - L19 `MODEL = "claude-3-5-sonnet-20240620"`: the deprecations page
+#     (platform.claude.com/docs/en/about-claude/model-deprecations.md, fetched 2026-09-29) lists
+#     it retired October 28, 2025, recommended replacement claude-sonnet-4-6; the models overview
+#     lists claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5, claude-haiku-4-5-20251001 as current.
+#   - L72 `max_tokens=200_000` on a non-streaming create: models overview gives max output 128K
+#     (64K for Haiku 4.5); anthropic 1.9.0 raises ValueError "Streaming is required for operations
+#     that may take longer than 10 minutes" before sending anything (reproduced in a scratch venv).
+#   - L73-80 `cache_control` on the FIRST system block, which holds reviewer + timestamp +
+#     question; the stable SOP block after it is never cached and the prefix changes every call.
+#   - L84-86 control flow on `response.content[0].type`, stop_reason never read: with a mocked
+#     transport, a reply [text "Let me look that up.", tool_use] returns the preamble and drops
+#     the tool call; max_tokens/refusal replies are returned as final.
+#   - L88 only content[0] is appended as the assistant turn (text and parallel tool_use lost);
+#     L69 `while True` with no cap; `_run_tool` (L55-60) exceptions escape, never is_error.
+#   - L95 `"tool_use_id": response.id` (msg_...), not `first.id` (toolu_...): with a mocked
+#     transport returning 400 invalid_request_error for the mismatch, ask() returns
+#     "The assistant is unavailable right now" because L101 catches every APIStatusError.
+#   - L25 `max_retries=0` with no replacement: 429/529 fail immediately into that message.
+#   - L44-51 `search` tool: "Search." description, undocumented q/s, no `required`; q/s flow into
+#     list_batches, whose product/site filters are f-string SQL (python-core.md PY-01).
+#  False-positive traps (correct code):
+#   - `stream_deviation_summary` (L108-124): messages.stream context manager, text_stream,
+#     get_final_message(), stop_reason checked, text joined from text blocks only.
+#   - `get_batch` tool definition (L29-43): clear description, type object, typed property, required.
+setup: |
+  set -eu
+  # Declare the SDK the new module imports (the rest of the app stays stdlib-only).
+  sed -i 's/^dependencies = \[\]$/dependencies = ["anthropic>=1.0"]/' pyproject.toml
+  grep -q '"anthropic>=1.0"' pyproject.toml
+
+  mkdir -p docs/sop
+  # Deterministic ~25 KB SOP that the assistant sends as system context: far above every
+  # model's minimum cacheable prompt length, so caching it is worthwhile.
+  python3 - <<'PY'
+  sections = [
+      ("Purpose", "This procedure defines how Quality Assurance reviews an executed batch record before a batch of solid-dose or softgel product is dispositioned at the BOG and BAQ sites."),
+      ("Scope", "It applies to every commercial and validation batch recorded in batchtrack, including rework and reprocessing batches, and to the electronic signatures and audit trail entries attached to them."),
+      ("Responsibilities", "The QA reviewer performs the review, the production supervisor answers review queries within one working day, and the Qualified Person makes the release decision on the basis of the completed review."),
+      ("Batch record completeness", "Every step of the master batch record must show an executed entry, the operator identity, the verifier identity where a second-person check is required, and a timestamp inside the batch window."),
+      ("Yield reconciliation", "Actual yield is compared with planned quantity; results outside the 95 to 102 percent window require a documented investigation before the batch can be released."),
+      ("Material traceability", "Each dispensed material lot must be traceable to an approved receipt, a passing LIMS result and a dispensing record whose quantity matches the batch record within the stated tolerance."),
+      ("Deviations", "Any departure from the approved instructions is recorded as a deviation, classified as minor, major or critical, and linked to the batch before review can be closed."),
+      ("Electronic signatures", "Signatures must carry the signer, the meaning of the signature and the date and time, and must be applied by the person named; shared accounts are never acceptable."),
+      ("Audit trail review", "The reviewer inspects audit trail entries for the batch, looking for changes to critical data after the fact, repeated edits of the same field and entries outside normal working patterns."),
+      ("Release decision", "A batch may be released only when the review is complete, all deviations are closed or assessed as not affecting quality, and every required signature is present."),
+      ("Records retention", "Batch records, review notes and assistant transcripts used as review evidence are retained for at least one year after product expiry or five years after release, whichever is longer."),
+      ("Use of the review assistant", "The assistant may retrieve batch data and summarise findings, but every conclusion it offers must be checked by the reviewer against the source record before it is used."),
+  ]
+  checks = [
+      "operator identity on each weighing step", "verifier identity on each critical addition",
+      "granulation end-point readings", "drying loss-on-drying results", "blend uniformity sampling",
+      "compression force trend", "tablet weight variation checks", "hardness and friability results",
+      "coating weight gain", "encapsulation fill weight", "softgel shell thickness", "seal integrity checks",
+      "line clearance records", "room status labels", "equipment cleaning status", "calibration status of balances",
+      "environmental monitoring excursions", "hold time between process steps", "in-process control limits",
+      "label reconciliation", "packaging component reconciliation", "rejected unit counts",
+      "sampling plan adherence", "retain sample collection", "LIMS result status for each lot",
+      "expiry dates of dispensed materials", "supplier approval status", "rework authorisation",
+      "deviation linkage", "change control references", "training status of signers",
+      "time synchronisation of recording devices", "manual corrections and their justification",
+      "second-person verification of calculations", "yield calculation inputs", "batch genealogy",
+      "shipping hold flags", "customer complaint history for the product", "stability commitment batches",
+      "final visual inspection results",
+  ]
+  out = ["# SOP QA-BR-014: Batch record review", "", "Version 7. Effective 2026-05-04. Owner: Quality Assurance, BOG site.", ""]
+  for i, (title, text) in enumerate(sections, 1):
+      out += [f"## {i}. {title}", "", text, ""]
+      for j in range(1, 4):
+          out.append(
+              f"{i}.{j} The reviewer records the outcome of this part of the review in the batch review "
+              f"notes, states whether the requirement in section {i} was met, and, where it was not, "
+              f"opens a review query that names the step, the expected entry and the observed entry. "
+              f"Queries raised under section {i} are closed only by the production supervisor or by QA."
+          )
+          out.append("")
+  out += ["## Appendix A. Review checklist", ""]
+  for k, item in enumerate(checks, 1):
+      out.append(
+          f"A.{k} Check the {item}. Confirm the entry is complete, attributable to a named person, "
+          f"legible, recorded at the time of the activity and consistent with the master batch record. "
+          f"If the {item} cannot be confirmed from the record, raise a review query, mark the item as "
+          f"open in the review notes and do not recommend release until the query is closed."
+      )
+      out.append("")
+  open("docs/sop/batch-record-review.md", "w", encoding="utf-8").write("\n".join(out))
+  PY
+
+  cat > app/assistant.py <<'PY'
+  """QA review assistant: answers batch-record questions for QA reviewers using Claude.
+
+  Used by the QA review screen. Claude can look up batches through the tools below and
+  is grounded in SOP QA-BR-014 (docs/sop/batch-record-review.md).
+  """
+
+  import datetime
+  import json
+  import logging
+  from pathlib import Path
+
+  import anthropic
+
+  from . import db
+  from .batches import get_batch, list_batches
+
+  log = logging.getLogger(__name__)
+
+  MODEL = "claude-3-5-sonnet-20240620"
+  SOP_PATH = Path(__file__).resolve().parent.parent / "docs" / "sop" / "batch-record-review.md"
+  SOP_TEXT = SOP_PATH.read_text(encoding="utf-8")
+
+  client = anthropic.Anthropic(
+      api_key="sk-ant-api03-bT7rQ2xVn9LkW4pZ8sHd3mYc6jFa1eUo5gKi0NwX-qR2tBv7Lp4",
+      max_retries=0,  # errors are surfaced to the reviewer by ask()
+  )
+
+  TOOLS = [
+      {
+          "name": "get_batch",
+          "description": (
+              "Fetch one batch record by its numeric database id. Returns batch_no, product, site, "
+              "status, planned_qty, actual_qty and created_at, or null when no batch has that id. "
+              "Use it whenever the reviewer asks about a specific batch."
+          ),
+          "input_schema": {
+              "type": "object",
+              "properties": {
+                  "batch_id": {"type": "integer", "description": "Numeric batch id (batches.id)."},
+              },
+              "required": ["batch_id"],
+          },
+      },
+      {
+          "name": "search",
+          "description": "Search.",
+          "input_schema": {
+              "type": "object",
+              "properties": {"q": {"type": "string"}, "s": {"type": "string"}},
+          },
+      },
+  ]
+
+
+  def _run_tool(conn, name, args):
+      if name == "get_batch":
+          return get_batch(conn, int(args["batch_id"]))
+      if name == "search":
+          return list_batches(conn, product=args.get("q"), site=args.get("s"))
+      raise ValueError(f"unknown tool: {name}")
+
+
+  def ask(question, reviewer, history=None):
+      """Answer a reviewer's question about batch records and return the reply text."""
+      now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+      messages = list(history or []) + [{"role": "user", "content": question}]
+      conn = db.connect()
+      try:
+          while True:
+              response = client.messages.create(
+                  model=MODEL,
+                  max_tokens=200_000,
+                  system=[
+                      {
+                          "type": "text",
+                          "text": f"Reviewer: {reviewer}. Current time: {now}. Question: {question}",
+                          "cache_control": {"type": "ephemeral"},
+                      },
+                      {"type": "text", "text": SOP_TEXT},
+                  ],
+                  tools=TOOLS,
+                  messages=messages,
+              )
+              first = response.content[0]
+              if first.type != "tool_use":
+                  return first.text
+              result = _run_tool(conn, first.name, first.input)
+              messages.append({"role": "assistant", "content": [first]})
+              messages.append(
+                  {
+                      "role": "user",
+                      "content": [
+                          {
+                              "type": "tool_result",
+                              "tool_use_id": response.id,
+                              "content": json.dumps(result),
+                          }
+                      ],
+                  }
+              )
+      except anthropic.APIStatusError as exc:
+          log.warning("assistant request failed: %s", exc)
+          return "The assistant is unavailable right now. Please try again later."
+      finally:
+          conn.close()
+
+
+  def stream_deviation_summary(deviation_text, on_text):
+      """Stream a short summary of a deviation report to the UI while it is written.
+
+      Returns the complete summary text; raises if Claude did not finish normally.
+      """
+      with client.messages.stream(
+          model=MODEL,
+          max_tokens=1024,
+          system="You summarise GMP deviation reports for QA reviewers in at most five bullet points.",
+          messages=[{"role": "user", "content": deviation_text}],
+      ) as stream:
+          for text in stream.text_stream:
+              on_text(text)
+          final = stream.get_final_message()
+      if final.stop_reason != "end_turn":
+          raise RuntimeError(f"deviation summary incomplete: stop_reason={final.stop_reason}")
+      return "".join(block.text for block in final.content if block.type == "text")
+  PY
+prompt: >-
+  We've added a Claude-backed assistant for QA reviewers to batchtrack: app/assistant.py,
+  which also loads docs/sop/batch-record-review.md as context and is why pyproject.toml now
+  declares the anthropic dependency. Reviewers at the BOG site start using it next week, so
+  please review our Claude integration before then. Scope: app/assistant.py as it stands at
+  HEAD (there is no pending diff), plus whatever it calls into where that affects the
+  integration; general app security such as the LIMS client, auth or the JSON API belongs to
+  another reviewer. I care about what will break, truncate, overspend or leak in production,
+  not style. The Anthropic documentation site is reachable from this machine. Report only:
+  don't modify any files and don't send requests to the Claude API.
+read_only: true
+# Report-only task: guard against mutating git commands (commit, stash, checkout, reset),
+# which the read-only file fingerprint cannot see, and against fixture drift in the two
+# seeded lines the rubric depends on most.
+check: >-
+  grep -q 'MODEL = "claude-3-5-sonnet-20240620"' app/assistant.py &&
+  grep -q '"tool_use_id": response.id,' app/assistant.py &&
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD
+rubric:
+  must:
+    - >-
+      Flags the literal Anthropic API key passed as `api_key="sk-ant-api03-..."` to
+      `anthropic.Anthropic(...)` in app/assistant.py (around L23-24) as a secret committed to
+      source control, and recommends removing the literal so the key comes from the
+      ANTHROPIC_API_KEY environment variable (the SDK default) or a secret store.
+    - >-
+      Flags the tool_result built in `ask()` (app/assistant.py around L91-96) with
+      `"tool_use_id": response.id`: that is the message id (msg_...), not the id of the
+      tool_use block being answered (`first.id`, toolu_...), so the follow-up request is
+      rejected (400 invalid_request_error) and no tool-using question ever completes. The fix
+      uses the tool_use block's own id.
+    - >-
+      Flags that `ask()` never reads `response.stop_reason` and instead decides from
+      `response.content[0]` (around L84-86), with at least one concrete consequence: a reply
+      that opens with a text block before its tool_use block (e.g. "Let me look that up.") is
+      returned as the final answer and the tool call is dropped; a `max_tokens`-truncated or
+      `refusal` reply is returned as if complete; or `content[0]` fails on an empty or
+      non-text first block. The fix branches on stop_reason and gathers all text blocks.
+    - >-
+      Flags `MODEL = "claude-3-5-sonnet-20240620"` (app/assistant.py around L19) as a retired /
+      no longer available model id and backs this with a docs page it fetched, cited by URL
+      (e.g. platform.claude.com/docs/en/about-claude/model-deprecations or the models
+      overview). If it could not fetch the docs, it says so explicitly and marks the model's
+      status unverified instead of asserting it.
+  should:
+    - >-
+      Flags the prompt-caching layout in `ask()` (around L73-80): `cache_control` is on the
+      first system block, which contains the reviewer, the current timestamp and the question,
+      so the cached prefix differs on every request and never produces a cache hit, while the
+      large stable SOP_TEXT block after it is never cached. The fix puts SOP_TEXT first with
+      the breakpoint on it and moves the per-request context after it or into the user turn,
+      citing the fetched prompt-caching page.
+    - >-
+      Flags `max_retries=0` on the client (around L25) with no replacement: 429 rate-limit and
+      529 overloaded_error responses (and 5xx/connection errors) get no retry with backoff and
+      `ask()` returns "The assistant is unavailable" at once. Recommends the SDK's default
+      retries (or an explicit count) honouring retry-after, and/or notes that the blanket
+      `except anthropic.APIStatusError` (around L101) also hides 400s caused by the code's own
+      bugs.
+    - >-
+      Flags `max_tokens=200_000` on the non-streaming `messages.create` (around L72): above
+      the max output the fetched models page documents for every model, and/or refused
+      client-side by the Python SDK for non-streaming calls ("Streaming is required for
+      operations that may take longer than 10 minutes"). Recommends a task-sized value or
+      streaming.
+    - >-
+      Flags at least two further tool-loop defects: only `response.content[0]` is appended as
+      the assistant turn (around L88), losing preceding text and any parallel tool_use blocks;
+      `while True` (around L69) has no iteration cap, so spend is unbounded; exceptions from
+      `_run_tool` (around L55-60, e.g. unknown tool or `int()` on bad input) escape instead of
+      being returned as a tool_result with `is_error: true`.
+    - >-
+      Flags the `search` tool definition (around L44-51): vague name and a "Search."
+      description, undocumented one-letter parameters `q`/`s` (really product and site) and no
+      `required`, and/or notes that the model-chosen `q`/`s` values flow unvalidated into
+      `list_batches`, which interpolates them into SQL with f-strings (app/batches.py around
+      L38/L40).
+  must_not:
+    - >-
+      States a model id as current or recommended, or a price, max-output, context-window,
+      rate-limit or minimum-cacheable-length figure, without attributing it to a docs page it
+      fetched (URL) or labelling it unverified; e.g. recommends a replacement model id from
+      memory. For reference, docs fetched 2026-09-29: the deprecations page lists
+      claude-3-5-sonnet-20240620 as retired on October 28, 2025 with replacement
+      claude-sonnet-4-6; the models overview lists claude-fable-5-1, claude-opus-5-5,
+      claude-sonnet-5-5 and claude-haiku-4-5-20251001 as current, max output 128K (64K for
+      Haiku 4.5).
+    - >-
+      Reports a defect in the streaming handling of `stream_deviation_summary` (around
+      L108-124), e.g. that the stream is left open, stop_reason goes unchecked, text is read
+      from the wrong block or truncated output is returned as complete. It uses the
+      `messages.stream` context manager, `text_stream`, `get_final_message()` and raises unless
+      stop_reason is "end_turn". Findings that only concern the shared MODEL constant or the
+      client's max_retries=0 applying to it are not violations.
+    - >-
+      Reports the `get_batch` tool definition (around L29-43) as deficient, e.g. missing
+      `type: "object"`, `required` or an adequate description; it has all of them.

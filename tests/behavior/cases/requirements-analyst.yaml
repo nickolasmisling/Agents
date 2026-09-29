@@ -1,0 +1,125 @@
+agent: requirements-analyst
+fixture: sample-app
+# Scenario: turn a one-paragraph plant-manager email ("put batches on hold", "auditable", "QA must be
+# able to release the hold") into a requirements file at docs/requirements/batch-hold.md. No setup:
+# the fixture has no docs/requirements/ folder or template, so the agent picks its own layout/ID scheme.
+# Ground truth the agent can find in the repo (not given in the prompt):
+#  - Roles: app/users.py L5 `ROLES = ("operator", "qa", "supervisor", "admin")`; QA maps to `qa`.
+#  - No authentication/authorisation anywhere in app/api.py (answer key python-core "Other legitimate
+#    observations"): GET /batches/<id>/release (L57-60) takes user_id from the query string (L59).
+#    So "only QA may lift a hold" depends on an authz capability that does not exist yet.
+#  - Release path: app/batches.py release_batch L77-86 only refuses an already-released batch (L81);
+#    it releases from any other status. A hold must be able to stop this path.
+#  - Audit: app/db.py audit_log (L44-53) + write_audit(conn, table_name, record_id, action, old_value,
+#    new_value, user_id) (L85-98) record who/when/old/new but have NO reason field -> "why" is new.
+#    docs/architecture.md L28: "audit_log: old and new values for every change to a GxP record".
+#  - Status model is inconsistent: docs/architecture.md L30 planned -> in_progress -> quarantined ->
+#    released | rejected; web/src/types.ts L1-6 draft | in_progress | pending_review | released |
+#    rejected; code default 'planned' (app/batches.py L18, app/db.py L15). No hold/on_hold anywhere.
+#    Whether a hold is a new status, a flag beside status, or the documented `quarantined` is open.
+#  - Downstream: services/erp-sync ErpSync.loadPending (L73-83) posts released + QA-approved batches to
+#    the ERP, so a hold on an already released batch raises the question of ERP postings.
+#  - Regulated context (README "electronic batch records", GxP audit_log, e-signatures in
+#    app/signatures.py) -> URS-style "shall" statements are the expected format choice.
+# Business answers the email does NOT give (must become open questions, not requirements): who may
+# PLACE a hold; whether a released (or rejected) batch can be put on hold; whether a reason is
+# mandatory and from a controlled list; whether placing/lifting needs an e-signature; whether the
+# person who placed a hold may lift it; what a hold blocks besides release; notifications; retention.
+# FP trap: claiming the code already has a hold status, a role/permission check on release, or a
+# reason column in audit_log.
+prompt: >-
+  The plant manager at the Bogotá site sent us this email about batchtrack (this
+  repo): "Subject: batch holds. Hi team, we need a way to put batches on hold and
+  it should be auditable. QA must be able to release the hold. Thanks." Turn it
+  into proper requirements for the team to review before anyone designs or builds
+  anything. Write them to docs/requirements/batch-hold.md, grounded in how the app
+  works today. Don't implement anything and don't touch other files. In your reply,
+  list the open questions so I can forward them to the plant manager.
+read_only: false
+# Passes only when docs/requirements/batch-hold.md exists, carries at least 3 distinct requirement-
+# style IDs (FR-01, AC-01.1, Q-01, URS-001 ...; batch numbers like PX-2026-0101 do not match), uses
+# Given/When/Then, has an open-questions section, and nothing else in the tree changed (.claude/
+# ignored). Validated on a scratch copy: do-nothing run -> exit 1; reference doc -> exit 0; reference
+# doc + an edit to app/batches.py -> exit 1; doc without Given/When/Then -> exit 1; doc citing only
+# batch numbers (no IDs) -> exit 1; reference doc committed -> exit 1.
+check: |
+  set -u
+  fail() { echo "FAIL: $*"; exit 1; }
+  f=docs/requirements/batch-hold.md
+  test -s "$f" || fail "$f not written"
+  ids=$(grep -Eo '\b[A-Z]{1,5}(-[A-Z]{1,5})?-[0-9]{1,3}(\.[0-9]{1,2})?\b' "$f" | sort -u | wc -l)
+  test "$ids" -ge 3 || fail "fewer than 3 distinct requirement IDs in $f ($ids)"
+  grep -Eqi '\bgiven\b' "$f" && grep -Eqi '\bwhen\b' "$f" && grep -Eqi '\bthen\b' "$f" \
+    || fail "no Given/When/Then acceptance criteria in $f"
+  grep -Eqi 'open question' "$f" || fail "no open questions section in $f"
+  test "$(git log -1 --format=%s)" = setup || fail "agent created a commit: $(git log -1 --oneline)"
+  other=$(git status --porcelain --untracked-files=all | grep -v '\.claude/' | grep -v " $f\$" || true)
+  test -z "$other" || fail "files other than $f changed: $other"
+  echo "ok: $f written with IDs, Given/When/Then and open questions; nothing else changed"
+rubric:
+  must:
+    - >-
+      docs/requirements/batch-hold.md holds functional requirements with unique IDs (e.g.
+      FR-01, FR-02 or URS-001) where each one has at least one Given/When/Then acceptance
+      criterion with a concrete precondition, one action and an observable result, and the
+      set includes negative criteria (e.g. an action refused in a forbidden state or for an
+      unauthorised user, with the batch left unchanged).
+    - >-
+      Role constraint: lifting ("releasing") a hold is restricted to QA, mapped to the
+      existing `qa` role in app/users.py (ROLES), with a negative acceptance criterion in
+      which a user with another role (e.g. `operator`) tries to lift a hold, is refused, and
+      the batch stays on hold.
+    - >-
+      Audit requirements cover BOTH placing and lifting a hold and state what each audit
+      record must capture: who (the acting user), when (date/time), what changed (the
+      action or old -> new hold state) and why (a reason given by the user).
+    - >-
+      An open-questions list (in the file and in the reply) asks specific business questions
+      instead of answering them, including at least (a) which roles may PLACE a hold (the
+      email only says QA releases it) and (b) whether a batch that is already released (or
+      rejected) can be put on hold and what that means for it; and the released-batch case
+      also appears as an edge case pointing to that question.
+  should:
+    - >-
+      Chooses URS-style "shall" statements and justifies it by the regulated context in the
+      repo (README "electronic batch records", docs/architecture.md audit_log for "every
+      change to a GxP record", e-signatures in app/signatures.py), and raises e-signature /
+      21 CFR Part 11 expectations for placing or lifting a hold as an open question rather
+      than deciding them.
+    - >-
+      Grounds the hold in the release path with path references: app/batches.py
+      `release_batch` (and the GET /batches/<id>/release route in app/api.py) must refuse a
+      batch that is on hold, with a negative acceptance criterion; and notes that
+      app/db.py `write_audit` / the `audit_log` table has no reason field, so recording
+      "why" is new capability.
+    - >-
+      Flags the status-model ambiguity: docs/architecture.md documents a `quarantined`
+      status (planned -> in_progress -> quarantined -> released/rejected) while
+      web/src/types.ts lists draft/pending_review and there is no hold state in code; asks
+      whether a hold is a new status, a flag beside the status, or the same as quarantined,
+      and what status the batch returns to when the hold is lifted.
+    - >-
+      Notes that app/api.py has no authentication or authorisation today (the release
+      route takes `user_id` from the query string), so the QA-only rule depends on an
+      authz capability; recorded as a dependency or open question.
+    - >-
+      Edge cases go beyond the released batch: placing a hold on a batch already on hold,
+      lifting a hold on a batch not on hold, concurrent or double submission, a
+      non-existent batch, and/or impact on services/erp-sync (which posts released
+      batches to the ERP); plus an NFR sweep (security, audit/compliance, performance,
+      accessibility, i18n) with "N/A: reason" where not applicable.
+  must_not:
+    - >-
+      Settles as a firm requirement, with no linked open question, a business answer the
+      email does not give: which roles may place a hold, that holds on released batches are
+      allowed or forbidden, a specific audit-record retention period, that an e-signature
+      is (or is not) required, a fixed list of hold reasons, or that admin/supervisor may
+      also lift holds.
+    - >-
+      Claims the codebase already provides something it does not: an existing hold/on-hold
+      status or flag, a role or permission check on batch release or any API route, or a
+      reason field in audit_log / db.write_audit.
+    - >-
+      Produces implementation instead of requirements (code, SQL DDL or migrations, or a
+      step-by-step implementation plan), or creates or modifies any file other than
+      docs/requirements/batch-hold.md.
