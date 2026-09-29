@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**29 agents** in 5 categories.
+**30 agents** in 5 categories.
 
 ### Code review & auditing
 
@@ -119,6 +119,7 @@ To pin every agent to one model (for example, on a budget), set
 
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
+| [`adr-writer`](.claude/agents/docs/adr-writer.md) | Records an architecture decision as an ADR (MADR or the repo's template): context, options with pros/cons, decision, consequences, status, date, links to code/PRs; numbered in the ADR folder, index updated. Unstated rationale becomes an open question. | sonnet | read/write |
 | [`docs-sync-editor`](.claude/agents/docs/docs-sync-editor.md) | Fixes documentation that drifted after a code change, with minimal line edits: README, docs/*.md and docstrings that still cite renamed or removed CLI flags, config keys, env vars, function signatures, endpoints, setup steps or examples. | sonnet | read/write |
 | [`technical-writer`](.claude/agents/docs/technical-writer.md) | Writes NEW documentation: README, getting-started, how-to guides, runbooks, API usage guides, onboarding and troubleshooting pages, architecture overviews, with every command, flag, env var and path verified against the repo. | sonnet | read/write |
 <!-- catalog:end -->
