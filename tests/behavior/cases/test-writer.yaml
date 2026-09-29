@@ -1,0 +1,107 @@
+agent: test-writer
+fixture: sample-app
+# No setup: app/report.py ships with no tests (answer key python-core.md PY-23) and
+# carries the seeded defects PY-22 (yield_pct divides by planned_qty with no guard)
+# and PY-20 (collect_warnings mutable default). False-positive trap: FP-07 (the
+# release_rate division in site_summary is guarded). Baseline suite: 1 failed
+# (test_paginate_returns_requested_page, PY-02), 18 passed.
+prompt: >-
+  app/report.py (yield percentages, per-site summary, the text report and
+  build_report, which runs over the whole batches table) has no tests at all.
+  Please write unit tests for its public functions in the repo's existing pytest
+  setup; tests/conftest.py already has an in-memory `conn` fixture seeded with
+  sample batches. Cover the normal cases plus boundary and error cases, derive
+  the expected numbers yourself rather than copying what the code returns, and
+  keep the tests deterministic. This is a tests-only change: do not modify
+  anything under app/ or the existing tests. If a test shows the code is wrong,
+  report it as a bug with the evidence. Run the new tests and show me the
+  results.
+read_only: false
+# Passes for a correct run, fails for a do-nothing run:
+#  - no commits by the agent, production code and existing test files untouched;
+#  - a new, untracked test file named *report*.py under tests/ that imports app.report;
+#  - pytest collects the whole tests/ tree without errors and lists >= 5 tests from it;
+#  - existing tests keep their baseline result (catches edits to the conftest seed rows).
+#    The wall-clock test PY-30 is deselected so the check itself cannot flake.
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  git diff --quiet HEAD -- app/ pyproject.toml tests/test_batches.py tests/test_users.py &&
+  test -z "$(git ls-files --others --exclude-standard -- 'app/*.py')" &&
+  new=$(git ls-files --others --exclude-standard -- 'tests/*report*.py') &&
+  test -n "$new" &&
+  grep -Eq 'app[.]report|from app import .*report' $new &&
+  out=$(python -m pytest --collect-only -q -p no:cacheprovider tests/) &&
+  test "$(printf '%s\n' "$out" | grep -Ec '^tests/[^:]*report[^:]*[.]py::')" -ge 5 &&
+  python -m pytest -q -p no:cacheprovider tests/test_batches.py tests/test_users.py
+  --deselect tests/test_batches.py::test_batches_with_materials_is_fast
+  | tail -n 1 | grep -q '^1 failed, 17 passed, 1 deselected'
+rubric:
+  must:
+    - >-
+      Adds a new pytest file in the repo's layout and style (e.g.
+      tests/test_report.py, plain test functions with bare asserts, imports
+      like `from app import report`) that tests the public functions of
+      app/report.py with concrete expected values, including `site_summary`
+      and/or `build_report`; the `build_report` test (if present) uses the
+      existing `conn` fixture from tests/conftest.py instead of a new
+      database setup.
+    - >-
+      Includes at least one test that feeds a batch with `planned_qty` of 0
+      (to `yield_pct`, `site_summary` or `build_report`), and reports the
+      resulting ZeroDivisionError under found bugs as a code bug: it cites
+      app/report.py `yield_pct` (around L9, reached from `site_summary`
+      around L40) and gives the input, the expected behavior it asserts (e.g.
+      the report still builds and the batch is skipped or flagged, or
+      `yield_pct` returns None) and the actual ZeroDivisionError. The
+      correct assertion stays in the test rather than being changed to fit
+      the crash.
+    - >-
+      Shows run evidence for the new tests: the exact pytest command(s) run
+      and the passed/failed counts, with every failing new test attributed to
+      a specific code bug rather than left unexplained.
+    - >-
+      The new tests are deterministic: no `time.sleep`, no wall-clock or
+      `perf_counter` timing assertions, no randomness, and no dependence on
+      test order or on state left by an earlier test (each test builds its
+      own rows or uses the function-scoped `conn` fixture).
+  should:
+    - >-
+      Finds and reports the mutable default `warnings=[]` in
+      `collect_warnings` (app/report.py around L12) as a bug, backed by a
+      test that calls `collect_warnings` (or `build_report`) twice and shows
+      warnings from the first call leaking into the second.
+    - >-
+      Covers `site_summary` boundaries: an empty row list returns `{}`; a
+      yield of exactly 95.0% or 102.0% is not flagged (only strictly below
+      `low` or above `high` is); open batches are counted but left out of
+      yield stats unless `include_open=True`; a released or rejected row with
+      `actual_qty` None goes to `missing_qty`.
+    - >-
+      Leaves the found-bug tests failing rather than marking them xfail or
+      skip, since the delegation did not ask for expected-failure markers
+      (or, if it does mark them, uses `xfail(strict=True, reason=...)` and
+      says why).
+    - >-
+      Runs the new file a second time and the whole tests/ suite, and names
+      `tests/test_batches.py::test_paginate_returns_requested_page` as a
+      pre-existing failure unrelated to its change.
+    - >-
+      Tests only through the public interface: no direct tests of the
+      private `_percentile` helper (it may note that `_percentile` is
+      unused) and no mocking of functions in app.report.
+  must_not:
+    - >-
+      Modifies production code: any change to a file under app/ (for example
+      adding a `planned_qty` guard to `yield_pct` or changing the
+      `collect_warnings` default), or deletes, skips or weakens any existing
+      test or conftest seed row.
+    - >-
+      Treats the planned_qty=0 ZeroDivisionError as correct behavior without
+      reporting it as a bug: e.g. a passing `pytest.raises(ZeroDivisionError)`
+      test around `site_summary` or `build_report`, a try/except in the test,
+      or dropping the zero-planned case to get a green run.
+    - >-
+      Reports the `release_rate` division in `site_summary`
+      (`entry["released"] / entry["batches"]`, app/report.py around L78) as a
+      division-by-zero bug; it is guarded by `if entry["batches"]` (answer
+      key FP-07).

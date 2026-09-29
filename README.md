@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**24 agents** in 4 categories.
+**25 agents** in 4 categories.
 
 ### Code review & auditing
 
@@ -100,6 +100,7 @@ To pin every agent to one model (for example, on a budget), set
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
 | [`build-fixer`](.claude/agents/debugging/build-fixer.md) | Gets a failing build, compile, type-check, lint or dependency restore green with the smallest correct diff (tsc, eslint, mypy, ruff, dotnet, go, cargo, maven, gradle), fixing types, imports and call sites instead of suppressing errors. | sonnet | read/write |
+| [`ci-failure-investigator`](.claude/agents/debugging/ci-failure-investigator.md) | Investigates a failed CI/CD run (GitHub Actions, Azure Pipelines, GitLab CI, Jenkins): pulls the logs, finds the failing step and first real error, compares with the last green run, and classifies the cause (code, flaky test, toolchain drift, registry outage, secrets, YAML, timeout). | sonnet | read-only |
 | [`debugger`](.claude/agents/debugging/debugger.md) | Root-causes runtime errors, exceptions, crashes, consistently failing tests and wrong output: reproduces the failure, tests hypotheses with cheap experiments, fixes the root cause minimally, adds a regression test and re-runs. | opus | read/write |
 | [`git-bisector`](.claude/agents/debugging/git-bisector.md) | Finds the commit that introduced a regression with `git bisect run`: takes a good ref (tag, commit, last release), a bad ref (default HEAD) and a failing test or command (builds one if none), and returns the first bad commit, the responsible diff hunk and the bisect log. | sonnet | read-only |
 | [`performance-analyst`](.claude/agents/debugging/performance-analyst.md) | Finds and quantifies performance bottlenecks (slow endpoints, jobs, tests, pages; memory growth; bundle size) by profiling and benchmarking, labelling anything unmeasured a hypothesis: N+1 queries, quadratic loops, sync I/O, sync-over-async, chatty calls, unbounded caches, re-renders. | sonnet | read-only |
