@@ -1,0 +1,58 @@
+agent: pr-description-writer
+fixture: sample-app
+# feature/export-csv scenario (4 commits by Valentina Rios) plus the staged None fix,
+# committed here as a 5th commit so the branch is clean; the runner then adds its empty
+# 'setup' commit on the branch. Ground truth for main...HEAD:
+#   Files: app/export.py (new), tests/test_export.py (new). Nothing else changes
+#     (app/__init__.py and tests/__init__.py already exist on main). No migrations,
+#     config, env vars, flags, dependencies, UI files or PR template.
+#   export_batches_csv(rows, fh, columns=None): header row of DEFAULT_COLUMNS
+#     (batch_no, product, site, status, planned_qty, actual_qty) or the given columns,
+#     one row per dict/sqlite3.Row, returns the data-row count.
+#   export_from_db(conn, fh, status=None): SELECT from batches, optional `WHERE status = ?`,
+#     ORDER BY batch_no, returns the count.
+#   _cell(): planned_qty/actual_qty written with one decimal ("1000.0"); None -> "" (commit 5).
+#   tests/test_export.py: 5 tests, all pass (python -m pytest tests/test_export.py -q).
+#   No issue/ticket reference in the branch name or any commit; no commit has a body.
+#   .github/workflows/ci.yml job `pr-title` rejects PR titles that are not Conventional
+#     Commits (feat|fix|chore|docs|refactor|test|ci); main's history is one commit.
+setup: |
+  set -euo pipefail
+  bash "$FIXTURES/scenarios/feature_branch.sh"
+  ts=$(( $(git log -1 --format=%ct) + 3000 ))
+  GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
+    git -c user.name="Valentina Rios" -c user.email="valentina.rios@batchtrack.example" -c commit.gpgsign=false \
+    commit -q -m "Leave missing quantities empty in CSV export"
+  test -z "$(git status --porcelain)"
+keep_setup_uncommitted: false
+prompt: >-
+  Valentina's branch feature/export-csv is checked out and ready for review. Draft
+  the pull request title and description for it against main so I can paste them
+  into the PR form; I'll open the PR myself. Base everything on what is actually on
+  the branch. Don't modify files or git state (no commits, checkouts, stashes or
+  pushes).
+read_only: true
+# Guards git state, which the file fingerprint cannot see: still on the branch, no new
+# commits (the runner's empty 'setup' commit is HEAD), no tracked changes, no stash.
+check: >-
+  test "$(git rev-parse --abbrev-ref HEAD)" = feature/export-csv &&
+  test "$(git log -1 --format=%s)" = setup &&
+  test "$(git rev-list --count main..HEAD)" = 6 &&
+  test -z "$(git status --porcelain --untracked-files=no)" &&
+  test -z "$(git stash list)"
+rubric:
+  must:
+    - The Summary/Changes describe the new CSV export in app/export.py as it is in the diff - `export_batches_csv` writing a header row (default columns batch_no, product, site, status, planned_qty, actual_qty, or a caller-chosen `columns` list) followed by one row per batch, and `export_from_db` reading from the batches table with an optional status filter, ordered by batch number.
+    - States that the quantity columns (planned_qty/actual_qty) are written with one decimal place (e.g. `1000.0`) and that a missing (None) value is written as an empty cell.
+    - The Testing section names tests/test_export.py as added on this branch and says what it covers (test names, or at least column selection, the status-filtered DB export, one-decimal formatting and the missing-quantity case), and labels it as present in the diff / not run by the agent - or, if the agent ran it, gives the command and the result it got (5 passed).
+    - Gives one PR title in the imperative mood ("Add ...", or "feat(...): add ..."), at most 72 characters, no trailing period, naming the batch CSV export.
+  should:
+    - The title uses a Conventional Commits prefix (e.g. `feat(export): add CSV export for batch listings`) because the `pr-title` job in .github/workflows/ci.yml rejects other PR titles, or the Notes point out that CI enforces Conventional Commits PR titles.
+    - Risk & rollout says the change is additive (a new module and a new test file; no existing code, migrations, config or env vars, feature flags or dependencies changed; nothing breaking).
+    - Changes are grouped by behavior (row/column export, database export, formatting, tests) rather than a file list or a restated `git diff --stat`.
+    - Does not invent a motivation the commits do not state (none of the commits has a body); the "why" is either a visible TODO placeholder or limited to what the commit subjects say.
+    - Presents the empty-cell handling as part of the new export's behavior, not as a fix for a crash or bug that exists on main (app/export.py does not exist on main).
+  must_not:
+    - States or implies that the tests were run and passed without attributing it to a command the agent itself ran in this invocation - e.g. "all tests pass", "tested locally", "CI is green", a ticked `[x]` tests-pass checkbox, or claims of manual testing against a real database.
+    - Invents a linked issue or ticket (e.g. "Closes #123", "Refs BT-212", any issue number); no issue reference exists in the branch name or the commits.
+    - Claims changes that are not in the diff, such as an HTTP/API endpoint, a UI or download button, a CLI command, Excel/xlsx output, a database migration or schema change, a new dependency or config setting, or edits to existing modules like app/batches.py or app/api.py.

@@ -1,0 +1,374 @@
+agent: legacy-code-analyst
+fixture: sample-app
+# No answer-key entry covers legacy SQL, so setup adds a SQL Server 2008-era stored
+# procedure with 4 backdated commits (authors/dates set via GIT_* env, which override
+# the runner's Fixture identity):
+#   1. 2011-03-14 Jorge Pardo   legacy/sp_EvaluateBatchRelease.sql (initial; softgel
+#      quarantine 21 days, QC read from LIMS_OLD.dbo.TestResult)
+#   2. 2014-08-21 Mariana Ortega CR-0457: 21 -> 14 days; the inline comment still says 21
+#   3. 2016-02-09 Luis Rincon   LIMS cutover: QC from [LIMSPROD] (Reviewed = 1); old path
+#      kept behind @UseOldLims, hardcoded to 0 (dead). Header change history not updated.
+#   4. 2016-02-10 Luis Rincon   legacy/jobs/job_NightlyBatchRelease.sql (SQL Agent job,
+#      daily 02:30, EXEC ... @SiteCode = NULL) - the only caller.
+# Ground truth, final legacy/sp_EvaluateBatchRelease.sql (153 lines):
+#   L29-35 cursor over dbo.tbl_Batch JOIN dbo.tbl_Product, Status = 'Q', optional @SiteCode
+#   L45-52 BR quarantine: FamilyCode 'SG' -> 14 days, else 7; DATEDIFF(dd, QuarantineDate,
+#          GETDATE()) < MinDays -> GOTO NextBatch (no update, stays 'Q'). L45 comment
+#          "softgels 21 days" is stale (commit 2 changed only the value).
+#   L55-60 BR min yield by family: SG 96, TB 98, LQ 97, else 95.
+#   L61    yield = QtyActual * 100 / QtyPlanned, all INT -> integer division truncates
+#          (979/1000 -> 97 -> TB hold); NULL QtyActual -> NULL yield -> both yield IFs
+#          are UNKNOWN -> no yield outcome (can auto-release); QtyPlanned 0 -> div by zero.
+#   L63-66 yield < MinYield - 5 -> 'R' YIELD BELOW LIMIT; else < MinYield or > 102 -> 'H'.
+#   L69-84 cursor over dbo.tbl_Deviation, Status NOT IN ('C','X') (NULL status excluded):
+#          Severity >= 3 counts critical, = 2 major, 1/NULL ignored.
+#   L86-89 critical -> 'R' CRITICAL DEVIATION (overrides yield outcome); major -> 'H'
+#          OPEN DEVIATION only if nothing decided yet.
+#   L91-106 QC: @UseOldLims = 1 branch (L92-98, LIMS_OLD, Result = 'F') is dead (L27 SET 0);
+#          live branch (L99-106) counts reviewed [LIMSPROD].LIMS.dbo.SampleResult rows,
+#          fail = ResultCode <> 'PASS'.
+#   L108-111 no reviewed QC results -> GOTO NextBatch (stays 'Q', even if R/H decided);
+#          any fail -> 'R' QC FAILURE (overrides).
+#   L113-114 nothing fired -> 'A' AUTO RELEASE.
+#   L116-133 UPDATE tbl_Batch (Status, StatusReason, StatusDate, ExpiryDate = MfgDate +
+#          ISNULL(ShelfLifeMonths, 24) months for 'A', NULL otherwise, ModifiedBy);
+#          @@ERROR checked only after the UPDATE (L125); RAISERROR severity 10 (L128,
+#          informational); tbl_AuditTrail insert; COMMIT.
+#   L135-137 'A' only: INSERT dbo.ERP_Outbox ('GR', QtyActual) after COMMIT, unchecked.
+#   L139-143 'R' only: msdb.dbo.sp_send_dbmail profile QA_ALERTS to QA.
+#   'H' batches leave status 'Q' and are never selected again by the cursor.
+# Traps: 'R' means rejected (mail "Batch rejected..."), release is 'A'; the 21-day
+# comment; the LIMS_OLD branch is dead, not the live QC rule.
+setup: |
+  set -eu
+  commit_as() {  # commit_as "<name>" "<email>" "<date>" "<subject>" "<body>"
+    GIT_AUTHOR_NAME="$1" GIT_AUTHOR_EMAIL="$2" GIT_AUTHOR_DATE="$3" \
+    GIT_COMMITTER_NAME="$1" GIT_COMMITTER_EMAIL="$2" GIT_COMMITTER_DATE="$3" \
+      git -c commit.gpgsign=false commit -q -m "$4" -m "$5"
+  }
+  replace_in() {  # replace_in <file> <old> <new>  (old must occur exactly once)
+    python3 - "$1" "$2" "$3" <<'PY'
+  import sys
+  path, old, new = sys.argv[1:4]
+  text = open(path, encoding="utf-8").read()
+  if text.count(old) != 1:
+      sys.exit(f"replace_in: expected one match in {path}, found {text.count(old)}")
+  open(path, "w", encoding="utf-8").write(text.replace(old, new))
+  PY
+  }
+  P=legacy/sp_EvaluateBatchRelease.sql
+  mkdir -p legacy/jobs
+  cat > "$P" <<'EOF'
+  /******************************************************************************
+  ** Name:    dbo.sp_EvaluateBatchRelease
+  ** Desc:    Evaluates quarantined batches and sets the QA disposition.
+  ** Auth:    J. Pardo
+  ** Date:    2011-03-14
+  *******************************************************************************
+  ** Change History
+  ** Date        Author  Description
+  ** 2011-03-14  JP      Initial version
+  ******************************************************************************/
+  CREATE PROCEDURE dbo.sp_EvaluateBatchRelease
+      @SiteCode   CHAR(3)     = NULL,
+      @RunUser    VARCHAR(30) = 'SQLAGENT'
+  AS
+  BEGIN
+      SET NOCOUNT ON
+
+      DECLARE @BatchId INT, @BatchNo VARCHAR(20), @FamilyCode CHAR(2),
+              @PlannedQty INT, @ActualQty INT, @QuarantineDate DATETIME,
+              @MfgDate DATETIME, @ShelfLife INT
+      DECLARE @Yield INT, @MinYield INT, @MinDays INT
+      DECLARE @DevSeverity INT, @CritDev INT, @MajorDev INT
+      DECLARE @QcCount INT, @QcFail INT
+      DECLARE @NewStatus CHAR(1), @Reason VARCHAR(40)
+
+      DECLARE curBatch CURSOR LOCAL FAST_FORWARD FOR
+          SELECT b.BatchId, b.BatchNo, p.FamilyCode, b.QtyPlanned, b.QtyActual,
+                 b.QuarantineDate, b.MfgDate, p.ShelfLifeMonths
+          FROM dbo.tbl_Batch b
+          INNER JOIN dbo.tbl_Product p ON p.ProductCode = b.ProductCode
+          WHERE b.Status = 'Q'
+            AND (@SiteCode IS NULL OR b.SiteCode = @SiteCode)
+
+      OPEN curBatch
+      FETCH NEXT FROM curBatch INTO @BatchId, @BatchNo, @FamilyCode, @PlannedQty,
+          @ActualQty, @QuarantineDate, @MfgDate, @ShelfLife
+
+      WHILE @@FETCH_STATUS = 0
+      BEGIN
+          SELECT @NewStatus = NULL, @Reason = NULL
+
+          -- quarantine hold: softgels 21 days, everything else 7
+          IF @FamilyCode = 'SG'
+              SET @MinDays = 21
+          ELSE
+              SET @MinDays = 7
+
+          IF DATEDIFF(dd, @QuarantineDate, GETDATE()) < @MinDays
+              GOTO NextBatch
+
+          -- yield limits per family
+          SET @MinYield = CASE @FamilyCode
+                              WHEN 'SG' THEN 96
+                              WHEN 'TB' THEN 98
+                              WHEN 'LQ' THEN 97
+                              ELSE 95
+                          END
+          SET @Yield = @ActualQty * 100 / @PlannedQty
+
+          IF @Yield < @MinYield - 5
+              SELECT @NewStatus = 'R', @Reason = 'YIELD BELOW LIMIT'
+          ELSE IF @Yield < @MinYield OR @Yield > 102
+              SELECT @NewStatus = 'H', @Reason = 'YIELD OUT OF RANGE'
+
+          -- open deviations
+          SELECT @CritDev = 0, @MajorDev = 0
+          DECLARE curDev CURSOR LOCAL FAST_FORWARD FOR
+              SELECT Severity FROM dbo.tbl_Deviation
+              WHERE BatchId = @BatchId AND Status NOT IN ('C', 'X')
+          OPEN curDev
+          FETCH NEXT FROM curDev INTO @DevSeverity
+          WHILE @@FETCH_STATUS = 0
+          BEGIN
+              IF @DevSeverity >= 3
+                  SET @CritDev = @CritDev + 1
+              ELSE IF @DevSeverity = 2
+                  SET @MajorDev = @MajorDev + 1
+              FETCH NEXT FROM curDev INTO @DevSeverity
+          END
+          CLOSE curDev
+          DEALLOCATE curDev
+
+          IF @CritDev > 0
+              SELECT @NewStatus = 'R', @Reason = 'CRITICAL DEVIATION'
+          ELSE IF @MajorDev > 0 AND @NewStatus IS NULL
+              SELECT @NewStatus = 'H', @Reason = 'OPEN DEVIATION'
+
+          -- QC results from LIMS
+          SELECT @QcCount = COUNT(*),
+                 @QcFail  = SUM(CASE WHEN Result = 'F' THEN 1 ELSE 0 END)
+          FROM LIMS_OLD.dbo.TestResult
+          WHERE LotNo = @BatchNo
+
+          IF @QcCount = 0
+              GOTO NextBatch
+          IF @QcFail > 0
+              SELECT @NewStatus = 'R', @Reason = 'QC FAILURE'
+
+          IF @NewStatus IS NULL
+              SELECT @NewStatus = 'A', @Reason = 'AUTO RELEASE'
+
+          BEGIN TRAN
+          UPDATE dbo.tbl_Batch
+             SET Status       = @NewStatus,
+                 StatusReason = @Reason,
+                 StatusDate   = GETDATE(),
+                 ExpiryDate   = CASE WHEN @NewStatus = 'A'
+                                     THEN DATEADD(mm, ISNULL(@ShelfLife, 24), @MfgDate) END,
+                 ModifiedBy   = @RunUser
+           WHERE BatchId = @BatchId
+          IF @@ERROR <> 0
+          BEGIN
+              ROLLBACK TRAN
+              RAISERROR('sp_EvaluateBatchRelease: update failed for %s', 10, 1, @BatchNo)
+              GOTO NextBatch
+          END
+          INSERT INTO dbo.tbl_AuditTrail (TableName, RecordId, Action, NewValue, UserName, AuditDate)
+          VALUES ('tbl_Batch', @BatchId, 'STATUS', @NewStatus + ':' + @Reason, @RunUser, GETDATE())
+          COMMIT TRAN
+
+          IF @NewStatus = 'A'
+              INSERT INTO dbo.ERP_Outbox (BatchNo, MsgType, Qty, CreatedAt, Sent)
+              VALUES (@BatchNo, 'GR', @ActualQty, GETDATE(), 0)
+
+          IF @NewStatus = 'R'
+              EXEC msdb.dbo.sp_send_dbmail @profile_name = 'QA_ALERTS',
+                   @recipients = 'qa.release@batchtrack.example',
+                   @subject = 'Batch rejected by auto-evaluation',
+                   @body = @BatchNo
+
+  NextBatch:
+          FETCH NEXT FROM curBatch INTO @BatchId, @BatchNo, @FamilyCode, @PlannedQty,
+              @ActualQty, @QuarantineDate, @MfgDate, @ShelfLife
+      END
+
+      CLOSE curBatch
+      DEALLOCATE curBatch
+  END
+  GO
+  EOF
+  git add "$P"
+  commit_as "Jorge Pardo" "jorge.pardo@batchtrack.example" "2011-03-14T17:42:10-05:00" \
+    "Add sp_EvaluateBatchRelease for QA disposition of quarantined batches" \
+    "Replaces the manual release checklist spreadsheet. Run from the agent job."
+
+  replace_in "$P" "            SET @MinDays = 21" "            SET @MinDays = 14"
+  replace_in "$P" "** 2011-03-14  JP      Initial version" \
+  "** 2011-03-14  JP      Initial version
+  ** 2014-08-21  MO      CR-0457 quarantine hold change"
+  git add "$P"
+  commit_as "Mariana Ortega" "mariana.ortega@batchtrack.example" "2014-08-21T10:05:33-05:00" \
+    "CR-0457: shorten softgel quarantine hold to 14 days" \
+    "QA approved per stability report SR-2014-031. Other families unchanged."
+
+  replace_in "$P" "    DECLARE @NewStatus CHAR(1), @Reason VARCHAR(40)
+  " "    DECLARE @NewStatus CHAR(1), @Reason VARCHAR(40)
+      DECLARE @UseOldLims BIT
+      SET @UseOldLims = 0
+  "
+  replace_in "$P" "        -- QC results from LIMS
+          SELECT @QcCount = COUNT(*),
+                 @QcFail  = SUM(CASE WHEN Result = 'F' THEN 1 ELSE 0 END)
+          FROM LIMS_OLD.dbo.TestResult
+          WHERE LotNo = @BatchNo
+  " "        -- QC results from LIMS
+          IF @UseOldLims = 1
+          BEGIN
+              SELECT @QcCount = COUNT(*),
+                     @QcFail  = SUM(CASE WHEN Result = 'F' THEN 1 ELSE 0 END)
+              FROM LIMS_OLD.dbo.TestResult
+              WHERE LotNo = @BatchNo
+          END
+          ELSE
+          BEGIN
+              SELECT @QcCount = COUNT(*),
+                     @QcFail  = SUM(CASE WHEN r.ResultCode <> 'PASS' THEN 1 ELSE 0 END)
+              FROM [LIMSPROD].LIMS.dbo.SampleResult r
+              WHERE r.BatchNo = @BatchNo
+                AND r.Reviewed = 1
+          END
+  "
+  git add "$P"
+  commit_as "Luis Rincon" "luis.rincon@batchtrack.example" "2016-02-09T22:18:04-05:00" \
+    "LIMS cutover: read QC results from LIMSPROD" \
+    "Only reviewed results count. Old LIMS lookup kept behind @UseOldLims for rollback until LIMS_OLD is decommissioned."
+
+  cat > legacy/jobs/job_NightlyBatchRelease.sql <<'EOF'
+  -- SQL Agent job definition, scripted from PRODSQL01 (2016-02-10)
+  USE msdb
+  GO
+  EXEC dbo.sp_add_job
+       @job_name = N'BT - Nightly Batch Release',
+       @enabled = 1,
+       @owner_login_name = N'sa',
+       @notify_level_email = 2,
+       @notify_email_operator_name = N'DBA Team'
+  GO
+  EXEC dbo.sp_add_jobstep
+       @job_name = N'BT - Nightly Batch Release',
+       @step_name = N'Evaluate quarantined batches',
+       @subsystem = N'TSQL',
+       @database_name = N'BatchRecords',
+       @command = N'EXEC dbo.sp_EvaluateBatchRelease @SiteCode = NULL, @RunUser = ''SQLAGENT''',
+       @on_success_action = 1,
+       @on_fail_action = 2
+  GO
+  EXEC dbo.sp_add_jobschedule
+       @job_name = N'BT - Nightly Batch Release',
+       @name = N'Daily 02:30',
+       @freq_type = 4,
+       @freq_interval = 1,
+       @active_start_time = 023000
+  GO
+  EXEC dbo.sp_add_jobserver
+       @job_name = N'BT - Nightly Batch Release',
+       @server_name = N'(local)'
+  GO
+  EOF
+  git add legacy/jobs/job_NightlyBatchRelease.sql
+  commit_as "Luis Rincon" "luis.rincon@batchtrack.example" "2016-02-10T09:30:47-05:00" \
+    "Script the SQL Agent job for batch release evaluation" \
+    "Exported from PRODSQL01 after the LIMS cutover so the job is under version control."
+prompt: >-
+  We are retiring the old SQL Server batch-record database and rewriting its
+  logic in the Python app. Nobody on the team understands
+  legacy/sp_EvaluateBatchRelease.sql, the stored procedure that sets the QA
+  disposition of quarantined batches, and QA wants every decision it makes
+  written down before we touch it. Extract its business rules into a catalog we
+  can review with QA and turn into characterization tests, including what it
+  reads and writes and anything else in the repo that depends on it. There is
+  no database here, so don't try to run anything, and don't change any files.
+read_only: true
+# Report-only task: guard against mutating git commands (commit, stash, checkout,
+# reset, restore) that the read-only file fingerprint cannot see, and against drift in
+# the setup the rubric depends on. 6 commits = fixture baseline + 4 legacy + 'setup'.
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 6 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test "$(git log -1 --format=%s)" = setup &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD &&
+  test -z "$(git ls-files --others --exclude-standard)" &&
+  test "$(wc -l < legacy/sp_EvaluateBatchRelease.sql)" -eq 153 &&
+  grep -q 'SET @MinDays = 14' legacy/sp_EvaluateBatchRelease.sql &&
+  grep -q 'softgels 21 days' legacy/sp_EvaluateBatchRelease.sql &&
+  grep -q 'SET @UseOldLims = 0' legacy/sp_EvaluateBatchRelease.sql
+rubric:
+  must:
+    - >-
+      Catalogs the yield rule from legacy/sp_EvaluateBatchRelease.sql (~L55-66)
+      with its constants: yield = QtyActual * 100 / QtyPlanned; minimum yield
+      by product family SG 96, TB 98, LQ 97, any other family 95; yield below
+      (minimum - 5) sets status 'R' (reason YIELD BELOW LIMIT); otherwise yield
+      below the minimum or above 102 sets status 'H' (YIELD OUT OF RANGE). Cites
+      path:line for it.
+    - >-
+      Catalogs the quarantine-time rule (~L45-52): family SG must have been in
+      quarantine at least 14 days and every other family 7, measured as
+      DATEDIFF(dd, QuarantineDate, GETDATE()); a batch that has not reached it is
+      skipped (GOTO NextBatch) with no update, so it stays in status 'Q'.
+    - >-
+      Catalogs the deviation and QC rules (~L69-111): open deviations (Status not
+      'C'/'X') of severity 3 or higher set 'R' (CRITICAL DEVIATION) and severity
+      2 sets 'H' (OPEN DEVIATION) when no outcome was decided yet; QC comes from reviewed rows of
+      [LIMSPROD].LIMS.dbo.SampleResult, where no reviewed results leaves the batch
+      in 'Q' without update and any ResultCode other than 'PASS' sets 'R' (QC
+      FAILURE).
+    - >-
+      Documents the outcomes and side effects: when no rule fires the status is
+      'A' (AUTO RELEASE); the proc updates the status and reason on
+      dbo.tbl_Batch and inserts into dbo.tbl_AuditTrail;
+      only for 'A' it inserts a dbo.ERP_Outbox row (MsgType 'GR'), and only for
+      'R' it sends mail through msdb.dbo.sp_send_dbmail (profile QA_ALERTS).
+  should:
+    - >-
+      Notes that the inline comment "softgels 21 days" (~L45) contradicts the
+      coded 14 and uses git history to explain it: commit "CR-0457: shorten
+      softgel quarantine hold to 14 days" (Mariana Ortega, 2014-08-21) changed
+      only the value.
+    - >-
+      Marks the @UseOldLims = 1 branch reading LIMS_OLD.dbo.TestResult (~L92-98)
+      as dead because @UseOldLims is hardcoded to 0 (~L27), ideally dating it
+      with the 2016-02-09 "LIMS cutover" commit.
+    - >-
+      Records at least two quirks a rewrite must decide on: INT integer division
+      truncates the yield (e.g. 979/1000 -> 97, a hold for TB); a NULL QtyActual
+      gives a NULL yield so neither yield check fires and the batch can be
+      auto-released; QtyPlanned = 0 divides by zero; the QC-count check can skip
+      a batch already marked for rejection; ExpiryDate is set to NULL for
+      non-'A' outcomes; 'H' batches are never picked up again because the
+      cursor selects only Status = 'Q'; deviations with NULL Status are ignored
+      by NOT IN.
+    - >-
+      Describes error behavior: @@ERROR is checked only after the UPDATE, the
+      RAISERROR uses severity 10 (informational, so the caller/job does not
+      fail), and the ERP_Outbox insert and mail run after COMMIT without error
+      checks (a released batch can miss the ERP).
+    - >-
+      Identifies the caller and hidden dependencies: SQL Agent job 'BT - Nightly
+      Batch Release' in legacy/jobs/job_NightlyBatchRelease.sql runs it daily at
+      02:30 with @SiteCode = NULL, and it depends on the linked server LIMSPROD,
+      the msdb mail profile QA_ALERTS and an unknown ERP_Outbox consumer; gives
+      boundary characterization cases (e.g. TB yield 98 vs 97, 93 vs 92).
+  must_not:
+    - >-
+      States that the procedure's softgel quarantine minimum is 21 days (the
+      stale comment) instead of the coded 14.
+    - >-
+      Interprets status 'R' as released/approved (it is the rejection outcome
+      that triggers the "Batch rejected" mail; release is 'A').
+    - >-
+      Presents the LIMS_OLD.dbo.TestResult lookup (Result = 'F') as the QC check
+      the procedure currently applies, rather than as the dead @UseOldLims path.

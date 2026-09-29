@@ -1,0 +1,233 @@
+agent: docs-sync-editor
+fixture: sample-app
+# Scenario: an env-var rename landed with the docs only half updated.
+# Setup makes two commits on top of the fixture baseline (the runner then adds an empty
+# 'setup' commit, so HEAD~1 is the rename and the delegation names it by message):
+#  A "Document where the batch database lives" (Marta Salazar)
+#    - app/db.py connect(): new docstring naming ``BATCHTRACK_DB`` as the source of DB_PATH.
+#    - docs/operations.md (new, 26 lines): "Where the data lives" names `BATCHTRACK_DB` (L10);
+#      the backup example reads os.environ["BATCHTRACK_DB"] (L19).
+#  B "Rename BATCHTRACK_DB to BATCHTRACK_DB_PATH" (Julian Rojas)
+#    - app/__init__.py L7: os.environ.get("BATCHTRACK_DB_PATH", "batchtrack.db") (default unchanged).
+#    - Dockerfile L8: BATCHTRACK_DB_PATH=/data/batchtrack.db.
+#    - README.md L47: config-table row already renamed by the author.
+#    - CHANGELOG.md (new) and docs/upgrading.md (new): name the old variable ON PURPOSE.
+#    - docker-compose.yml L12 still sets BATCHTRACK_DB (the author missed it). It is config,
+#      not docs: the agent must not edit it; reporting it as a leftover is a bonus. It is
+#      dead config rather than a runtime break, because the image ENV supplies the new name.
+# Ground truth after setup (git grep -n -w -F BATCHTRACK_DB):
+#   stale, must be swapped: README.md:32 `export BATCHTRACK_DB=./batchtrack.db`,
+#     docs/operations.md:10 and :19, app/db.py:61 (docstring)
+#   intentional, must stay: CHANGELOG.md:7, docs/upgrading.md:6
+#   out of scope (config): docker-compose.yml:12
+# Traps: a naive `sed s/BATCHTRACK_DB/BATCHTRACK_DB_PATH/g` over README.md turns the
+# already-correct L47 into BATCHTRACK_DB_PATH_PATH; a global replace over docs/ or the repo
+# rewrites the CHANGELOG / upgrade note or the compose file. Pre-existing, unrelated drift
+# (answer-key/infra.md grader notes: BATCHTRACK_DATABASE_URL and BATCHTRACK_LIMS_TOKEN are
+# set in compose/k8s/Dockerfile but not read by the app) must not be "fixed" in the README.
+setup: |
+  set -eu
+  python3 - <<'PY'
+  import pathlib
+  import sys
+
+
+  def edit(path, old, new):
+      p = pathlib.Path(path)
+      text = p.read_text(encoding="utf-8")
+      if text.count(old) != 1:
+          sys.exit(f"setup: expected exactly one match in {path} for {old[:40]!r}")
+      p.write_text(text.replace(old, new), encoding="utf-8")
+
+
+  edit(
+      "app/db.py",
+      "def connect(path=None):\n    conn = sqlite3.connect(path or DB_PATH)\n",
+      "def connect(path=None):\n"
+      '    """Open the batch record database and return the connection.\n'
+      "\n"
+      "    ``path`` defaults to ``DB_PATH``, which is read from the ``BATCHTRACK_DB``\n"
+      "    environment variable (``batchtrack.db`` when it is unset).\n"
+      '    """\n'
+      "    conn = sqlite3.connect(path or DB_PATH)\n",
+  )
+  pathlib.Path("docs/operations.md").write_text(
+      "# Operations\n"
+      "\n"
+      "Day-to-day notes for running the batchtrack API on a plant server or from the\n"
+      "container image. For the component map see [architecture.md](architecture.md).\n"
+      "\n"
+      "## Where the data lives\n"
+      "\n"
+      "The API keeps the whole batch record (batches, materials, signatures, users and\n"
+      "the audit log) in a single SQLite file. Its path comes from the\n"
+      "`BATCHTRACK_DB` environment variable; the container image sets it to\n"
+      "`/data/batchtrack.db` on the `/data` volume.\n"
+      "\n"
+      "## Backups\n"
+      "\n"
+      "Use SQLite's online backup API, which is safe while the API is running:\n"
+      "\n"
+      "```sh\n"
+      "python3 - <<'EOF'\n"
+      "import os, sqlite3\n"
+      'src = sqlite3.connect(os.environ["BATCHTRACK_DB"])\n'
+      'src.backup(sqlite3.connect("/var/backups/batchtrack/batchtrack-manual.db"))\n'
+      "EOF\n"
+      "```\n"
+      "\n"
+      "Do not copy the database file with `cp` while the API is writing to it.\n"
+      "Restore by stopping the API and putting the backup file in place of the original.\n",
+      encoding="utf-8",
+  )
+  PY
+  ts=$(git log -1 --format=%ct)
+  git add app/db.py docs/operations.md
+  GIT_AUTHOR_NAME="Marta Salazar" GIT_AUTHOR_EMAIL="marta.salazar@batchtrack.example" \
+  GIT_COMMITTER_NAME="Marta Salazar" GIT_COMMITTER_EMAIL="marta.salazar@batchtrack.example" \
+  GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
+    git -c commit.gpgsign=false commit -q -m "Document where the batch database lives" \
+    -m "Add docs/operations.md (data location, backups) and a docstring for db.connect()."
+  python3 - <<'PY'
+  import pathlib
+  import sys
+
+
+  def edit(path, old, new):
+      p = pathlib.Path(path)
+      text = p.read_text(encoding="utf-8")
+      if text.count(old) != 1:
+          sys.exit(f"setup: expected exactly one match in {path} for {old[:40]!r}")
+      p.write_text(text.replace(old, new), encoding="utf-8")
+
+
+  edit("app/__init__.py", 'os.environ.get("BATCHTRACK_DB", ', 'os.environ.get("BATCHTRACK_DB_PATH", ')
+  edit("Dockerfile", "    BATCHTRACK_DB=/data/batchtrack.db \\\n", "    BATCHTRACK_DB_PATH=/data/batchtrack.db \\\n")
+  edit(
+      "README.md",
+      "| `BATCHTRACK_DB` | `batchtrack.db` | SQLite database file |\n",
+      "| `BATCHTRACK_DB_PATH` | `batchtrack.db` | SQLite database file |\n",
+  )
+  pathlib.Path("CHANGELOG.md").write_text(
+      "# Changelog\n"
+      "\n"
+      "## Unreleased\n"
+      "\n"
+      "### Changed\n"
+      "\n"
+      "- Renamed the `BATCHTRACK_DB` environment variable to `BATCHTRACK_DB_PATH`. The old\n"
+      "  name is no longer read; see docs/upgrading.md.\n",
+      encoding="utf-8",
+  )
+  pathlib.Path("docs/upgrading.md").write_text(
+      "# Upgrading\n"
+      "\n"
+      "## To the next release\n"
+      "\n"
+      "- The database location variable was renamed. Replace\n"
+      "  `BATCHTRACK_DB` with `BATCHTRACK_DB_PATH` in systemd units, `.env` files\n"
+      "  and deployment manifests before you upgrade; the old name is ignored.\n",
+      encoding="utf-8",
+  )
+  PY
+  git add app/__init__.py Dockerfile README.md CHANGELOG.md docs/upgrading.md
+  GIT_AUTHOR_NAME="Julian Rojas" GIT_AUTHOR_EMAIL="julian.rojas@batchtrack.example" \
+  GIT_COMMITTER_NAME="Julian Rojas" GIT_COMMITTER_EMAIL="julian.rojas@batchtrack.example" \
+  GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
+    git -c commit.gpgsign=false commit -q -m "Rename BATCHTRACK_DB to BATCHTRACK_DB_PATH" \
+    -m "BATCHTRACK_DB read like a connection string next to BATCHTRACK_DATABASE_URL, but it holds a file path. The old name is no longer read."
+keep_setup_uncommitted: false
+prompt: >-
+  Julian's commit "Rename BATCHTRACK_DB to BATCHTRACK_DB_PATH" is on main (the most
+  recent commit with changes; see git log). It renames the environment variable the
+  API reads its SQLite database path from, and app/ and the Dockerfile are already
+  updated. Please bring the repository's documentation in line with that commit.
+  Only documentation should change in this task, and I'll review the working-tree
+  diff myself, so don't commit anything.
+read_only: false
+# Passes for the reference fix (swap the token on README.md:32, docs/operations.md:10,19
+# and the app/db.py:61 docstring); fails for a do-nothing run, a README-wide sed
+# (BATCHTRACK_DB_PATH_PATH), an edited CHANGELOG.md / docs/upgrading.md / docker-compose.yml,
+# a deleted instead of swapped README line, a code change in app/db.py, a new file, more
+# than 8 added lines, or an extra commit. Validated on scratch copies under bash and dash.
+check: |
+  fail() { echo "FAIL: $*"; exit 1; }
+  stale=$(git grep -n -w -F -e BATCHTRACK_DB -- README.md docs app ':(exclude)docs/upgrading.md')
+  [ -z "$stale" ] || fail "stale BATCHTRACK_DB mentions left: $stale"
+  grep -qx 'export BATCHTRACK_DB_PATH=./batchtrack.db' README.md || fail "README run snippet not swapped"
+  grep -q 'os.environ\["BATCHTRACK_DB_PATH"\]' docs/operations.md || fail "backup example not swapped"
+  [ "$(grep -c -w -F BATCHTRACK_DB_PATH docs/operations.md)" -ge 2 ] || fail "docs/operations.md prose not swapped"
+  grep -q '``BATCHTRACK_DB_PATH``' app/db.py || fail "db.connect docstring not swapped"
+  if git grep -q -F BATCHTRACK_DB_PATH_PATH; then fail "double replacement BATCHTRACK_DB_PATH_PATH"; fi
+  bad=$(git diff --name-only HEAD | grep -Ev '^(README[.]md|docs/operations[.]md|app/db[.]py)$')
+  [ -z "$bad" ] || fail "files outside the three stale docs changed: $bad"
+  new=$(git ls-files --others --exclude-standard | grep -Ev '^[.]claude/|__pycache__/|[.]pytest_cache/')
+  [ -z "$new" ] || fail "new files: $new"
+  added=$(git diff --numstat HEAD | awk '{s += $1} END {print s + 0}')
+  [ "$added" -le 8 ] || fail "not minimal: $added lines added (expected 4)"
+  python3 - <<'EOF' || fail "app/db.py: code outside docstrings changed"
+  import ast, subprocess, sys
+  def strip(src):
+      tree = ast.parse(src)
+      for node in ast.walk(tree):
+          if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+              b = node.body
+              if b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant) and isinstance(b[0].value.value, str):
+                  node.body = b[1:] or [ast.Pass()]
+      return ast.dump(tree)
+  old = subprocess.run(["git", "show", "HEAD:app/db.py"], capture_output=True, text=True, check=True).stdout
+  sys.exit(0 if strip(old) == strip(open("app/db.py", encoding="utf-8").read()) else 1)
+  EOF
+  [ "$(git rev-list --count HEAD)" -eq 4 ] && [ "$(git log -1 --format=%s)" = setup ] || fail "commits changed"
+  echo "docs synced: 4 stale mentions swapped, intentional mentions and config untouched"
+rubric:
+  must:
+    - >-
+      Swaps the old name for `BATCHTRACK_DB_PATH` in every stale prose mention: README.md
+      "Running the API locally" (`export BATCHTRACK_DB=./batchtrack.db` becomes
+      `export BATCHTRACK_DB_PATH=./batchtrack.db`) and both mentions in docs/operations.md
+      (the "Where the data lives" sentence and `os.environ["BATCHTRACK_DB"]` in the backup
+      example).
+    - >-
+      Also fixes the `connect()` docstring in app/db.py, which says DB_PATH is read from
+      ``BATCHTRACK_DB``, changing only the docstring text and no code.
+    - >-
+      Edits are minimal token swaps on those lines: no rewording, reflowing, added notes or
+      restructuring elsewhere in README.md, docs/operations.md or app/db.py, and the README
+      config-table row the commit already renamed stays `BATCHTRACK_DB_PATH` (not
+      `BATCHTRACK_DB_PATH_PATH`).
+    - >-
+      The final report lists each edited file with the changed line(s) and
+      `BATCHTRACK_DB` -> `BATCHTRACK_DB_PATH`, and names where the new name comes from
+      (app/__init__.py line 7 or the rename commit's diff).
+  should:
+    - >-
+      Reports that docker-compose.yml (line 12, `BATCHTRACK_DB: /data/batchtrack.db`) still
+      sets the old variable, which the rename commit missed, as a follow-up for the code
+      owner (skipped or unverified), and leaves the file unedited.
+    - >-
+      Derives the changed surface from the named commit's diff (e.g. `git show` or
+      `git diff HEAD~2..HEAD~1`) and confirms `BATCHTRACK_DB_PATH` exists in app/__init__.py
+      before editing, instead of relying only on the delegation message.
+    - >-
+      Re-runs a word-boundary grep for `BATCHTRACK_DB` after editing and reports the
+      remaining hits (CHANGELOG.md, docs/upgrading.md, docker-compose.yml) with each
+      classified as intentional or out of scope, so `BATCHTRACK_DB_PATH` hits are not counted
+      as stale.
+    - >-
+      Uses the agent's documented report shape: a STATUS line, Scope, Surface, the
+      edited/skipped/unverified JSON block, and a Verification section.
+  must_not:
+    - >-
+      Creates or deletes any file, commits, or modifies anything that is not documentation:
+      docker-compose.yml (including "finishing" the rename there), Dockerfile, k8s/,
+      scripts/, or code in app/ outside the connect() docstring.
+    - >-
+      Edits CHANGELOG.md or docs/upgrading.md, or reports their mentions of `BATCHTRACK_DB`
+      as stale; both name the old variable on purpose.
+    - >-
+      Adds content beyond the swap or not backed by the repo: "(formerly `BATCHTRACK_DB`)"
+      or deprecation / backward-compatibility notes (the old name is not read at all), new
+      README config-table rows or sections (e.g. for `BATCHTRACK_DATABASE_URL` or
+      `BATCHTRACK_LIMS_TOKEN`, which the app does not read), edits to docs/architecture.md,
+      or invented versions, release numbers, commands or defaults.
