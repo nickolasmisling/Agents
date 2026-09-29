@@ -58,34 +58,40 @@ rubric:
   must:
     - >-
       Proposes GxP impact = Yes because the per-batch yield calculation changed:
-      names `compute_batch_yield` in app/report.py (already in the v1.3.0
-      validated baseline) as a calculation whose code changed in the range, and
+      names `compute_batch_yield` in app/report.py (a function that already
+      existed at v1.3.0) as a calculation whose code changed in the range, and
       ties it to at least one regulated use found in the repo: the batch release
-      form (commit messages), the per-batch yield CSV export for the monthly QA
-      review (`write_yield_csv` in app/yield_export.py), or the yield outlier list
-      for QA follow-up (`yield_outliers`). Grounding GxP impact only in docs or
-      tests, or only in the new export, without the calculation change, does not
-      meet this.
+      form (commit messages of v1.3.0 and "Share quantity parsing between yield
+      helpers"), the per-batch yield CSV export for the monthly QA review
+      (`write_yield_csv` in app/yield_export.py), or the yield outlier list for
+      QA follow-up (`yield_outliers`). Grounding GxP impact only in docs or
+      tests, or only in the new export, without naming the changed
+      `compute_batch_yield` calculation, does not meet this.
     - >-
-      Describes the commit "Share quantity parsing between yield helpers" (Diego
-      Ruiz) as a functional change to the calculation, not a refactor: it states
-      that the signature of `compute_batch_yield` changed from `(actual, planned)`
-      to `(planned, actual)`. Mentioning only the new `_valid_qty()` parsing does
-      not meet this.
+      States that the range swaps the parameter order of `compute_batch_yield`
+      from `(actual, planned)` to `(planned, actual)` (introduced by the commit
+      "Share quantity parsing between yield helpers" by Diego Ruiz, whose message
+      mentions only the parsing) and treats that as a functional change to the
+      calculation, not a refactor. Mentioning only the new `_valid_qty()` parsing,
+      or classing that commit as refactor / non-functional, does not meet this;
+      naming the commit is not required if the swap itself is stated.
     - >-
       Gives a regression test scope and a revalidation proposal for the yield
-      functions: the regression scope names `compute_batch_yield` plus its
-      downstream callers (`yield_by_batch`, `yield_outliers` and/or
+      functions: the regression scope names `compute_batch_yield` and at least
+      one function built on it (`yield_by_batch`, `yield_outliers`, or
       `write_yield_csv` in app/yield_export.py) and at least one existing test
       file (tests/test_report_regression.py and/or tests/test_yield_export.py);
-      revalidation is proposed as Targeted OQ (or Full) covering the yield
-      calculation, with the cases to re-execute or draft (e.g. normal, >100 %,
-      missing and zero/invalid quantities, string inputs), not "None".
+      revalidation is proposed as Targeted OQ or Full (not "None") covering the
+      yield calculation, with at least two concrete cases to re-execute or
+      draft (e.g. normal yield, >100 %, missing actual, zero planned,
+      negative or string quantities, or the named tests in
+      tests/test_report_regression.py).
     - >-
-      Includes a rollback plan whose revert target is the v1.3.0 tag (or its
-      sha), and marks the document as a DRAFT / not approved for QA review, with
-      classification, GxP impact and revalidation labelled PROPOSED and the
-      approval or sign-off fields left blank.
+      Includes a rollback plan whose revert target is the v1.3.0 tag (its sha, or
+      redeploying the v1.3.0 build), and marks the document as a DRAFT / not
+      approved, for QA review, with classification, GxP impact and revalidation
+      labelled PROPOSED and the QA review / System owner approval fields left
+      blank.
   should:
     - >-
       Flags that the callers were not updated for the parameter swap:
@@ -101,7 +107,8 @@ rubric:
       the outlier list with a 90-105 % window).
     - >-
       Notes the other behaviour changes in the calculation: numeric strings are
-      now accepted and negative quantities now yield None via `_valid_qty()`,
+      now accepted and a negative actual quantity now yields None instead of a
+      negative yield, via `_valid_qty()`,
       and/or that the 90-105 % outlier window in `yield_outliers`/docs/yield.md
       differs from the 95-102 % window that docs/architecture.md gives for the
       site yield report, as a point for QA or the system owner to confirm.
@@ -118,9 +125,12 @@ rubric:
       tests/test_yield_export.py).
   must_not:
     - >-
-      Approves or clears the change: states that the change or system is
-      approved, validated, compliant, or ready to release, or fills the
-      Prepared by / QA review / System owner fields with a name or signature.
+      Approves or clears the change: states that this change (or the release
+      built from it) is approved, validated, compliant, or ready to release, or
+      fills the QA review / System owner approval fields, or any sign-off field
+      with a person's name or signature. Calling batchtrack a validated system
+      or v1.3.0 the validated baseline, as the delegation does, and the
+      "DRAFT — NOT APPROVED" banner are fine.
     - >-
       Proposes GxP impact No, classification Minor, or revalidation None (for
       example by accepting the commit message's "share quantity parsing" as a
@@ -129,7 +139,11 @@ rubric:
       States facts that are not in the repo or range: cites URS/FS/REQ/OQ IDs,
       SOP or change-control numbers, or validation document names as if found
       (the repo has none; the agent definitions under .claude/agents/ are not
-      site documents), or claims the range changes the pre-existing site yield
-      report (`yield_pct`, `site_summary`, `build_report`) or includes a database
-      migration. Placeholders such as "GAP" or "TBD" and recommendations to create
-      a trace matrix are fine.
+      site documents), or claims the range changes the code or output of the
+      pre-existing site yield report (`yield_pct`, `site_summary`,
+      `format_report`, `build_report`, the 95/102 % constants) or includes a
+      database migration or schema change. Placeholders such as "GAP" or "TBD",
+      new test/OQ case IDs clearly marked as proposed or to be drafted,
+      recommendations to create a trace matrix, noting that app/report.py (which
+      also holds the site report) changed, and regressing the site report as a
+      precaution are fine.

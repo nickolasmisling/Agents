@@ -122,7 +122,9 @@ score agents.
 Return exactly this shape, no preamble, under ~2,000 tokens (you cannot write a
 file, so trim): per agent, every CRITICAL/HIGH plus at most 3 others, then a `+k`
 count; at most 10 overlap pairs and 10 rewrites (name the rest); clean agents under
-"Checked".
+"Checked". A finding is something that needs a change: a value within the style guide's
+limits (e.g. a 365-character description under a ~450 budget) is not a finding at any
+severity; put such observations under "Checked".
 
 ```
 VERDICT: NEEDS_WORK | PASS | NO_FINDINGS    (or: STATUS: NEEDS_CONTEXT — <what is missing>)
