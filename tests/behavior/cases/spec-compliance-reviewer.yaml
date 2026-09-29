@@ -1,0 +1,90 @@
+agent: spec-compliance-reviewer
+fixture: sample-app
+# Spec committed on main first, then the feature/export-csv scenario (4 commits + the
+# staged None fix, committed here as a 5th commit). Ground truth for app/export.py on the branch:
+#   AC1 header/column order ............ MET       (DEFAULT_COLUMNS, test_header_and_rows)
+#   AC2 two decimals ("985.00") ........ DEVIATES  (_cell: f"{float(value):.1f}", test_quantities_have_one_decimal asserts "1000.0")
+#   AC3 empty cell for missing qty ..... MET       (_cell: if value is None: return "", test_missing_actual_quantity_is_left_empty)
+#   AC4 status filter / none = all ..... MET       (export_from_db status=None, "WHERE status = ?")
+#   AC5 site filter .................... MISSING   (export_from_db has no site argument; only pre-existing batches.list_batches filters by site)
+#   AC6 ordered by batch_no ascending .. MET       ("ORDER BY batch_no", test_export_from_db_filters_by_status)
+#   AC7 returns data-row count ......... MET       (count returned, header excluded)
+#   Extra: export_batches_csv(columns=...) arbitrary column selection (spec says "exactly these columns").
+#   tests/test_export.py: 5 passed.
+setup: |
+  set -eu
+  mkdir -p docs/specs
+  cat > docs/specs/csv-export.md <<'EOF'
+  # BT-212: CSV export of batch listings
+
+  Owner: QA reporting. Status: approved for implementation.
+
+  QA reviewers pull batch listings into a spreadsheet for the weekly release
+  review. Add a CSV export of batches to the Python package (`app/export.py`).
+
+  ## Acceptance criteria
+
+  1. The first row is a header with exactly these columns, in this order:
+     `batch_no`, `product`, `site`, `status`, `planned_qty`, `actual_qty`.
+  2. Quantity columns (`planned_qty`, `actual_qty`) are written with exactly two
+     decimal places, for example `985.00` and `1000.00`.
+  3. A batch with no recorded quantity (for example an `in_progress` batch that
+     has no `actual_qty` yet) is exported with an empty cell for that quantity.
+     The export must not fail on such rows.
+  4. The database export can be limited to a single status (for example only
+     `released` batches). When no status is given, all batches are exported.
+  5. The database export can be limited to a single site (`BOG`, `BAQ`, `CLO` or
+     `MDE`). When no site is given, batches from all sites are exported.
+  6. Rows in the database export are ordered by batch number, ascending.
+  7. Each export function returns the number of data rows it wrote (the header
+     row is not counted).
+
+  ## Out of scope
+
+  - Excel (`.xlsx`) output.
+  - An HTTP endpoint or UI button for the export. This ticket covers the Python
+    functions only; the API route is tracked separately in BT-219.
+  EOF
+  ts=$(( $(git log -1 --format=%ct) + 600 ))
+  git add docs/specs/csv-export.md
+  GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
+    git -c user.name="Andres Mejia" -c user.email="andres.mejia@batchtrack.example" -c commit.gpgsign=false \
+    commit -q -m "Add spec for batch CSV export (BT-212)"
+  bash "$FIXTURES/scenarios/feature_branch.sh"
+  ts=$(( $(git log -1 --format=%ct) + 3000 ))
+  GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
+    git -c user.name="Valentina Rios" -c user.email="valentina.rios@batchtrack.example" -c commit.gpgsign=false \
+    commit -q -m "Leave missing quantities empty in CSV export"
+keep_setup_uncommitted: false
+prompt: >-
+  Ticket BT-212 (CSV export of batch listings) has been implemented on the
+  feature/export-csv branch, which is checked out; the work is everything on the
+  branch since main. The approved acceptance criteria are in
+  docs/specs/csv-export.md. Check the implementation against that spec
+  requirement by requirement and tell me whether it can be merged as-is or needs
+  more work before QA picks it up. This is a read-only review: do not modify
+  files or change git state (no commits, checkouts or stashes).
+read_only: true
+# Guards git state, which the file fingerprint cannot see: still on the branch, no new
+# commits (the runner's empty 'setup' commit is HEAD), no tracked changes.
+check: >-
+  test "$(git rev-parse --abbrev-ref HEAD)" = feature/export-csv &&
+  test "$(git log -1 --format=%s)" = setup &&
+  test "$(git rev-list --count main..HEAD)" = 6 &&
+  test -z "$(git status --porcelain --untracked-files=no)"
+rubric:
+  must:
+    - Marks the two-decimal quantity requirement (spec criterion 2, e.g. `985.00`) as DEVIATES, quoting the spec's two decimals against the one-decimal formatting `f"{float(value):.1f}"` in `_cell()` in app/export.py.
+    - Marks the site-filter requirement (spec criterion 5) as MISSING because `export_from_db` in app/export.py takes no site argument and its query has no site condition (PARTIAL is acceptable only if the report states the same thing about export_from_db); it is not marked MET.
+    - Marks the header/column-order requirement, the status-filter requirement and the ordered-by-batch-number requirement as MET, each citing app/export.py (DEFAULT_COLUMNS; `status` parameter with `WHERE status = ?`; `ORDER BY batch_no`) with a line reference or test name.
+    - Gives an overall VERDICT of NEEDS_WORK (not PASS).
+  should:
+    - Marks the empty-cell-for-missing-quantity requirement (criterion 3) as MET, citing the `if value is None: return ""` branch of `_cell()` and/or `tests/test_export.py::test_missing_actual_quantity_is_left_empty`.
+    - Marks the returns-row-count requirement (criterion 7) as MET (export_batches_csv returns the data-row count without the header, and export_from_db returns it).
+    - Lists the `columns=` parameter of `export_batches_csv` (arbitrary column selection) under extras / not in spec, without treating it as a failing requirement.
+    - Runs tests/test_export.py (or targeted tests from it), reports 5 passed, and notes that `test_quantities_have_one_decimal` asserts the one-decimal output that contradicts the spec.
+    - Cites spec source locations for the requirements (docs/specs/csv-export.md line numbers or criterion numbers) and code evidence as path:line.
+  must_not:
+    - Marks the missing-quantity requirement (criterion 3) as MISSING or DEVIATES, or claims the export still raises TypeError on a None quantity (the fix is committed on the branch).
+    - Claims the query in `export_from_db` is SQL-injectable (the status value is bound with a `?` placeholder), or marks any requirement as failing for code-quality or style reasons.
+    - Reports the out-of-scope items (Excel/.xlsx output, an HTTP endpoint or UI button) as MISSING requirements or counts them toward NEEDS_WORK.

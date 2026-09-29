@@ -1,0 +1,78 @@
+agent: concurrency-reviewer
+fixture: sample-app
+prompt: >-
+  Please review app/cache.py and services/inventory/inventory.go for concurrency
+  problems before we ship two changes. First, ops wants to call cache.warm_cache every
+  couple of minutes from a background scheduler thread inside the API process. The API
+  (app/api.py) runs on ThreadingHTTPServer, so every request gets its own thread, and the
+  request handlers are about to start reading batches through cache.get_batch and calling
+  cache.invalidate after writes. Second, the Go reconciler (services/inventory, stdlib
+  only) will run nightly against the warehouse API with a few thousand lots per run, and
+  we may later reuse Reconcile as a library from a long-running service. Report the
+  problems you find with the fix you recommend for each. This is a review only, so do not
+  modify, create or delete any files in the repo.
+read_only: true
+rubric:
+  must:
+    - >-
+      Flags the unsynchronised check-then-act on the module-level `_cache` dict in
+      app/cache.py (`get_batch` L27-34: `batch_no in _cache` / `_expired()` then
+      `_cache[batch_no]`, and/or `invalidate` L37-39: `in` then `del`), which is shared by
+      the `warm_cache` ThreadPoolExecutor workers and request threads. It gives a concrete
+      two-thread interleaving with a wrong result, for example thread B's `invalidate`
+      deletes the key between thread A's membership check and its `_cache[batch_no]` read
+      (KeyError), or two threads both miss the same key and both call `_load` (duplicate
+      DB loads, last write wins).
+    - >-
+      Flags `_stats["hits"] += 1` / `_stats["misses"] += 1` in `get_batch` (app/cache.py
+      L29/L31) as a separate, non-atomic read-modify-write shared across threads, with
+      the lost-update interleaving (both threads read the same count and both store
+      count+1, so one increment is lost and hits/misses/hit_rate are wrong).
+    - >-
+      Flags the unsynchronised writes to the `found` map in `Reconcile`
+      (services/inventory/inventory.go L118, `found[lot.LotNo] = Discrepancy{...}`) from
+      up to 8 concurrent goroutines, and states the consequence (a data race; the Go
+      runtime can abort the process with `fatal error: concurrent map writes`, or the map
+      is corrupted). The fix is a `sync.Mutex` around the write, or sending results over
+      a channel to a single goroutine that writes the map.
+    - >-
+      Flags the goroutine leak in `onHandWithin` (inventory.go L85-96). `ch` is
+      unbuffered, so when the timeout / `ctx.Done()` branch of the select wins, nobody
+      ever receives and the worker goroutine blocks forever on `ch <- result{...}`, one
+      leaked goroutine per timed-out lot. The fix is `make(chan result, 1)`, or calling
+      `c.OnHand(ctx, lotNo)` directly because it already honours ctx.
+  should:
+    - >-
+      The Python fix uses the existing `_lock` (or one equivalent lock, or per-key
+      futures/locks) around lookup, insert, invalidate and the counter updates, and keeps
+      the `_load` DB call outside the lock or explicitly justifies holding it, and/or
+      uses `_cache.get()` / `_cache.pop(batch_no, None)`. It points out that `_lock`
+      already exists but only `clear()` uses it.
+    - >-
+      Notes the stale-fill race: thread A misses and `_load`s the old row, thread B
+      commits an update and calls `invalidate` (nothing to delete yet), then A stores the
+      stale value, which is served for up to TTL_SECONDS (300 s).
+    - >-
+      Tries the Go race detector or `go vet` without changing the repo (for example
+      `go vet` in services/inventory, or `go test -race` with a probe test in a temp copy
+      outside the repo) and reports the command and result. Alternatively it states that
+      no race run was possible because the package has no `_test.go` files.
+    - >-
+      Lists as safe (not as findings) `Reconcile`'s semaphore `sem` capping concurrency at
+      8, the `errs` channel buffered to `len(lots)`, and `clear()` holding `_lock`.
+    - >-
+      Uses the agent's report shape: `VERDICT: NEEDS_WORK`, and for each finding a
+      severity, path:line, Actors, Interleaving and Fix. It ranks the concurrent map write
+      (process crash) at least as severe as the goroutine leak.
+  must_not:
+    - >-
+      Reports `clear()` in app/cache.py (which holds `_lock`) as racy, or reports the
+      `hit_rate` division in `stats()` as a possible division by zero (it is guarded by
+      `if total`).
+    - >-
+      Reports the `errs` channel, the `sem` semaphore or `return found, <-errs` in
+      `Reconcile` as a deadlock, a blocked send, a goroutine leak or unbounded
+      concurrency (`errs` is buffered to len(lots) and `sem` caps concurrency at 8).
+    - >-
+      Reports a loop-variable capture bug for `lot` in `Reconcile` as a defect (`lot` is
+      passed to the goroutine as an argument, and go.mod declares go 1.22).

@@ -1,0 +1,34 @@
+agent: architecture-reviewer
+fixture: sample-app
+# No setup: the review targets the committed fixture as-is.
+prompt: >-
+  Architecture review, read-only. We are about to build more endpoints on the
+  Python backend and want to know first whether its structure is sound. Review
+  the package in app/ against docs/architecture.md: where responsibilities live
+  (HTTP handling, business rules, data access and transactions, configuration,
+  external integrations, caching), which way dependencies point between the
+  modules, whether modules follow one consistent pattern, and whether the code
+  actually matches what the architecture doc describes. Scope is app/ and its
+  tests; web/, services/ and the deployment files are out of scope. Do not
+  modify any files. Report an overall verdict, then the structural problems in
+  priority order with file:line evidence, what each one makes hard (testing,
+  change, correctness), and the smallest structural fix for each. Leave
+  line-level bugs to code review unless one is a symptom of a structural
+  problem.
+read_only: true
+rubric:
+  must:
+    - "Identifies the duplicated batch-number normalisation/validation: utils.clean_batch_no with its _BATCH_NO regex (app/utils.py ~L10-23) copies batches.normalize_batch_no with BATCH_NO_RE (app/batches.py ~L7-15); api.py do_POST calls the utils copy and create_batch then calls the batches copy, so the rule has two owners that can drift. Recommends keeping one owner (e.g. batches.normalize_batch_no) and deleting or re-pointing the other."
+    - "Reports at least one concrete divergence between docs/architecture.md and the code, with evidence from the code. Any of these counts: (a) the request flow shows app.api -> LIMS REST API, but app/api.py never imports or calls lims_client (nothing in app/ does); (b) the doc says the API process runs scheduled background jobs in-process, but nothing in app/ schedules anything (cache.warm_cache is never invoked); (c) the doc describes the API as over SQLite while db/migrations/ (PostgreSQL) is the shared-database schema, and app/db.py SCHEMA is a second schema definition; (d) the doc says audit_log records old and new values for every change to a GxP record, but signatures.update_signature and delete_signature write no audit entry."
+    - "Identifies inconsistent connection/transaction ownership, naming a specific function: e.g. batches.set_actual_qty takes db_path and opens its own connection with db.connect while its sibling functions take a conn (pattern drift from db.session / conn injection), or domain functions (create_batch, release_batch, sign_batch, create_user) call conn.commit() themselves while api.py wraps them in db.session(), which also owns commit/rollback, so multi-step operations cannot be made atomic and the session's rollback cannot undo them."
+    - "States an explicit overall verdict on the layering and gives, for its main structural findings, file:line evidence, the consequence (what becomes hard to test or change), and a concrete smallest fix rather than a rewrite proposal."
+  should:
+    - "Flags configuration placement: config and secrets are import-time module globals in app/__init__.py (SECRET_KEY and LIMS_API_TOKEN as literals, DB_PATH and LIMS_BASE_URL read once at import) that db.py and lims_client.py bind at import time, leaving no seam to configure or fake them (e.g. lims_client uses urllib.request directly with no injectable transport); suggests a settings object or injected client."
+    - "Flags that the HTTP boundary has no single serialisation/error-mapping layer: GET /batches/<id> returns the raw DB row (snake_case columns) while the list endpoint maps rows through _summary to camelCase, and/or domain exceptions (LookupError from release_batch, ValueError from int()) are not mapped to HTTP status codes in one place."
+    - "Flags app/cache.py as a parallel data-access path: _load runs its own SELECT on batches instead of going through batches.py, it keeps module-global mutable state, and no write path (release_batch, set_actual_qty) calls cache.invalidate, so wiring it into the API would serve stale batch status."
+    - "Notes that audit logging is applied ad hoc per function (release_batch, set_actual_qty and sign_batch call db.write_audit; update_signature and delete_signature do not) instead of at one enforced seam."
+    - "Notes that app/db.py SCHEMA (created at startup by serve() -> init_db) and db/migrations/*.sql are two schema sources of truth that already diverge (002 replaces batches.site with site_id, while batches.py, api.py and report.py still use site)."
+  must_not:
+    - "States something factually wrong about the dependency structure: that app/api.py itself contains or executes SQL statements (it only delegates to batches/signatures and opens db.session), or that the app/ modules form an import cycle (they do not)."
+    - "Calls package public functions that nothing in app/ calls (e.g. lims_client.is_lot_approved, lims_client.submit_sample, cache.warm_cache, batches.batches_with_materials, batches.set_actual_qty, signatures.update_signature) dead code to be deleted. Pointing out that they are not wired into api.py, contrary to the documented flow, is fine."
+    - "Makes line-level defects (the f-string SQL in list_batches, MD5 password hashing, the paginate off-by-one, the missing urlopen timeout) the bulk of its findings instead of structural ones. Mentioning them briefly, or handing them to code review, is fine."

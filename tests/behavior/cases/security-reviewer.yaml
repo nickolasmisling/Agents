@@ -1,0 +1,72 @@
+agent: security-reviewer
+fixture: sample-app
+# No setup: the tree is clean, so the agent must review the named paths as they
+# stand in HEAD rather than a diff. Ground truth: answer-key/python-core.md
+# (PY-01, PY-04, PY-06, PY-07; false-positive traps FP-01, FP-02, FP-03).
+prompt: >-
+  We're about to open the batchtrack JSON API (app/api.py) to other plant
+  systems instead of localhost only, and I need a security review of the Python
+  app layer before sign-off. Scope: everything under app/ (it's small, read all
+  of it), with most attention on the request path, meaning api.py and what it
+  calls into: batches.py, users.py and db.py. There is no pending diff, so
+  review these files as they currently stand at HEAD. Leave out the Dockerfile,
+  k8s/, infra/, web/, services/ and dependency versions; other reviewers cover
+  those. Report in your usual format, and only list what you can actually
+  back up from the code.
+read_only: true
+# Report-only task: guard against mutating git commands (commit, stash,
+# checkout, reset), which the read-only file fingerprint cannot see.
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD
+rubric:
+  must:
+    - >-
+      Reports SQL injection (CWE-89) in `list_batches` in app/batches.py
+      (around L38/L40): the `product` and/or `site` filter values are
+      interpolated into the SQL text with f-strings. It traces the value back
+      to its source, the `product`/`site` query-string parameters of
+      `GET /batches` that app/api.py (around L46-47) passes through unchanged.
+    - >-
+      Reports that `hash_password` in app/users.py (around L10) stores
+      passwords as a single unsalted MD5 digest, and recommends a salted, slow
+      KDF (bcrypt, scrypt, argon2, or PBKDF2 with a random per-user salt).
+    - >-
+      Reports at least one hardcoded credential in app/__init__.py as a secret
+      committed to source control: `SECRET_KEY` (around L9) and/or
+      `LIMS_API_TOKEN` (around L14). The fix loads it from the environment or a
+      secret store, as the file already does for `DB_PATH`/`LIMS_BASE_URL`.
+  should:
+    - >-
+      Flags the `==` comparison of password hashes in `verify_password`
+      (app/users.py around L44) as not constant-time, and recommends
+      `hmac.compare_digest` (CWE-208).
+    - >-
+      The SQL injection fix binds `product` and `site` with `?` placeholders
+      and `params.append(...)`, the same way the existing `status` filter does.
+    - >-
+      Gives a concrete exploit for the injection, e.g. `?site=x' OR '1'='1`
+      returning every batch, or a `UNION SELECT ... FROM users` that leaks
+      usernames and password hashes through the `GET /batches` response.
+    - >-
+      Flags `GET /batches/<id>/release` in app/api.py (around L57-60) as a
+      state-changing GET with no authentication (CSRF, CWE-352), and/or notes
+      that the acting `user_id` for release or signing comes from the request
+      (query string or JSON body) instead of an authenticated session.
+    - >-
+      Redacts the hardcoded secret values in the report (e.g. the first few
+      characters followed by an ellipsis) instead of printing the full
+      `SECRET_KEY` or LIMS token.
+  must_not:
+    - >-
+      Reports any query in app/users.py (`find_user`, `list_users`, including
+      its `sql += " WHERE role = ?"` concatenation, or `create_user`) as SQL
+      injection. Each one binds every value with `?` placeholders.
+    - >-
+      Claims that the `status` filter in `list_batches` (app/batches.py around
+      L41-43) or the f-string `UPDATE signatures SET {...} WHERE id = ?` in
+      `update_signature` (app/signatures.py around L43) is injectable. Both
+      join only constant fragments and bind the values. A note that either is
+      safe or merely fragile is not a violation.
