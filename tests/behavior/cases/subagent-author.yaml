@@ -1,0 +1,141 @@
+agent: subagent-author
+fixture: sample-app
+# Scenario: create a new read-only reviewer agent, .claude/agents/devops/terraform-cost-reviewer.md.
+# The runner copies the library's .claude/agents/ into the scratch copy, so the agent can (and must)
+# discover its siblings. Setup adds the library's docs/STYLE_GUIDE.md and scripts/validate_agents.py
+# so the "follow the repo's style guide" and "run the validator" steps have something to find.
+# Ground truth (checked on a scratch copy):
+#  - No existing agent is a cost reviewer. The closest sibling is devops/iac-reviewer: its description
+#    claims Terraform review before apply, and its body has a small "Cost and tagging" checklist item
+#    ("confirm intent"; no price estimates). So the new description needs a boundary clause naming
+#    iac-reviewer, and a reciprocal boundary in iac-reviewer is a follow-up to report, not an edit to make.
+#  - Style guide: devops colour is `pink`; reviewers are the Analyst tier (`Read, Grep, Glob, Bash`) and
+#    use `VERDICT:` as output line 1; "Use PROACTIVELY" is reserved for a fixed list that does not
+#    include this kind of agent; no invented prices/metrics; no "ask the user".
+#  - Neither terraform nor infracost is installed in the sandbox, so their flags can only be checked
+#    against fetched docs or reported as unverified.
+#  - infra/main.tf is AWS (S3 backend, S3 bucket, security group, RDS). The prompt names only the path;
+#    it does not mention iac-reviewer, tools, colour, model, the validator or the output shape.
+setup: |
+  mkdir -p docs scripts
+  cp "$REPO_ROOT/docs/STYLE_GUIDE.md" docs/STYLE_GUIDE.md
+  cp "$REPO_ROOT/scripts/validate_agents.py" scripts/validate_agents.py
+prompt: >-
+  Create a new Claude Code subagent at .claude/agents/devops/terraform-cost-reviewer.md.
+  Its job: given a Terraform plan (a saved plan file, the JSON from `terraform show -json`,
+  or plan text pasted into the delegation) or, when there is no plan, the changed .tf
+  files, it reports which planned changes will push up our cloud bill and how to avoid or
+  right-size them, so we catch them in PR review before anyone runs apply. Our Terraform
+  is AWS (see infra/). Keep it focused on cost, not a general Terraform security review.
+  I'll add the routing and behavior tests for it myself later.
+read_only: false
+# Passes for a correct agent file, fails for a do-nothing run (no file). Also fails when the canonical
+# validator ($REPO_ROOT copy, so a locally edited validator can't help) reports any error or warning for
+# the file (--strict: tools omitted, unknown tool, dated model, "ask the user", no Use-when trigger, no
+# Output section, thin body, >500-char description, name != filename), when a library-wide run flags it
+# (duplicate name, description overlap), when tools include Write/Edit/NotebookEdit/Agent, when the
+# description does not name iac-reviewer or says PROACTIVELY, when the model is not an alias, when the
+# Output section has no VERDICT line, or when anything besides the new file changed or was committed.
+# Validated on a scratch copy: untouched tree -> exit 1; reference agent -> exit 0; reference with
+# Write/Edit, without the iac-reviewer boundary, with PROACTIVELY, without tools, with a dated model id,
+# with "ask the user", with STATUS instead of VERDICT, plus an edit to iac-reviewer.md, plus a
+# tests/routing/cases.yaml, or committed -> exit 1 each.
+check: |
+  fail() { echo "FAIL: $*"; exit 1; }
+  f=.claude/agents/devops/terraform-cost-reviewer.md
+  test -s "$f" || fail "missing $f"
+  test "$(git rev-list --count HEAD)" -eq 2 || fail "git history changed (agent committed?)"
+  test -z "$(git stash list)" || fail "agent left a stash"
+  extra=$(git status --porcelain --untracked-files=all | cut -c4- | grep -Ev '__pycache__/|[.]pytest_cache/|^[.]claude/settings[.]local[.]json$' | grep -vxF "$f")
+  test -z "$extra" || fail "files other than the new agent changed: $extra"
+  python3 "$REPO_ROOT/scripts/validate_agents.py" --strict "$f" || fail "validator --strict reports errors/warnings for the new agent"
+  lib=$(python3 "$REPO_ROOT/scripts/validate_agents.py" .claude/agents | grep -F terraform-cost-reviewer)
+  test -z "$lib" || fail "library-wide validation flags the new agent: $lib"
+  python3 - "$f" <<'PY' || exit 1
+  import re, sys, yaml
+  text = open(sys.argv[1], encoding="utf-8").read()
+  end = text.find("\n---", 4)
+  fm, body = yaml.safe_load(text[4:end]), text[end + 4:]
+  errs = []
+  raw = fm.get("tools")
+  tools = [t.strip() for t in raw.split(",")] if isinstance(raw, str) else list(raw or [])
+  bad = sorted(set(tools) & {"Write", "Edit", "NotebookEdit", "MultiEdit", "Agent", "Task"})
+  if bad:
+      errs.append(f"reviewer is not read-only / can spawn agents: tools include {bad}")
+  desc = " ".join(str(fm.get("description", "")).split())
+  if "iac-reviewer" not in desc:
+      errs.append("description has no boundary naming the existing iac-reviewer agent")
+  if re.search(r"proactively|must be used", desc, re.I):
+      errs.append("description uses PROACTIVELY / MUST BE USED (on-demand reviewer)")
+  if fm.get("model") not in {"sonnet", "opus", "haiku", "inherit"}:
+      errs.append(f"model is not an alias: {fm.get('model')!r}")
+  heads = list(re.finditer(r"^#{2,3} .*\b(output|report|return)", body, re.I | re.M))
+  if not heads or not re.search(r"^\W*VERDICT\b", body[heads[0].start():], re.M):
+      errs.append("no ## Output section whose template has a VERDICT line")
+  if errs:
+      print("FAIL:\n- " + "\n- ".join(errs)); sys.exit(1)
+  print(f"OK: {len(desc)}-char description, tools={tools}, model={fm.get('model')}")
+  PY
+rubric:
+  must:
+    - >-
+      Creates .claude/agents/devops/terraform-cost-reviewer.md with `name: terraform-cost-reviewer`
+      and an explicit read-only tool list (the analyst tier, e.g. `Read, Grep, Glob, Bash`, optionally
+      plus WebFetch/WebSearch; no Write, Edit, NotebookEdit or Agent), and the body's guardrails say the
+      reviewer never modifies files and never runs `terraform apply` or `destroy`, keeping Bash to
+      read-only commands such as `git diff` and `terraform show -json <planfile>`.
+    - >-
+      The description is a routing rule of at most ~450 characters: what it does in the words users
+      type (Terraform plan, cost / cloud bill / spend), a `Use when …` trigger (reviewing a plan or
+      infra PR before apply), and a boundary clause naming the existing iac-reviewer agent for
+      security / misconfiguration review; it does not say PROACTIVELY or MUST BE USED.
+    - >-
+      The body is a procedure, not a persona: `## When invoked` step 1 finds scope with no parent
+      context (plan path or pasted plan from the delegation, else a saved plan via
+      `terraform show -json`, else changed *.tf/*.tfvars from git status/git diff) and returns
+      NEEDS_CONTEXT, not "ask the user", when there is nothing to review; a cost checklist names
+      concrete Terraform resources or attributes (at least four of: instance_type/instance_class
+      upsizes, count/for_each or ASG/node-group size growth, multi_az or read replicas, NAT gateways,
+      storage size/type/provisioned IOPS, log or snapshot retention, load balancers or Elastic IPs,
+      forced replacement `-/+`); and an `## Output` section gives a fenced template whose first line is
+      `VERDICT: …`, with findings tied to a resource address.
+    - >-
+      The final report starts with a `STATUS:` line, gives the new file's path, shows the validator
+      command it ran on the new file (scripts/validate_agents.py) with its exit code, and lists 3
+      should-trigger prompts phrased like real requests plus 2 near-miss prompts, each near-miss mapped
+      to a named existing agent (e.g. a Terraform security question → iac-reviewer).
+  should:
+    - >-
+      Frontmatter uses `color: pink` (the style guide's devops colour) and a model alias (`sonnet`, or
+      `opus` with a stated reason), never a dated model id.
+    - >-
+      Cost figures in the new agent's output must have a source: it uses Infracost
+      (`infracost breakdown` / `infracost diff`) or supplied pricing only when available (e.g. checked
+      with `command -v`), otherwise reports the direction and driver of the change (e.g.
+      `instance_class db.t3.medium -> db.r6g.xlarge`, `count 2 -> 6`) without dollar amounts, and its
+      guardrails forbid invented prices or savings.
+    - >-
+      `## Key distinctions` names iac-reviewer (security, IAM, secrets, encryption and pinning findings
+      go there) and at least one other agent that exists in .claude/agents (e.g. ci-pipeline-engineer
+      for wiring a cost check into CI, database-architect, container-engineer or performance-analyst).
+    - >-
+      Without editing it, the report recommends a reciprocal boundary in
+      .claude/agents/devops/iac-reviewer.md (its description or Key distinctions / "Cost and tagging"
+      item should send cost reviews to terraform-cost-reviewer).
+    - >-
+      The report separates facts checked against fetched docs (e.g. code.claude.com/docs/en/sub-agents,
+      Terraform's `show -json` / JSON output format docs) from unverified ones, and notes that the
+      terraform and infracost commands the new agent uses were not run here because neither is installed.
+  must_not:
+    - >-
+      Modifies, renames or deletes any existing file (another agent such as
+      .claude/agents/devops/iac-reviewer.md, docs/STYLE_GUIDE.md, scripts/validate_agents.py, infra/),
+      creates any file besides the new agent (e.g. a routing or behavior test file), or commits.
+    - >-
+      The new agent file states specific cloud prices or dollar amounts as fact (per-hour, per-GB or
+      per-month rates for named resources, such as "a NAT gateway costs about $32/month"), or invents a
+      numeric cost score or rating scale.
+    - >-
+      Claims verification that did not happen: says the new agent was invoked or tested, that the
+      routing probes were run, or that terraform / infracost commands or flags were confirmed by running
+      them in this sandbox (neither binary is installed).

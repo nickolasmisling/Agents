@@ -168,7 +168,7 @@ def run_case(path: Path, opts: argparse.Namespace) -> dict:
         r = sh(case["check"], work)
         check_ok, check_out = r.returncode == 0, (r.stdout + r.stderr)[-1500:]
 
-    judge_prompt = JUDGE_PROMPT.format(agent=agent, prompt=prompt, report=report[:30000],
+    judge_prompt = JUDGE_PROMPT.format(agent=agent, prompt=prompt, report=report[:120000],
                                        status=status or "(no changes)", diff=diff[:30000] or "(none)",
                                        rubric=json.dumps(case.get("rubric", {})))
     verdict = None

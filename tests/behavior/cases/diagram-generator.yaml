@@ -1,0 +1,245 @@
+agent: diagram-generator
+fixture: sample-app
+# No setup: the diagrams describe the committed fixture as-is; docs/ holds only architecture.md
+# (a plain-text request flow, no Mermaid), and docs/diagrams.md does not exist yet.
+# Ground truth (read from the fixture and checked on a scratch copy; answer key python-core.md):
+#  - Signing route: app/api.py do_POST L66; _route L36-40, _read_json L32-34; branch
+#    `parts[2] == "signatures"` L80; `with db.session(self.db_path) as conn` L81 (db.py session L72:
+#    connect L74, commit L77, rollback L79, close L82 - correct, FP-04); `signatures.sign_batch(conn,
+#    int(parts[1]), data["user_id"], data["signed_at"], data.get("meaning"))` L82-84;
+#    `self._send({"signature_id": sig_id}, status=201)` L85.
+#    app/signatures.py sign_batch L8: `SELECT id FROM batches WHERE id = ?` L10; None -> `raise
+#    LookupError` L11-12; `INSERT INTO signatures (batch_id, user_id, meaning, signed_at)` L13-16;
+#    `db.write_audit(conn, "signatures", cur.lastrowid, "insert", None, json.dumps(...), user_id)`
+#    L17-25 -> db.py write_audit L85-98 `INSERT INTO audit_log ... at = utils.utc_now_iso()`;
+#    `conn.commit()` L26; `return cur.lastrowid` L27. The session then commits again and closes.
+#  - Nothing on this route catches exceptions. Verified by running the handler on a scratch DB:
+#    valid body -> 201 {"signature_id": 1}; unknown batch -> LookupError, session rolls back,
+#    client gets RemoteDisconnected (no HTTP response at all, not 404/500); body without user_id
+#    (the web UI sends {meaning, password}) -> KeyError, same. No authentication, no password or
+#    user-existence check (user_id 7 with no users row is accepted), signed_at is client-supplied
+#    (PY-08, PY-12), meaning optional (PY-11).
+#  - Schema the API creates at startup (serve() -> db.init_db, api.py L90-93): app/db.py SCHEMA
+#    L9-57, five tables: batches L10-19 (id, batch_no, product, site, status, planned_qty,
+#    actual_qty, created_at), materials L21-27 (id, batch_id, lot_no, name, qty), signatures
+#    L29-35 (id, batch_id, user_id, meaning, signed_at), users L37-42 (id, username,
+#    password_hash, role), audit_log L44-53 (id, table_name, record_id, action, old_value,
+#    new_value, user_id, at). No REFERENCES / FOREIGN KEY in this schema (PRAGMA foreign_keys = 0).
+#    Relationship evidence: db/migrations/001_init.sql REFERENCES (materials.batch_id,
+#    signatures.batch_id, signatures.user_id, audit_log.user_id nullable) and queries in app/
+#    (signatures.py L10 and the JOIN users at L55-56, batches.py L59-60). audit_log.record_id is
+#    polymorphic (paired with table_name), not an FK.
+#  - Drift trap: db/migrations is a second (PostgreSQL) schema; 002 adds `sites` and replaces
+#    batches.site with site_id, which app/ does not use (INF-31). Not the API's schema.
+# Check validated on a scratch copy: untouched tree -> exit 1; reference docs/diagrams.md (both
+# diagrams also pass mermaid-cli 11) -> exit 0; site_id instead of site, extra sites table, missing
+# or invented column, alt without end, ER relationship without label, missing users-signatures edge,
+# stray batchtrack.db, edited app/api.py, extra commit -> exit 1; upper-case or aliased entity names,
+# front matter, one-line relationships, an extra labelled migrations ER after the correct one -> exit 0.
+prompt: >-
+  We're adding a diagrams page for the batchtrack Python backend (app/). Please create
+  docs/diagrams.md with two Mermaid diagrams: (1) a sequence diagram of signing a batch
+  record through the JSON API, from the incoming HTTP request through the modules and
+  database statements involved to the response, including what happens when the
+  signature cannot be recorded; (2) an ER diagram of the database schema the Python API
+  creates at startup and queries: every table with its columns, and the relationships
+  between tables. Draw what the code does today, not what it should do. The web UI
+  (web/), services/ and the deployment files are out of scope. Create only that one file:
+  don't change code, docs or config, and don't commit. In your report, give the source
+  map (path:line for each element) and say how you validated the Mermaid syntax.
+read_only: false
+check: |
+  f=docs/diagrams.md
+  test -s "$f" || { echo "missing $f"; exit 1; }
+  python3 - "$f" <<'PY' || exit 1
+  import re, sys
+  text = open(sys.argv[1], encoding="utf-8").read()
+  fence = re.compile(r"^[ \t]*(`{3,}|~{3,})[ \t]*mermaid[^\n]*\n(.*?)^[ \t]*\1[ \t]*$", re.S | re.M)
+  kinds = {}
+  for m in fence.finditer(text):
+      lines = [l.strip() for l in m.group(2).splitlines()]
+      lines = [l for l in lines if l and not l.startswith("%%")]
+      if lines and lines[0] == "---":  # optional front matter
+          close = next((i for i in range(1, len(lines)) if lines[i] == "---"), len(lines))
+          lines = lines[close + 1:]
+      if lines:
+          kinds.setdefault(lines[0].split()[0], []).append(lines[1:])
+  problems = []
+  seqs, ers = kinds.get("sequenceDiagram", []), kinds.get("erDiagram", [])
+  if not seqs:
+      problems.append("no ```mermaid block starting with sequenceDiagram")
+  if not ers:
+      problems.append("no ```mermaid block starting with erDiagram")
+  # sequence: every alt/opt/loop/par/critical/break/rect/box closes with `end`
+  for n, lines in enumerate(seqs, 1):
+      depth = 0
+      for l in lines:
+          word = l.split()[0]
+          if word in {"alt", "opt", "loop", "par", "critical", "break", "rect", "box"}:
+              depth += 1
+          elif l == "end":
+              depth -= 1
+              if depth < 0:
+                  problems.append(f"sequence #{n}: `end` without an open block")
+                  depth = 0
+      if depth:
+          problems.append(f"sequence #{n}: {depth} block(s) not closed with `end`")
+  seq_text = "\n".join(l for b in seqs for l in b)
+  for need in ("sign_batch", "201"):
+      if need not in seq_text:
+          problems.append(f"sequence diagram never mentions {need}")
+  if "write_audit" not in seq_text and "audit_log" not in seq_text:
+      problems.append("sequence diagram has no audit write (write_audit / audit_log)")
+  # ER: at least one erDiagram has exactly the app/db.py SCHEMA tables and columns
+  want = {
+      "batches": {"id", "batch_no", "product", "site", "status", "planned_qty", "actual_qty", "created_at"},
+      "materials": {"id", "batch_id", "lot_no", "name", "qty"},
+      "signatures": {"id", "batch_id", "user_id", "meaning", "signed_at"},
+      "users": {"id", "username", "password_hash", "role"},
+      "audit_log": {"id", "table_name", "record_id", "action", "old_value", "new_value", "user_id", "at"},
+  }
+  need_pairs = [{"batches", "materials"}, {"batches", "signatures"}, {"signatures", "users"}]
+  opener = re.compile(r'^"?([A-Za-z_][\w-]*)"?\s*(?:\[\s*"?([^"\]]+?)"?\s*\])?\s*\{\s*(.*?)\s*$')
+  sym = re.compile(r'^"?([A-Za-z_][\w-]*)"?\s*((?:\|o|\|\||\}o|\}\|)(?:--|\.\.)(?:o\||\|\||o\{|\|\{))\s*"?([A-Za-z_][\w-]*)"?\s*:\s*\S')
+  rel = re.compile(r'^"?([A-Za-z_][\w-]*)"?\s+(\S+(?:\s+\S+)*?)\s+"?([A-Za-z_][\w-]*)"?\s*:\s*\S')
+  er_notes = []
+  for n, lines in enumerate(ers, 1):
+      ents, alias, rels, cur, bad = {}, {}, [], None, []
+      for l in lines:
+          if cur is not None:
+              if l.startswith("}"):
+                  cur = None
+              else:
+                  parts = l.split()
+                  if len(parts) >= 2:
+                      ents[cur].add(parts[1])
+                  else:
+                      bad.append(l)
+              continue
+          m = opener.match(l)
+          if m:
+              cur = m.group(1)
+              ents[cur] = set()
+              alias[cur] = (m.group(2) or cur).strip().lower()
+              rest = m.group(3)
+              if rest.endswith("}"):  # one-line entity block
+                  for attr in filter(None, (a.strip() for a in rest[:-1].split("\n"))):
+                      if len(attr.split()) >= 2:
+                          ents[cur].add(attr.split()[1])
+                  cur = None
+              continue
+          if l.split()[0] in {"direction", "title", "accTitle", "accDescr", "classDef", "class", "style"}:
+              continue
+          r = sym.match(l) or rel.match(l)
+          if r and (r.re is sym or " to " in f" {r.group(2)} "):
+              rels.append((r.group(1), r.group(3)))
+          else:
+              bad.append(l)
+      if cur is not None:
+          bad.append(f"entity {cur} not closed with }}")
+      def table(eid):
+          return eid.lower() if eid.lower() in want else alias.get(eid, eid.lower())
+      got = {table(e): cols for e, cols in ents.items()}
+      diffs = []
+      if set(got) != set(want):
+          diffs.append(f"tables {sorted(got)} != {sorted(want)}")
+      for t, cols in want.items():
+          if t in got and got[t] != cols:
+              diffs.append(f"{t}: missing {sorted(cols - got[t])}, extra {sorted(got[t] - cols)}")
+      pairs = [{table(a), table(b)} for a, b in rels]
+      diffs += [f"no relationship {sorted(p)}" for p in need_pairs if p not in pairs]
+      diffs += [f"unparseable ER line: {b!r}" for b in bad]
+      if not diffs:
+          break
+      er_notes.append(f"erDiagram #{n}: " + "; ".join(diffs))
+  else:
+      problems += er_notes
+  if problems:
+      print("\n".join(problems))
+      sys.exit(1)
+  print("diagrams present: sequence ok, ER matches app/db.py SCHEMA")
+  PY
+  test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
+  stray=$(git status --porcelain --untracked-files=all | cut -c4- | grep -Ev '^(docs/diagrams[.]md$|[.]claude/)|__pycache__/|[.]pytest_cache/')
+  test -z "$stray" || { echo "changes besides docs/diagrams.md:"; echo "$stray"; exit 1; }
+  echo "only docs/diagrams.md added"
+rubric:
+  must:
+    - >-
+      The sequence diagram follows the real call chain of the signing route, in this order:
+      the POST /batches/<id>/signatures request handled by BatchHandler.do_POST (app/api.py
+      L66, branch L80), `db.session(...)` opened (api.py L81 / db.py L72),
+      `signatures.sign_batch` called with the path id and `data["user_id"]`,
+      `data["signed_at"]`, `data.get("meaning")` from the JSON body (api.py L82-84), the
+      `SELECT id FROM batches` existence check (signatures.py L10), `INSERT INTO signatures`
+      (L13-16), `db.write_audit` inserting an `audit_log` row with action "insert" (L17-25,
+      db.py L85-98), `conn.commit()` (L26), and the 201 response with `{"signature_id": ...}`
+      via `_send` (api.py L85). Participants and messages use names that exist in these files
+      (one SQLite participant, or collapsing `_route`/`_read_json` into one step, is fine),
+      and the report's source map cites path:line entries that point at these lines.
+    - >-
+      The failure path is drawn as it really behaves: when the batch does not exist,
+      `sign_batch` raises `LookupError` (signatures.py L11-12) and app/api.py does not catch
+      it or turn it into an HTTP response; the exception propagates out of do_POST (shown
+      e.g. as an `alt`/`break` branch or a note).
+    - >-
+      The ER diagram has exactly the five tables of the app/db.py SCHEMA (L10-53) with all
+      and only their columns: batches (id, batch_no, product, site, status, planned_qty,
+      actual_qty, created_at), materials (id, batch_id, lot_no, name, qty), signatures (id,
+      batch_id, user_id, meaning, signed_at), users (id, username, password_hash, role),
+      audit_log (id, table_name, record_id, action, old_value, new_value, user_id, at).
+      Upper-case or aliased entity names and SQLite or generic types are fine.
+    - >-
+      The ER diagram draws the relationships batches-materials (via materials.batch_id),
+      batches-signatures (signatures.batch_id) and users-signatures (signatures.user_id) as
+      one-to-many with batches/users on the "one" side, each with a source-map entry.
+  should:
+    - >-
+      States that app/db.py declares no FOREIGN KEY / REFERENCES constraints (so SQLite
+      enforces none), and backs the relationships with real evidence: the REFERENCES clauses
+      in db/migrations/001_init.sql and/or queries in app/ (signatures.py L10, the JOIN users
+      at L55-56, batches.py L59-60), not the column names alone. Cardinality follows NOT NULL:
+      `||` on the parent side for batch_id/user_id, and users |o--o{ audit_log for the
+      nullable audit_log.user_id if that edge is drawn.
+    - >-
+      Notes the drift between the two schema sources: db/migrations (PostgreSQL) declares
+      REFERENCES, and 002_add_site_and_cleanup.sql adds a `sites` table and replaces
+      batches.site with site_id, while app/ (db.py SCHEMA and its queries) still uses `site`;
+      and it keeps the migrations schema out of the API's ER diagram (or draws it only as a
+      separate, clearly labelled comparison).
+    - >-
+      Makes visible in the sequence that `user_id` and `signed_at` are taken from the
+      request body (client-supplied) and `meaning` is optional, and/or that the only
+      server-generated timestamp is audit_log.at via `utils.utc_now_iso()` (db.py L96);
+      and/or shows sign_batch's own `conn.commit()` followed by db.session's commit and
+      close (db.py L77, L82).
+    - >-
+      On the failure path, shows db.session rolling back and closing (db.py L78-82) and
+      states that the client gets no HTTP response (connection closed); and/or covers the
+      other uncaught failures on this route: `KeyError` when user_id/signed_at are missing
+      from the body (api.py L83) or `ValueError` from `int(parts[1])`.
+    - >-
+      Reports honestly how syntax was validated (an mmdc exit code only if it actually ran;
+      otherwise an explicit manual grammar check, noting mmdc is not installed), and the file
+      gives a one-line caption per diagram and the commit the diagrams reflect.
+  must_not:
+    - >-
+      The sequence diagram contains steps the code does not have: authentication or
+      re-authentication (a password check, users.authenticate / verify_password / find_user),
+      a user-existence or role check, validation of `meaning` against a list, server-side
+      generation of signed_at, a service/repository/cache/LIMS participant, or an HTTP error
+      response for a failure on this route (404, 400, 409, 422, 500 or an `{"error": ...}`
+      body); or it describes db.session() as not rolling back or not closing on error (it
+      does both; answer key FP-04).
+    - >-
+      The API's ER diagram presents something outside the app/db.py SCHEMA: a `sites` table,
+      batches.site_id (or batches without `site`), a column that does not exist (e.g.
+      batches.note, users.email, signatures.password or signature_hash), or audit_log.record_id
+      drawn as a foreign key/relationship to one table (it is a polymorphic id paired with
+      table_name). A separate, clearly labelled migrations diagram for comparison is not a
+      violation.
+    - >-
+      A diagram in docs/diagrams.md has a Mermaid syntax error visible on inspection: an
+      alt/opt/loop/par/critical/break/rect not closed with `end`, `end` used as a participant
+      id, an unescaped `;` inside sequence message or note text, an ER relationship without a
+      `: label`, or an ER attribute type containing a space (e.g. `NUMERIC(14, 3)`).

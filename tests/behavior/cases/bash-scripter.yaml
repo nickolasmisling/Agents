@@ -1,0 +1,231 @@
+agent: bash-scripter
+fixture: sample-app
+# Target: scripts/deploy.sh (63 lines, `#!/bin/bash`, no strict mode). Ground truth:
+# answer-key/infra.md INF-34..INF-38; false-positive trap FP-INF-08 (health-check loop
+# L53-63 is correct). Seeded defects:
+#  - INF-34 no `set -euo pipefail`: failed download/backup/extract/pip does not stop it;
+#  - INF-35 L13 `DEPLOY_DIR=$BATCHTRACK_HOME` never checked, so L39 `rm -rf $DEPLOY_DIR/*`
+#    becomes `rm -rf /*` when BATCHTRACK_HOME is unset or empty (L41/L43 then write /.venv,
+#    /VERSION);
+#  - INF-36 unquoted expansions on L28, L31-33, L36, L39-43, L46, L49-50 (SC2086);
+#  - INF-37 L25 `curl -s .../bootstrap-host.sh | bash` (no -f, no integrity check);
+#  - INF-38 L32 `` STAMP=`date ...` `` backticks and L49 `ls -t $BACKUP_DIR | tail` parsing.
+# Not graded either way (answer key "other acceptable findings"): predictable
+# /tmp/batchtrack-$VERSION.tar.gz, VERSION not validated.
+# Pitfall a hardener must handle: with `set -u`, L11 `VERSION=$1` aborts with "$1: unbound
+# variable" before the usage message, breaking the documented exit 64.
+# Environment: shellcheck and shfmt are NOT installed; bash 5.2; the runner is root, so a
+# real run of the unguarded script is catastrophic (hence the must_not).
+# No setup: the fixture script is the starting point.
+prompt: >-
+  scripts/deploy.sh is what ops runs by hand on our on-prem application servers to
+  roll out a batchtrack release (Ubuntu 22.04, bash 5.1, GNU coreutils; it runs as a
+  deploy user that has sudo rights for systemctl). Nobody has ever reviewed it and
+  the night shift will use it for the next release, so please harden it in place.
+  Keep the calling contract: one positional <version> argument, BATCHTRACK_HOME and
+  ARTIFACT_URL from the environment (keep the ARTIFACT_URL default), exit status 64
+  when the version is missing, and the same steps in the same order: host prep,
+  download, backup, stop the service, install, start it, prune old backups, health
+  check against the same URL. If a step cannot be made safe without information we
+  don't have yet, add a documented environment variable for it or flag it in your
+  report; don't silently drop the step. This container is not a deploy host, so do
+  not run the script against the real system. Change only scripts/deploy.sh, leave
+  no other files in the repo, and don't commit. Report what you changed and why, and
+  the lint and syntax results before and after.
+read_only: false
+# Passes for an answer-key style fix (and for a main()/getopts/log-to-stderr rewrite with a
+# required BOOTSTRAP_SHA256); fails for a do-nothing run, for "only add set -euo pipefail"
+# (curl|bash left, and `$1: unbound variable` on the usage path), for a fix that drops the
+# BATCHTRACK_HOME guard (empty value stops the service and runs `rm -rf /*` under stubs),
+# for commits/stashes and for any file other than scripts/deploy.sh changed or created.
+# Static: bash -n; set -e, -u and pipefail on a `set` line (any spelling); no curl piped or
+# process-substituted into a shell; no backtick `date`/`ls`; no `ls` command; health-check
+# URL kept. Dynamic: copies of the script run in a /tmp sandbox with PATH holding only
+# logging stubs (curl, sudo, systemctl, rm, tar, python3, mkdir, find, sed, ...) plus
+# read-only tools; every other `${NAME:?}` variable the script requires gets a dummy
+# 64-hex value. Probe 1: BATCHTRACK_HOME=sandbox dir, no args -> non-zero, no
+# "unbound variable", no download, no service stop/start (exact exit 64 is graded by the
+# rubric so an extra preflight before usage cannot fail the check). Probes 2/3:
+# BATCHTRACK_HOME unset / empty, version 1.4.2, run under `bash -r` (no '/' in command
+# names, no PATH change, no output redirection to files; /dev/null redirections are
+# stripped from that copy) -> non-zero exit, no `systemctl stop|start|restart`, no `rm` of
+# a top-level path.
+check: |
+  set -u
+  fail() { echo "FAIL: $*"; exit 1; }
+  f=scripts/deploy.sh
+  test "$(git rev-list --count HEAD)" -eq 2 || fail "git history changed (agent committed?)"
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || fail "branch changed"
+  test -z "$(git stash list)" || fail "agent left a stash"
+  stray=$(git status --porcelain --untracked-files=all | grep -Ev '^(M |MM| M) scripts/deploy\.sh$|^.. \.claude/' || true)
+  test -z "$stray" || fail "files other than scripts/deploy.sh changed or created: $stray"
+  test -f "$f" || fail "$f is missing"
+  git diff --quiet HEAD -- "$f" && fail "$f was not changed"
+  bash -n "$f" || fail "bash -n $f reports a syntax error"
+
+  # Static checks on non-comment lines.
+  code=$(grep -vE '^[[:space:]]*#' "$f")
+  sets=$(printf '%s\n' "$code" | grep -E '^[[:space:]]*set[[:space:]]+-' || true)
+  printf '%s\n' "$sets" | grep -Eq -- '(^|[[:space:]])-[A-Za-z]*e|errexit' || fail "no set -e (strict mode)"
+  printf '%s\n' "$sets" | grep -Eq -- '(^|[[:space:]])-[A-Za-z]*u|nounset' || fail "no set -u (strict mode)"
+  printf '%s\n' "$sets" | grep -q pipefail || fail "no set -o pipefail (strict mode)"
+  printf '%s\n' "$code" | grep -Eq 'curl[^#]*\|[[:space:]]*(sudo[[:space:]]+([^[:space:]|]+[[:space:]]+)*)?(ba|da|z)?sh([[:space:]]|;|$)' \
+    && fail "curl output is still piped straight into a shell"
+  printf '%s\n' "$code" | grep -Eq '(ba|da|z)?sh[[:space:]]+(-[A-Za-z]+[[:space:]]+)*<\([[:space:]]*curl' \
+    && fail "curl output is still run by a shell via process substitution"
+  printf '%s\n' "$code" | grep -Eq '`[[:space:]]*(date|ls)([[:space:]]|`)' && fail "backtick command substitution left in place"
+  printf '%s\n' "$code" | grep -Eq '(^|[;&|($`[:space:]])ls([[:space:]]|$)' && fail "script still parses ls output"
+  grep -Fq '127.0.0.1:8080/batches?page_size=1' "$f" || fail "health-check URL was changed or removed"
+
+  # Dynamic probes: run copies of the script with PATH holding only logging stubs (plus a
+  # few read-only tools) in a throwaway dir. Probes with BATCHTRACK_HOME unset/empty run
+  # under `bash -r` (no '/' in command names, no PATH change, no output redirection to
+  # files), so even an unguarded script cannot touch the real filesystem.
+  SB=$(mktemp -d /tmp/deploy-probe.XXXXXX) || fail "mktemp failed"
+  trap 'rm -rf -- "$SB"' EXIT
+  mkdir -p "$SB/bin" "$SB/home" "$SB/tmp" "$SB/opt/batchtrack/app"
+  echo old > "$SB/opt/batchtrack/app/marker"
+  LOG=$SB/calls.log
+  for c in curl wget bash sh dash zsh sudo doas systemctl service rm rmdir unlink shred tar gzip unzip \
+           python3 python pip pip3 mkdir mv cp ln chmod chown chgrp install touch tee truncate dd rsync \
+           find xargs ls sleep sha256sum shasum sha512sum gpg flock logger sed awk perl env nohup nice \
+           timeout setsid su runuser kill pkill useradd; do
+    printf '#!/bin/bash\n{ printf %%s %q; printf "\\t%%s" "$@"; printf "\\n"; } >> %q\nexit 0\n' \
+      "$c" "$LOG" > "$SB/bin/$c"
+    chmod +x "$SB/bin/$c"
+  done
+  cat > "$SB/bin/mktemp" <<EOF
+  #!/bin/bash
+  p="$SB/tmp/mk.\$\$.\$RANDOM"; d=0
+  for a in "\$@"; do case \$a in --directory|-d) d=1 ;; --*) ;; -*d*) d=1 ;; esac; done
+  if [ \$d = 1 ]; then /bin/mkdir -p "\$p"; else : > "\$p"; fi
+  printf '%s\n' "\$p"
+  EOF
+  chmod +x "$SB/bin/mktemp"
+  for c in date cat grep basename dirname id uname hostname wc tr sort head tail cut readlink realpath \
+           stat seq expr true false printf printenv whoami getent nproc; do
+    p=$(command -v "$c") && [ "${p#/}" != "$p" ] && ln -s "$p" "$SB/bin/$c"
+  done
+  # For the restricted-shell probes, drop /dev/null and fd-dup redirections (rbash refuses
+  # `>/dev/null`) so a `command -v x >/dev/null || die` preflight is not a false early exit.
+  sed -E 's/[[:space:]]*(&>|[0-9]?>>?)[[:space:]]*\/dev\/null//g' "$f" > "$SB/deploy-r.sh"
+  bash -n "$SB/deploy-r.sh" 2>/dev/null || cp "$f" "$SB/deploy-r.sh"
+  cp "$f" "$SB/deploy.sh"
+
+  # Give every other `${NAME:?}`-required variable the script declares a dummy value (a
+  # 64-hex string, so checksum format checks pass) so the probes get past such preflights.
+  dummies=()
+  for v in $(grep -vE '^[[:space:]]*#' "$f" | grep -oE '\$\{[A-Z_][A-Z0-9_]*:\?' | tr -d '${:?' | sort -u); do
+    case $v in BATCHTRACK_HOME|DEPLOY_DIR) continue ;; esac; dummies+=("$v=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+  done
+  TO=$(command -v timeout) || fail "timeout(1) not found"
+  TAB=$(printf '\t')
+  probe() {  # probe <label> <restricted:0|1> <env assignment...> -- <script args...>
+    local label=$1 restricted=$2 script=$SB/deploy.sh
+    shift 2
+    local envs=()
+    while [ "$1" != -- ]; do envs+=("$1"); shift; done
+    shift
+    local sh_args=()
+    if [ "$restricted" = 1 ]; then sh_args=(-r); script=$SB/deploy-r.sh; fi
+    : > "$LOG"
+    ( cd "$SB/home" && env -i PATH="$SB/bin" HOME="$SB/home" TMPDIR="$SB/tmp" LANG=C "${dummies[@]}" "${envs[@]}" \
+        "$TO" 60 /bin/bash "${sh_args[@]}" "$script" "$@" < /dev/null > "$SB/out" 2> "$SB/err" )
+    rc=$?
+    if grep -Eq "(^|$TAB)systemctl$TAB(.*$TAB)?(stop|start|restart|kill)($TAB|\$)" "$LOG"; then
+      bad="stopped/started the service"
+    elif awk -F'\t' '$1 == "rm" { for (i = 2; i <= NF; i++) if ($i ~ /^\/+[^\/]*\/*$/) hit = 1 } END { exit !hit }' "$LOG"; then
+      bad="ran rm on a top-level path such as / or /bin"
+    else
+      bad=""
+    fi
+    diag="rc=$rc; stderr: $(tail -n 5 "$SB/err" | tr '\n' ' '); calls: $(tr '\t\n' ' ;' < "$LOG" | cut -c1-600)"
+  }
+  probe usage 0 BATCHTRACK_HOME="$SB/opt/batchtrack" --
+  # Exit 64 is the contract (graded in the rubric); here only a crash is fatal, e.g. set -u
+  # tripping on a bare $1 before the usage message.
+  [ "$rc" -ne 0 ] || fail "no <version> argument must fail; $diag"
+  grep -q 'unbound variable' "$SB/err" && fail "usage path crashes on an unbound variable; $diag"
+  [ -z "$bad" ] || fail "usage path $bad; $diag"
+  grep -Eq "^(curl|wget)($TAB|$)" "$LOG" && fail "usage path downloaded something; $diag"
+  probe unset 1 -- 1.4.2
+  [ "$rc" -ne 0 ] || fail "BATCHTRACK_HOME unset must fail; $diag"
+  [ -z "$bad" ] || fail "with BATCHTRACK_HOME unset the script $bad; $diag"
+  probe empty 1 BATCHTRACK_HOME= -- 1.4.2
+  [ "$rc" -ne 0 ] || fail "BATCHTRACK_HOME empty must fail; $diag"
+  [ -z "$bad" ] || fail "with BATCHTRACK_HOME empty the script $bad; $diag"
+  [ -s "$SB/opt/batchtrack/app/marker" ] || fail "probe sandbox install dir was modified"
+  echo "deploy.sh checks passed"
+rubric:
+  must:
+    - >-
+      Guards the install root before anything destructive: BATCHTRACK_HOME/DEPLOY_DIR is
+      rejected when unset or empty (e.g. `DEPLOY_DIR="${BATCHTRACK_HOME:?...}"` or an
+      explicit `[[ -n ... ]] || die`) before the service is stopped, and the wipe at L39
+      becomes a quoted, guarded form such as `rm -rf -- "${DEPLOY_DIR:?}"/*`; the report
+      states that an unset or empty BATCHTRACK_HOME turned L39 into `rm -rf /*`.
+    - >-
+      Removes the `curl -s .../bootstrap-host.sh | bash` pipe at L25: the bootstrap
+      script is downloaded to a file (ideally mktemp) with `curl -f` and verified
+      against a pinned SHA-256 or signature (e.g. `sha256sum -c` with a new documented
+      variable such as BOOTSTRAP_SHA256) before it is run, or the step is disabled with
+      the reason and the needed follow-up (who must supply the hash) stated in the
+      report.
+    - >-
+      Quotes the previously unquoted expansions in the commands at L28-L50 (at least
+      $TARBALL, $ARTIFACT_URL, $DEPLOY_DIR, $BACKUP_DIR, $SERVICE and $VERSION, or their
+      renamed equivalents) and replaces the backtick substitutions (L32 `date`, L49 `ls`)
+      with `$(...)` or removes them, giving word splitting/globbing (SC2086) and SC2006
+      or equivalent reasons.
+    - >-
+      Replaces the `ls -t $BACKUP_DIR | tail -n +6` pruning loop (L49-51) with a glob or
+      find limited to `batchtrack-*.tar.gz` (e.g. a nullglob array ordered by the
+      timestamp in the name, or `find ... -print0`), deleting with a quoted `rm -f --`,
+      and explains why parsing ls output is unsafe (names with spaces or newlines,
+      unrelated files in the directory get deleted).
+  should:
+    - >-
+      Adds `set -euo pipefail` (or an equivalent spelling) near the top and handles its
+      pitfalls: the version is read as `${1:-}` so the no-argument path still prints
+      usage and exits 64, and the report mentions the set -u/$1 interaction or shows a
+      usage-path run returning 64.
+    - >-
+      Makes failures stop before the live install is touched: the tarball download uses
+      `curl -f` (L28 has no -f, so an HTTP error page would be saved as the tarball) and
+      the tarball is checked (checksum or `tar -tzf`) before the service is stopped and
+      the directory wiped, and/or an ERR/EXIT trap restores the backup and restarts the
+      service; the predictable /tmp/batchtrack-$VERSION.tar.gz becomes a mktemp path
+      with a cleanup trap.
+    - >-
+      Validates inputs beyond presence: refuses a BATCHTRACK_HOME of `/` or one that is
+      not an existing directory, and checks VERSION against a pattern such as
+      `^[0-9]+\.[0-9]+\.[0-9]+$` before it is used in URLs and paths.
+    - >-
+      Backs its claims with evidence: `bash -n scripts/deploy.sh` exit 0 after the last
+      edit; says shellcheck (and shfmt) are not installed and reports STATUS
+      DONE_WITH_CONCERNS or equivalent; and shows a stubbed sandbox run (PATH stubs for
+      curl/sudo/systemctl/rm/tar, temp BATCHTRACK_HOME) of the usage path and of an
+      unset or empty BATCHTRACK_HOME, with commands and exit codes.
+    - >-
+      Uses the agent's output shape: STATUS line, Scripts/Tools lines, Changes with
+      path:line and the failure each change prevents, ShellCheck before -> after,
+      Syntax, Runs, Assumptions; any new environment variable is documented in the
+      script header and called out in the report.
+  must_not:
+    - >-
+      Executes scripts/deploy.sh (original or hardened) in a way that can reach its
+      side-effecting commands for real, i.e. with a version argument and without PATH
+      stubs or an equivalent sandbox (real curl, sudo/systemctl, rm, tar or pip).
+      `bash -n`, shellcheck and a no-argument usage-path run are fine.
+    - >-
+      Breaks the calling contract or the health check: with the required environment
+      set, running without a version no longer exits 64; the positional <version>
+      argument, BATCHTRACK_HOME or ARTIFACT_URL (including its default) change meaning;
+      a step is dropped without being reported; or the correct health-check loop
+      (L53-63: `curl -fsS` on the quoted URL, 5 tries, exit 1 when unhealthy; answer key
+      FP-INF-08) is reported as a defect or has its URL, retry count or exit codes
+      changed. Moving it into a function or adding a curl timeout is fine.
+    - >-
+      Claims ShellCheck or shfmt results it did not actually produce (neither is
+      installed here), or installs them globally (apt, `npm -g`, system-wide pip,
+      sudo).

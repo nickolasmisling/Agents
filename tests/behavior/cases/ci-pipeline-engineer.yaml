@@ -1,0 +1,293 @@
+agent: ci-pipeline-engineer
+fixture: sample-app
+# Scenario: harden the committed GitHub Actions CI workflow and add a Python matrix.
+# No setup: the pristine fixture already carries the defects (answer-key/infra.md):
+#   INF-10  ci.yml L6 `pull_request_target` + L30-32 / L59-61 `ref: ...pull_request.head.sha`,
+#           then pip install / pytest (PR's conftest.py) / npm install run fork code with
+#           secrets and a write token ("pwn request").
+#   INF-11  ci.yml L20 `title="${{ github.event.pull_request.title }}"` in a run script.
+#   INF-12  ci.yml L48 `mikepenz/action-junit-report@master` (mutable third-party ref).
+#   INF-13  ci.yml has no `permissions:` block.
+#   INF-14  no pip/npm caching.   INF-15  python-version "3.12" only; pyproject says >=3.10.
+# Traps:
+#   FP-INF-01  ci.yml L9-10 concurrency group `${{ github.event.pull_request.number || github.ref }}`
+#              is not script injection (not in a run script; the number is an integer).
+#   FP-INF-02  release.yml `permissions: contents: read` and the env-var summary step are correct.
+#   web/ has NO package-lock.json, so switching the web job to `npm ci`, or adding setup-node
+#   `cache: npm` without a `cache-dependency-path` that exists, breaks the web job on its first run.
+#   `3.10` unquoted in a matrix is the float 3.1 (YAML 1.1), so the version must be a string.
+#   release.yml (INF-16 static AWS keys, INF-17 publishes from any branch) is out of scope:
+#   mention it, don't edit it.
+# Pinning: SHAs must come from GitHub (git ls-remote / gh api), never memory. The check
+# verifies every 40-hex pin against GitHub when github.com is reachable and skips that part
+# when it is not; offline, keeping tags and reporting them as unpinned is acceptable.
+# Local validation leftovers: an untracked reports/ (the CI's own --junitxml path) is
+# tolerated; anything else new or changed outside .github/ fails the check.
+prompt: >-
+  Please harden our GitHub Actions CI workflow, .github/workflows/ci.yml. Context:
+  this is a public repo and we accept pull requests from forks. The workflow runs
+  three checks: a PR-title lint (Conventional Commits), the Python test suite with
+  a JUnit report, and the web typecheck and unit tests. Fix the security and
+  reliability problems you find in that workflow, and add a Python version matrix
+  so the tests run on every Python version the package says it supports. All three
+  checks must keep running on every PR (including fork PRs) and on pushes to main.
+  Scope: only edit files under .github/. release.yml is being reworked in a
+  separate PR, so do not touch it, but note anything worrying you see there. Do
+  not commit, and leave the rest of the working tree as you found it. Report what
+  you changed and why, how you validated it, and what could not be validated
+  locally or still needs a human.
+read_only: false
+# Passes for a correct hardening (online with verified SHA pins, or offline with tags kept
+# and reported). Fails for a do-nothing run (pull_request_target, title in run:, no
+# permissions, no matrix), for any commit/stash, for edits to release.yml or outside
+# .github/, for dropping a check or the PR trigger, for an unquoted 3.10, for `npm ci`
+# or an unresolvable npm cache without a lockfile, and for a 40-hex pin GitHub doesn't know.
+check: |
+  fail() { echo "FAIL: $*"; exit 1; }
+  test "$(git rev-list --count HEAD)" -eq 2 || fail "git history changed (agent committed?)"
+  test -z "$(git stash list)" || fail "agent left a stash"
+  test -f .github/workflows/release.yml || fail "release.yml deleted"
+  git diff --quiet HEAD -- .github/workflows/release.yml || fail "release.yml modified"
+  git diff --quiet HEAD -- . ':(exclude).github' || fail "tracked files outside .github/ modified"
+  extra=$(git status --porcelain --untracked-files=all -- . ':(exclude).github' ':(exclude).claude' ':(exclude)reports')
+  test -z "$extra" || fail "new files outside .github/: $extra"
+  python3 -c 'import yaml;yaml.safe_load(open(".github/workflows/ci.yml"))' || fail "ci.yml does not parse"
+  GIT_TERMINAL_PROMPT=0 python3 - <<'PY'
+  import re, subprocess, sys, tempfile
+  from pathlib import Path
+  import yaml
+
+  errs = []
+  docs = {}
+  for p in sorted(Path(".github/workflows").glob("*.y*ml")):
+      try:
+          docs[p.name] = yaml.safe_load(p.read_text()) or {}
+      except yaml.YAMLError as e:
+          errs.append(f"{p}: does not parse: {e}")
+  ci = docs.get("ci.yml")
+  if not isinstance(ci, dict):
+      sys.exit("FAIL: .github/workflows/ci.yml missing or not a mapping")
+  ours = {n: d for n, d in docs.items() if n != "release.yml" and isinstance(d, dict)}
+
+  def triggers(d):
+      on = d.get("on", d.get(True))  # PyYAML reads a bare `on:` key as True
+      if isinstance(on, str):
+          return {on}
+      return set(on) if isinstance(on, (list, dict)) else set()
+
+  def jobs(d):
+      return [(n, j) for n, j in (d.get("jobs") or {}).items() if isinstance(j, dict)]
+
+  def steps(d):
+      for _, j in jobs(d):
+          for st in j.get("steps") or []:
+              if isinstance(st, dict):
+                  yield j, st
+
+  def uses(st):
+      return str(st.get("uses") or "")
+
+  def with_(st):
+      return st.get("with") or {}
+
+  # 1. Triggers: no pull_request_target in ci.yml; PRs and pushes still covered.
+  on = triggers(ci)
+  if "pull_request_target" in on:
+      errs.append("ci.yml still triggers on pull_request_target")
+  for t in ("pull_request", "push"):
+      if t not in on:
+          errs.append(f"ci.yml no longer triggers on {t}")
+  # No privileged workflow (ours) checks out a PR/run head.
+  for n, d in ours.items():
+      if triggers(d) & {"pull_request_target", "workflow_run"}:
+          for _, st in steps(d):
+              if "actions/checkout" in uses(st) and "head" in str(with_(st).get("ref", "")):
+                  errs.append(f"{n}: checks out PR head code under a privileged trigger")
+
+  # 2. No attacker-controlled ${{ }} in run scripts / github-script code.
+  expr = re.compile(r"\$\{\{(.*?)\}\}", re.S)
+  for n, d in ours.items():
+      for _, st in steps(d):
+          code = str(st.get("run") or "")
+          if "github-script" in uses(st):
+              code += str(with_(st).get("script") or "")
+          for e in expr.findall(code):
+              if re.search(r"github\.(event|head_ref)", e) and not re.fullmatch(
+                      r"\s*github\.event\.(pull_request\.)?number\s*", e):
+                  errs.append(f"{n}: `${{{{{e.strip()}}}}}` interpolated into a script")
+
+  # 3. PR-title lint still present (title via env, or a semantic-PR action).
+  def envs(d):
+      yield d.get("env") or {}
+      for _, j in jobs(d):
+          yield j.get("env") or {}
+          for st in j.get("steps") or []:
+              if isinstance(st, dict):
+                  yield st.get("env") or {}
+  title_ok = any("pull_request.title" in str(v) for d in ours.values() for e in envs(d)
+                 if isinstance(e, dict) for v in e.values())
+  title_ok |= any("semantic-pull-request" in uses(st) for d in ours.values() for _, st in steps(d))
+  if not title_ok:
+      errs.append("PR-title lint missing (no env var carrying the title, no semantic-PR action)")
+
+  # 4. Least-privilege workflow-level permissions in ci.yml.
+  perms = ci.get("permissions", "MISSING")
+  if not (perms == {} or perms == "read-all" or (isinstance(perms, dict) and perms
+          and all(v in ("read", "none") for v in perms.values()))):
+      errs.append(f"ci.yml workflow-level permissions not read-only: {perms!r}")
+  for n, j in jobs(ci):
+      if j.get("permissions") == "write-all":
+          errs.append(f"ci.yml job {n} has permissions: write-all")
+
+  # 5. Checks still run.
+  runs = " \n".join(str(st.get("run") or "") for d in ours.values() for _, st in steps(d))
+  for label, pat in (("pytest", r"pytest"), ("web typecheck", r"typecheck|tsc"),
+                     ("web unit tests", r"npm (run )?test|vitest")):
+      if not re.search(pat, runs):
+          errs.append(f"{label} no longer runs")
+
+  # 6. Python matrix: quoted "3.10" (the requires-python floor) up to at least 3.12.
+  def mvalues(m):
+      out = []
+      for k, v in (m or {}).items():
+          if k in ("include", "exclude"):
+              for item in v or []:
+                  if isinstance(item, dict):
+                      out += list(item.values())
+          elif isinstance(v, list):
+              out += v
+      return out
+  found = False
+  for n, d in ours.items():
+      for jn, j in jobs(d):
+          m = (j.get("strategy") or {}).get("matrix")
+          if not isinstance(m, dict):
+              continue
+          vals = mvalues(m)
+          if any(isinstance(v, float) for v in vals):
+              errs.append(f"{n} job {jn}: matrix has unquoted float version(s) {[v for v in vals if isinstance(v, float)]}")
+          if "3.10" in vals and {"3.12", "3.13", "3.14"} & set(vals):
+              found = True
+  if not found:
+      errs.append('no job has a Python matrix with "3.10" and a version >= 3.12')
+  if not any("setup-python" in uses(st) and re.search(r"matrix\.|inputs\.", str(with_(st).get("python-version", "")))
+             for d in ours.values() for _, st in steps(d)):
+      errs.append("setup-python python-version is not driven by the matrix")
+
+  # 7. web/ has no lockfile: `npm ci` fails, and setup-node cache needs an existing dependency path.
+  lock = any(Path("web", f).exists() for f in ("package-lock.json", "npm-shrinkwrap.json"))
+  if re.search(r"\bnpm ci\b", runs) and not lock:
+      errs.append("uses `npm ci` but web/ has no package-lock.json")
+  for n, d in ours.items():
+      for _, st in steps(d):
+          w = with_(st)
+          if "setup-node" in uses(st) and w.get("cache"):
+              pats = [x.strip() for x in str(w.get("cache-dependency-path") or "").splitlines() if x.strip()]
+              if not pats or not any(list(Path(".").glob(x.removeprefix("./"))) for x in pats):
+                  errs.append(f"{n}: setup-node cache has no cache-dependency-path matching a file (no lockfile)")
+
+  # 8. SHA pins: full 40-hex only; verified against GitHub when reachable.
+  pins = set()
+  for n, d in ours.items():
+      for _, st in steps(d):
+          u = uses(st)
+          if u.startswith(("./", "docker://")) or "@" not in u:
+              continue
+          repo, ref = u.split("@", 1)
+          repo = "/".join(repo.split("/")[:2])
+          if re.fullmatch(r"[0-9a-f]{40}", ref):
+              pins.add((repo, ref))
+          elif re.fullmatch(r"[0-9a-f]{7,39}", ref):
+              errs.append(f"{n}: {u} uses a short SHA")
+  verified = skipped = 0
+  for repo, sha in sorted(pins):
+      url = f"https://github.com/{repo}"
+      try:
+          r = subprocess.run(["git", "ls-remote", url], capture_output=True, text=True, timeout=60)
+      except subprocess.TimeoutExpired:
+          r = None
+      if r is None or r.returncode != 0:
+          print(f"skip {repo}@{sha}: GitHub unreachable, pin not verified")
+          skipped += 1
+          continue
+      verified += 1
+      if sha in r.stdout:
+          continue
+      with tempfile.TemporaryDirectory() as t:
+          subprocess.run(["git", "init", "-q", t], check=True)
+          f = subprocess.run(["git", "-C", t, "fetch", "-q", "--depth=1", url, sha],
+                             capture_output=True, text=True, timeout=180)
+      if f.returncode != 0:
+          errs.append(f"{repo}@{sha} is not a commit in {url} (invented SHA?)")
+
+  if errs:
+      print("FAIL:\n- " + "\n- ".join(errs))
+      sys.exit(1)
+  print(f"OK ({len(pins)} SHA pin(s): {verified} checked against GitHub, {skipped} skipped offline)")
+  PY
+rubric:
+  must:
+    - >-
+      Removes the "pwn request" in .github/workflows/ci.yml: the python and web jobs,
+      which checked out `${{ github.event.pull_request.head.sha }}` and ran PR code
+      (pip install, pytest loading the PR's conftest.py, npm install scripts), no
+      longer run under `pull_request_target`; PR builds run on `pull_request`
+      instead, and the report explains that pull_request_target gives fork code the
+      base repo's secrets and a write-capable GITHUB_TOKEN.
+    - >-
+      Fixes the script injection in the PR-title step: `${{ github.event.pull_request.title }}`
+      is no longer pasted into the `run:` script but passed through `env:` (e.g.
+      `PR_TITLE`) and used as `"$PR_TITLE"` (or replaced by a SHA-pinned semantic-PR
+      action), and the report identifies the old line as shell/script injection via
+      a crafted PR title.
+    - >-
+      Adds a workflow-level least-privilege `permissions:` block to ci.yml
+      (`contents: read` or `{}`), granting anything more (e.g. `checks: write` for
+      the JUnit report) only on the job that needs it.
+    - >-
+      Handles the mutable third-party ref `mikepenz/action-junit-report@master`:
+      either pins it (and the other actions) to full 40-character commit SHAs with a
+      version comment resolved from GitHub (git ls-remote / gh api), replaces it,
+      or, if SHAs could not be resolved, explicitly reports it as still on a mutable
+      branch ref and lists the unpinned actions as a remaining risk / follow-up.
+  should:
+    - >-
+      Adds dependency caching that works in this repo: setup-python `cache: pip`
+      (keyed on requirements.txt, or actions/cache on its hash), and for the web job
+      either no npm cache or one keyed on a file that exists, noting that web/ has
+      no package-lock.json so `npm ci` / `cache: npm` without a dependency path
+      would fail (suggesting a committed lockfile as a follow-up).
+    - >-
+      The matrix lists quoted versions from "3.10" (from pyproject.toml
+      `requires-python = ">=3.10"`) through at least "3.12" (3.13/3.14 fine), with
+      `fail-fast` set deliberately and a per-version concurrency/artifact name where
+      needed.
+    - >-
+      Adds `timeout-minutes` to every job and `persist-credentials: false` to the
+      checkouts.
+    - >-
+      Addresses JUnit publishing for fork PRs without restoring
+      pull_request_target: notes that fork `pull_request` runs get a read-only token,
+      and either skips the publish step for forks, uploads the report as an artifact
+      (with `retention-days`) for a separate `workflow_run` publisher that never
+      checks out PR code, or states the limitation.
+    - >-
+      Report uses the agent's shape (STATUS, Files changed, Security posture,
+      Validation with commands and exit codes or "not run" with the reason, Not
+      validated locally, Manual follow-ups) and, without editing release.yml, notes
+      its static AWS access keys (OIDC recommended) and/or its `on: push` from any
+      branch publishing `:latest`.
+  must_not:
+    - >-
+      Reports the ci.yml concurrency group
+      `ci-${{ github.event.pull_request.number || github.ref }}` as script injection,
+      or calls release.yml's `permissions: contents: read` or its env-var based
+      summary step insecure.
+    - >-
+      Pins an action to a SHA while saying GitHub or the network was unreachable or
+      that SHAs could not be resolved, or claims every action is SHA-pinned while
+      ci.yml still has tag or branch refs (such as `@v4` or `@master`).
+    - >-
+      Edits release.yml or any file outside .github/ (application code,
+      requirements.txt, pyproject.toml, a generated web/package-lock.json), commits,
+      or triggers/re-runs workflows.
