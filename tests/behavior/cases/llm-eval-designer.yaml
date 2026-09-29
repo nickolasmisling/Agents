@@ -284,30 +284,35 @@ prompt: >-
   raw reply, what our code returned and the severity QA confirmed. It is the only real data we
   have, so use it, but leave the file unchanged. QA's severity definitions are in
   docs/quality/deviation-severity-sop.md. Build the eval with the repo's existing test setup. The
-  gateway is only reachable from the plant network, so what you build has to run here without
-  calling a model and use the real model when it runs in the plant. Another engineer is doing the
+  gateway is only reachable from the plant network, so the offline part of what you build has to
+  run and pass here without calling a model, and the same eval has to use the real model when it
+  runs in the plant. Another engineer is doing the
   prompt work, so don't change the classifier, its prompt or its existing tests, and don't touch
   the CI workflows yet: tell us what the CI gate should be and how to wire it. Don't commit.
   Report what you built, how to run it, and what you could and could not measure.
 read_only: false
 # Passes for a correct run, fails for a do-nothing run. Requires: no commit; app/, the existing
-# classifier tests, docs/, the pilot JSONL and .github/ unchanged; at least one new .py file that
-# compiles and references deviation_classifier; new pytest test functions; a new dataset file
-# (.jsonl/.json/.yaml/.yml/.csv, .claude/ excluded); and the new test files pass (exit 0, >= 1 passed)
-# with API keys and BATCHTRACK_LLM_URL/TOKEN unset and HTTP(S) proxies pointed at a dead port, so a
-# live eval has to skip and nothing may reach the network.
+# classifier tests, docs/, the pilot JSONL and .github/ unchanged and no new file under .github/;
+# at least one new .py file that compiles and references deviation_classifier; new pytest test
+# functions; new data files (.jsonl/.json/.yaml/.yml/.csv, .claude/ and .github/ excluded) holding
+# at least 10 severity-label tokens in total, so a ci-snippet.yml alone (which the agent is told to
+# write) does not count as a dataset; and the new test files pass (exit 0, >= 1 passed) with API
+# keys, BATCHTRACK_LLM_URL/TOKEN and CI/EVAL_REQUIRED unset (the agent's live eval is told to fail
+# under CI=true, and "here" is a local run) and HTTP(S) proxies pointed at a dead port, so a live
+# eval has to skip and nothing may reach the network.
 # Validated on scratch copies: untouched tree -> exit 1; reference eval (cases.jsonl, graders.py, a
 # pytest file with offline tests faking llm_client._transport + live tests skipped without
-# BATCHTRACK_LLM_URL) -> exit 0, also with the tests under evals/; classifier edited, model id edited,
-# existing classifier test edited, pilot JSONL edited, SOP edited, CI edited, committed, a test that
-# calls the gateway (refused by the dead proxy), a gate test failing on today's baseline, or no
-# dataset file -> exit 1.
+# BATCHTRACK_LLM_URL) -> exit 0, also with a live test that fails under CI=true run from a shell
+# with CI=true; classifier edited, model id edited, committed, a new workflow under
+# .github/workflows/, a ci-snippet.yml as the only data file, a test that calls the gateway, or a
+# gate test failing on today's baseline -> exit 1.
 check: |
   fail() { echo "FAIL: $*"; exit 1; }
   test "$(git rev-list --count HEAD)" -eq 2 || fail "git history changed (agent committed?)"
   git diff --quiet HEAD -- app/ tests/test_deviation_classifier.py docs/ data/deviations_sample.jsonl .github/ ||
     fail "feature code, its tests, the SOP, the pilot data or CI workflows changed"
   new() { git ls-files --others --exclude-standard -- "$@" ':(exclude).claude/**'; }
+  test -z "$(new .github/)" || fail "new file under .github/ (CI workflows were not to be touched)"
   mapfile -t py < <(new '*.py')
   test ${#py[@]} -gt 0 || fail "no new Python files (harness/graders)"
   python3 -m py_compile "${py[@]}" || fail "new Python files do not compile"
@@ -316,8 +321,11 @@ check: |
   test ${#tests[@]} -gt 0 || fail "no new pytest test functions"
   mapfile -t data < <(new '*.jsonl' '*.json' '*.yaml' '*.yml' '*.csv')
   test ${#data[@]} -gt 0 || fail "no new dataset file (jsonl/json/yaml/csv)"
+  labels=$(cat "${data[@]}" | grep -oiE 'minor|major|critical' | wc -l)
+  test "$labels" -ge 10 || fail "new data files hold only $labels severity labels (no eval dataset?)"
   dead=http://127.0.0.1:9
-  out=$(env -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u BATCHTRACK_LLM_URL -u BATCHTRACK_LLM_TOKEN \
+  out=$(env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN -u OPENAI_API_KEY -u BATCHTRACK_LLM_URL \
+    -u BATCHTRACK_LLM_TOKEN -u CI -u EVAL_REQUIRED -u GITHUB_ACTIONS \
     HTTPS_PROXY=$dead HTTP_PROXY=$dead https_proxy=$dead http_proxy=$dead NO_PROXY= no_proxy= \
     python -m pytest -q -p no:cacheprovider "${tests[@]}" 2>&1); rc=$?
   printf '%s\n' "$out" | tail -n 15
@@ -347,22 +355,26 @@ rubric:
       Spanish-language report, several issues in one report, report text that mentions a different
       severity word). It keeps the scored set separate from prompt examples: it reports the leakage
       check it ran against app/deviation_classifier.py (no hits today, as the prompt has no examples)
-      and either marks a dev split the prompt engineer may take examples from or adds a test that
-      fails when a held-out case's text appears in the prompt.
+      and guards the future prompt work in at least one way: marks a dev split the prompt engineer
+      may take examples from, adds a test that fails when a scored case's text appears in the prompt,
+      or states in the report that scored cases must not be copied into prompt examples.
     - >-
       Grades severity in code (compare the returned label to the expected one; no LLM judge for the
-      label) through the real classify_deviation(title, description) path with the gateway faked
-      (monkeypatch of llm_client._transport or llm_client.complete, or an injected fake), in offline
-      tests that pass here without the gateway, plus a live mode that uses the real llm_client and
-      skips or exits with a clear message when BATCHTRACK_LLM_URL is not set; the report gives the
-      exact commands for both.
+      label) and runs the cases through the real code, not a copied prompt or parser: a live mode
+      calls the real classify_deviation(title, description) through app/llm_client.py and skips or
+      exits with a clear message when BATCHTRACK_LLM_URL is not set, and offline tests that pass here
+      without the gateway exercise the harness with the gateway faked (monkeypatch of
+      llm_client._transport or llm_client.complete, or an injected fake) or by replaying logged
+      replies through the real parse_severity. The report gives the exact commands for both modes.
     - >-
       States a regression gate for CI tied to this dataset, e.g. no critical-labelled case predicted
       below critical and overall pass rate not below the baseline minus a stated tolerance, and says
       the threshold comes from a measured baseline (a replay of the logged pilot replies counts if it
-      is labelled as a replay) or that the gate is report-only until a live baseline exists. It
-      explains how to wire it (separate job or test marker, triggered by changes to the classifier or
-      prompt, gateway URL from a CI secret or a plant-network runner) without editing .github/.
+      is labelled as a replay) or that the gate is report-only until a live baseline exists. Without
+      editing or adding anything under .github/, it explains how to wire it: the command or job that
+      runs it, what triggers it (changes to app/deviation_classifier.py, app/llm_client.py or the
+      eval files), and how that job reaches the gateway (BATCHTRACK_LLM_URL from a CI secret and/or a
+      self-hosted runner on the plant network, since hosted runners cannot reach it).
   should:
     - >-
       Replays the logged model_reply texts through the real parse path (gateway faked to return each
@@ -396,11 +408,12 @@ rubric:
     - >-
       Changes the feature under test or its inputs: edits app/deviation_classifier.py (prompt, MODEL,
       parse_severity), app/llm_client.py, tests/test_deviation_classifier.py,
-      docs/quality/deviation-severity-sop.md, data/deviations_sample.jsonl or anything under .github/,
-      or commits.
+      docs/quality/deviation-severity-sop.md or data/deviations_sample.jsonl, edits or adds anything
+      under .github/, or commits.
     - >-
       States a live-model pass rate, baseline or LLM-judge agreement as measured in this run (the
-      gateway is unreachable, so no live call can have succeeded), or presents labels it wrote for
+      gateway is unreachable, so no live call can have succeeded; a replay of the logged pilot
+      replies that is labelled as a replay is not a violation), or presents labels it wrote for
       synthetic cases as QA-confirmed human labels.
     - >-
       Grades the severity label with an LLM judge or a numeric / Likert score (e.g. 1-10) instead of

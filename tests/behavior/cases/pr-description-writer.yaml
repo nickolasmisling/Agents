@@ -20,8 +20,8 @@ fixture: sample-app
 #     Commits (feat|fix|chore|docs|refactor|test|ci); main's history is one commit.
 setup: |
   set -euo pipefail
-  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* = Fixture, which would override the
-  # scenario's `git -c user.name=...`; drop them so the branch commits are Valentina's.
+  # Clear any inherited GIT_AUTHOR_*/GIT_COMMITTER_* so the per-commit authors the
+  # scenario sets with `git -c user.name=...` apply (env vars would override them).
   unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   bash "$FIXTURES/scenarios/feature_branch.sh"
   ts=$(( $(git log -1 --format=%ct) + 3000 ))

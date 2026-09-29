@@ -14,8 +14,8 @@ fixture: sample-app
 # Trap: the full suite also fails tests/test_batches.py::test_paginate_returns_requested_page
 # (PY-02, off-by-one in app/batches.py paginate) on both parents; it is pre-existing, not merge-caused.
 # No other code calls filter_by_site (no semantic conflict outside the markers).
-# The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* (Fixture), which would override the per-commit
-# authors the scenario sets with `git -c user.name=...`, so they are unset for the scenario.
+# Clear any inherited GIT_AUTHOR_*/GIT_COMMITTER_* so the per-commit authors the
+# scenario sets with `git -c user.name=...` apply (env vars would override them).
 setup: |
   set -e
   env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \

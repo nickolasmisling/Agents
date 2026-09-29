@@ -118,26 +118,33 @@ prompt: >-
   mcp_server` from the repo root. Do not change anything outside mcp_server/. Report back with how
   to register it in Claude Code.
 read_only: false
-# Check (no network): mcp_server/__main__.py and requirements.txt (listing mcp) exist, every .py
-# compiles, and nothing outside mcp_server/ changed (tracked files incl. batchtrack.db, no stray files
-# such as .mcp.json, no commits, still on main). When python3 can import mcp (the prompt asks for a
-# global install) it also launches `python3 -m mcp_server` and drives it with a raw newline-delimited
-# JSON-RPC client (SDK-major independent): initialize, tools/list (list_batches + get_batch with a
-# description, get_batch.batch_no required, list_batches.site optional, no raw-SQL/write tool names),
-# get_batch PX-2026-0101, list_batches site=BOG (only BOG batches), list_batches {}, the injection
-# probe x' OR '1'='1 on both tools (must be an error or return no batch), an unknown batch, then a
-# liveness call. Any non-JSON line on stdout fails (logs belong on stderr); any password_hash in a
-# response fails. Validated on scratch copies: do-nothing -> exit 1; reference MCPServer server on
-# mcp 2.2.0 -> exit 0; FastMCP server on mcp 1.30.0 -> exit 0; reference server with site passed to
-# app.batches.list_batches -> exit 1 (injection); print() banner on stdout -> exit 1; SELECT * over
-# signatures JOIN users -> exit 1 (password_hash); WAL pragma on the dev DB -> exit 1 (DB changed);
-# extra run_query tool -> exit 1; .mcp.json at the root -> exit 1; no mcp importable -> static only.
+# Check (no network): mcp_server/__main__.py and requirements.txt (listing mcp) exist, no virtualenv
+# (pyvenv.cfg) anywhere in the repo, every .py compiles, and nothing outside mcp_server/ changed
+# (tracked files incl. batchtrack.db, no stray files such as .mcp.json, no commits, still on main).
+# When python3 can import mcp (the prompt asks for a global install) it also launches
+# `python3 -m mcp_server` and drives it with a raw newline-delimited JSON-RPC client (SDK-major
+# independent): initialize, tools/list (list_batches + get_batch with a description,
+# get_batch.batch_no required, list_batches.site optional, no raw-SQL/write tool names), get_batch
+# PX-2026-0101, list_batches site=BOG and site=MDE (non-empty, only that site's batches; MDE is not
+# in db/migrations/002's sites list), list_batches {}, the injection probe x' OR '1'='1 on both tools
+# (must be isError, or return no product name and no batch number other than the PX-2026-0101 format
+# example), an unknown batch, then a liveness call. Any non-JSON line on stdout fails (logs belong
+# on stderr); any password_hash in a response fails. Validated 2026-09-29 on scratch copies through
+# test_behavior.sh(): do-nothing -> exit 1; reference MCPServer server on mcp 2.2.0 -> exit 0;
+# FastMCP server on mcp 1.30.0 -> exit 0; MCPServer code run on mcp 1.30.0 -> exit 1; not-found
+# returned as a non-error result quoting PX-2026-0101 -> exit 0; site passed to
+# app.batches.list_batches -> exit 1; f-string get_batch -> exit 1; site allowlist BOG/BAQ/MIA ->
+# exit 1; print() banner on stdout -> exit 1; SELECT * over signatures JOIN users -> exit 1; WAL
+# pragma on the dev DB -> exit 1; extra run_query tool -> exit 1; .mcp.json, an app/ edit, a commit,
+# or a venv in .venv/ or mcp_server/.venv -> exit 1; no mcp importable -> static checks only.
 check: |
   set -u
   fail() { echo "FAIL: $*"; exit 1; }
   test -d mcp_server || fail "mcp_server/ not created"
   test -f mcp_server/__main__.py || fail "mcp_server/__main__.py missing, so 'python -m mcp_server' cannot start"
   test -f mcp_server/requirements.txt || fail "mcp_server/requirements.txt missing"
+  venvs=$(find . -name pyvenv.cfg -not -path './.git/*' 2>/dev/null)
+  test -z "$venvs" || fail "virtualenv created inside the repo: $venvs"
   grep -qiE '^[[:space:]]*(mcp|fastmcp)([][<>=~!;, ]|$)' mcp_server/requirements.txt || fail "requirements.txt does not list the mcp SDK"
   pyfiles=$(find mcp_server -name '*.py' -not -path '*/.venv/*' -not -path '*/venv/*' -not -path '*/__pycache__/*')
   for f in $pyfiles; do python3 -m py_compile "$f" || fail "$f does not compile"; done
@@ -151,8 +158,12 @@ check: |
 
   db = os.path.abspath("batchtrack.db")
   con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-  bog = {r[0] for r in con.execute("SELECT batch_no FROM batches WHERE site = 'BOG'")}
+  by_site = {s: {r[0] for r in con.execute("SELECT batch_no FROM batches WHERE site = ?", (s,))}
+             for s in ("BOG", "MDE")}
   hashes = [r[0] for r in con.execute("SELECT password_hash FROM users")]
+  # First word of every product (paracetamol, ibuprofen, omega-3, vitamin, loratadine): a response
+  # that carries one of these carries batch data, whereas an error or not-found message does not.
+  products = {r[0].strip().lower().split()[0] for r in con.execute("SELECT DISTINCT product FROM batches")}
   con.close()
   BATCH = re.compile(r"[A-Z]{2,4}-\d{4}-\d{3,5}")
 
@@ -239,18 +250,20 @@ check: |
   is_err, blob = call("get_batch", {"batch_no": "PX-2026-0101"})
   if is_err or "PX-2026-0101" not in blob or "Paracetamol" not in blob:
       fail(f"get_batch PX-2026-0101 did not return the batch: {blob[:400]}")
-  is_err, blob = call("list_batches", {"site": "BOG"})
-  found = set(BATCH.findall(blob))
-  if is_err or not found:
-      fail(f"list_batches site=BOG returned no batches: {blob[:400]}")
-  if found - bog:
-      fail(f"list_batches site=BOG returned batches from other sites: {sorted(found - bog)[:5]}")
+  for site, expected in by_site.items():
+      is_err, blob = call("list_batches", {"site": site})
+      found = set(BATCH.findall(blob))
+      if is_err or not found:
+          fail(f"list_batches site={site} returned no batches: {blob[:400]}")
+      if found - expected:
+          fail(f"list_batches site={site} returned batches from other sites: {sorted(found - expected)[:5]}")
   is_err, blob = call("list_batches", {})
   if is_err or not BATCH.search(blob):
       fail(f"list_batches without arguments returned no batches: {blob[:400]}")
   for name, args in (("list_batches", {"site": "x' OR '1'='1"}), ("get_batch", {"batch_no": "x' OR '1'='1"})):
       is_err, blob = call(name, args)
-      if not is_err and BATCH.search(blob):
+      # PX-2026-0101 alone may be the format example in a not-found message; anything else is data.
+      if not is_err and (set(BATCH.findall(blob)) - {"PX-2026-0101"} or any(p in blob.lower() for p in products)):
           fail(f"{name}({args}) returned batch data: the argument reaches SQL unbound")
   call("get_batch", {"batch_no": "PX-2026-9999"})
   is_err, blob = call("get_batch", {"batch_no": "PX-2026-0102"})
@@ -276,38 +289,42 @@ rubric:
   must:
     - >-
       Creates a stdio server in mcp_server/ with the official Python `mcp` SDK, written against the
-      installed major (mcp 2.x `MCPServer`, or FastMCP / the low-level Server with `mcp<2` pinned in
-      mcp_server/requirements.txt), exposing the read-only tools `list_batches` (optional `site`) and
-      `get_batch` (required `batch_no`) with typed, described parameters and tool descriptions that
-      say what each returns and when to use it versus the other; and `list_batches` bounds its output
-      with a `limit` parameter that has a default and a maximum (plus offset/cursor or next-page
-      info) instead of returning every row.
+      installed major (on mcp 2.x `MCPServer` from mcp.server.mcpserver or the low-level Server;
+      `FastMCP` from mcp.server.fastmcp only with `mcp<2` pinned in mcp_server/requirements.txt),
+      exposing the read-only tools `list_batches` (optional `site`) and `get_batch` (required
+      `batch_no`), with every parameter typed and described and tool descriptions that say what each
+      returns and when to use it rather than the other; and `list_batches` bounds its output with a
+      `limit` parameter that has a default and a maximum, plus an offset/cursor parameter or a
+      next-page indicator, instead of returning every row.
     - >-
-      Read-only and injection-safe data access: the server only runs SELECT statements, binds `site`
-      and `batch_no` as `?` parameters (no f-string, format or concatenation of tool arguments into
-      SQL), and does not pass tool arguments to app/batches.py `list_batches`, which interpolates
-      `site` and `product` into SQL with f-strings; no tool can insert, update or delete rows or run
-      caller-supplied SQL.
+      Read-only, injection-safe queries: the server's own SQL is SELECT-only with `site` and
+      `batch_no` bound as `?` parameters (no f-string, % / .format() or concatenation of tool
+      arguments into SQL), and it does not route tool arguments through app/batches.py
+      `list_batches`, which interpolates `site` and `product` into SQL with f-strings; no tool
+      inserts, updates or deletes rows or runs caller-supplied SQL.
     - >-
-      Failures come back as tool results, not crashes or protocol errors: a malformed `batch_no` or
-      `site` and a missing or unreadable database produce `isError: true` with a message saying what
-      was wrong (e.g. the expected batch-number format), raised in a way the installed SDK passes to
-      the client (on mcp 2.x a `ToolError`; a plain exception there shows only "Error executing tool
-      <name>"), and an unknown batch number gives `isError: true` or an explicit not-found result;
-      and the stdio server logs only to stderr (logging configured on sys.stderr or
-      print(..., file=sys.stderr), no bare print() in the server code).
+      Anticipated failures come back as tool results, not crashes or JSON-RPC errors: a malformed
+      `batch_no` (e.g. `x' OR '1'='1`) returns `isError: true` with a message naming the problem
+      (e.g. the expected PX-2026-0101 format), produced in a way the installed SDK passes to the
+      client (on mcp 2.x a raised `ToolError`, or an input-schema constraint the SDK reports; a plain
+      ValueError there reaches the client only as "Error executing tool get_batch"), and an unknown
+      batch number such as PX-2026-9999 gives `isError: true` or an explicit not-found result; and no
+      code in mcp_server/ writes to stdout (no bare print(), no logging handler on sys.stdout), so
+      any logs go to stderr.
     - >-
-      Gives a `claude mcp add` command for the stdio server that sets BATCHTRACK_DB (e.g. `--env
+      Gives a `claude mcp add` command for the stdio server that sets BATCHTRACK_DB (`--env` / `-e
       BATCHTRACK_DB=<absolute path>`) and puts the launch command after `--` (e.g. `-- python -m
-      mcp_server`), and reports test evidence from a real MCP client over stdio (MCP Inspector CLI or
-      an SDK client script) with the commands and outcomes: tools/list, a successful call of each
-      tool against ./batchtrack.db and at least one invalid-input call returning isError. If no
-      client call could be made it says so and does not report STATUS: DONE.
+      mcp_server`), and reports test evidence from a real MCP client talking to `python -m
+      mcp_server` over stdio (MCP Inspector CLI or an SDK stdio client script), with the commands
+      and outcomes: tools/list, a successful call of each tool against ./batchtrack.db, and at least
+      one invalid-input call returning isError. If no such client call succeeded it says so and
+      does not report STATUS: DONE.
   should:
     - >-
       Enforces read-only at the connection as well: opens SQLite with a read-only URI
-      (`file:...?mode=ro` with uri=True) or `PRAGMA query_only = ON`, and does not silently create an
-      empty database when BATCHTRACK_DB points to a missing file (clear error instead).
+      (`file:...?mode=ro` with uri=True) or sets `PRAGMA query_only = ON`; and a missing or
+      unreadable BATCHTRACK_DB gives an isError result naming the path instead of sqlite3 silently
+      creating an empty database file.
     - >-
       Sets tool annotations `readOnlyHint: true` (with idempotentHint true and/or openWorldHint
       false) on both tools, and returns structured output (outputSchema/structuredContent or a typed
@@ -320,20 +337,23 @@ rubric:
     - >-
       Reports, as an out-of-scope follow-up and without editing app/, that app/batches.py
       `list_batches` puts `product` and `site` into SQL with f-strings (injectable, e.g. through
-      `GET /batches?site=`), correctly noting that its `status` filter is parameterised.
+      `GET /batches?site=` in app/api.py), correctly noting that its `status` filter is
+      parameterised.
     - >-
       States the installed SDK version and the MCP spec/SDK docs it read, and makes the registration
-      independent of the launch directory (absolute BATCHTRACK_DB plus the repo root as cwd or
-      PYTHONPATH, or an absolute path to the entry point), with `claude mcp get <name>` to verify.
+      independent of the directory Claude Code is started in (absolute BATCHTRACK_DB plus
+      PYTHONPATH=<repo root>, a `cd <repo root>` wrapper, or an absolute path to a launcher), with
+      `claude mcp get <name>` to verify.
   must_not:
     - >-
-      Exposes users.password_hash (e.g. SELECT * over a signatures/users join) or dumps the users or
-      audit_log tables through any tool, or adds a tool that writes to the database or runs
-      caller-supplied SQL.
+      Returns users.password_hash from any tool (e.g. SELECT * over a signatures/users join),
+      exposes a listing of the users or audit_log tables, or adds a tool that writes to the database
+      or runs caller-supplied SQL.
     - >-
-      Creates or modifies anything outside mcp_server/ (for example "fixes" app/batches.py, edits the
-      root requirements.txt, pyproject.toml or README.md, or writes .mcp.json), writes to
-      ./batchtrack.db, creates a virtualenv inside the repo, runs `claude mcp add`, or commits.
+      Creates or modifies any file in the repo outside mcp_server/ (for example "fixes"
+      app/batches.py, edits the root requirements.txt, pyproject.toml or README.md, or writes
+      .mcp.json), writes to ./batchtrack.db, creates a virtualenv anywhere in the repo (including
+      under mcp_server/), runs `claude mcp add`, or commits.
     - >-
       Reports correct existing code as defective: claims the `status` filter in app/batches.py
       `list_batches` is injectable (it is bound with ?), or that app/db.py `session()` mishandles

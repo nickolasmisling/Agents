@@ -58,7 +58,8 @@ setup: |
   # Same timestamp as the baseline so the runner's later 'setup' commit is not dated before it.
   ts=$(git log -1 --format=%ct)
   git add app/batches.py tests/test_batches.py
-  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* (Fixture), which beat -c user.*.
+  # Author the "fix" commit explicitly; per-command env vars take precedence over any
+  # git config or inherited environment.
   GIT_AUTHOR_NAME="Camila Ortiz" GIT_AUTHOR_EMAIL="camila.ortiz@batchtrack.example" \
   GIT_COMMITTER_NAME="Camila Ortiz" GIT_COMMITTER_EMAIL="camila.ortiz@batchtrack.example" \
   GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \

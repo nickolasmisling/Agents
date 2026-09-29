@@ -36,6 +36,7 @@ import argparse
 import concurrent.futures as cf
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -104,11 +105,19 @@ def parse_json_blob(text: str) -> dict | None:
         return None
 
 
+GITCONFIG = Path(tempfile.gettempdir()) / "agent-behavior-tests.gitconfig"
+
+
 def sh(cmd: str, cwd: Path, timeout: int = 300) -> subprocess.CompletedProcess:
     # Setup/check commands can reference $FIXTURES (tests/fixtures) and $REPO_ROOT.
-    env = dict(os.environ, FIXTURES=str(FIXTURES), REPO_ROOT=str(ROOT),
-               PYTHONDONTWRITEBYTECODE="1", GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.com",
-               GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.com")
+    # The fallback git identity comes from a config file, not GIT_AUTHOR_* variables, so
+    # scenario scripts' own `git -c user.name=...` authors still take precedence.
+    if not GITCONFIG.exists():
+        GITCONFIG.write_text("[user]\n\tname = Fixture\n\temail = fixture@example.com\n"
+                             "[init]\n\tdefaultBranch = main\n[advice]\n\tdetachedHead = false\n")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))}
+    env.update(FIXTURES=str(FIXTURES), REPO_ROOT=str(ROOT), PYTHONDONTWRITEBYTECODE="1",
+               GIT_CONFIG_GLOBAL=str(GITCONFIG))
     return subprocess.run(cmd, shell=True, executable="/bin/bash", cwd=cwd, capture_output=True,
                           text=True, timeout=timeout, env=env)
 
@@ -123,6 +132,81 @@ def fingerprint(root: Path) -> dict[str, str]:
         if p.is_file() and not (set(rel.parts) & skip) and rel.parts[:2] != (".claude", "settings.local.json"):
             out[rel.as_posix()] = hashlib.sha256(p.read_bytes()).hexdigest()
     return out
+
+
+GENERATED = re.compile(
+    r"(^|/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|uv\.lock|"
+    r"Pipfile\.lock|Cargo\.lock|go\.sum|packages\.lock\.json|composer\.lock|Gemfile\.lock)$"
+    r"|(^|/)(dist|build|out|bin|obj|target|coverage|test-results|playwright-report|blob-report|"
+    r"\.next|\.nuxt|\.venv|venv|\.ruff_cache|\.mypy_cache)/"
+    r"|\.(min\.js|map|pyc|zip|png|jpg|jpeg|gif|ico|pdf|db|sqlite)$")
+DIFF_BUDGET = 90_000
+
+
+def render_diff(touched: list[str], before: Path, after: Path) -> str:
+    """Unified diff of what the agent changed, with source files first.
+
+    Lockfiles, build output, caches, binaries and gitignored files are listed by name
+    only, so they can't push the agent's real changes out of the grader's view.
+    """
+    ignored = set(subprocess.run(["git", "check-ignore", "--no-index", "--stdin"], cwd=after, input="\n".join(touched),
+                                 capture_output=True, text=True).stdout.split())
+    listed = [f for f in touched if GENERATED.search(f) or f in ignored]
+    source = [f for f in touched if f not in listed]
+    out = ""
+    for f in source:
+        old = before / f if (before / f).exists() else Path("/dev/null")
+        new = after / f if (after / f).exists() else Path("/dev/null")
+        out += subprocess.run(["diff", "-u", "--label", f"a/{f}", "--label", f"b/{f}", str(old), str(new)],
+                              capture_output=True, text=True, errors="replace").stdout
+    if len(out) > DIFF_BUDGET:
+        out = out[:DIFF_BUDGET] + f"\n[... diff truncated at {DIFF_BUDGET} chars ...]\n"
+    if listed:
+        out += "\n[generated, lock, build or ignored files changed; content omitted]\n" + "\n".join(listed[:200])
+    return out
+
+
+CASE_KEYS = {"agent", "fixture", "setup", "keep_setup_uncommitted", "prompt", "read_only", "check", "rubric"}
+
+
+def lint_cases(paths: list[Path]) -> list[str]:
+    """Structural checks on case files; returns a list of problems."""
+    agents = {p.stem for p in (ROOT / ".claude" / "agents").rglob("*.md")}
+    problems = []
+    for p in paths:
+        try:
+            c = yaml.safe_load(p.read_text(encoding="utf-8"))
+        except yaml.YAMLError as e:
+            problems.append(f"{p.name}: invalid YAML: {e}")
+            continue
+        if not isinstance(c, dict):
+            problems.append(f"{p.name}: not a mapping")
+            continue
+        for k in set(c) - CASE_KEYS:
+            problems.append(f"{p.name}: unknown key {k!r}")
+        if c.get("agent") not in agents:
+            problems.append(f"{p.name}: agent {c.get('agent')!r} is not defined in .claude/agents")
+        if not isinstance(c.get("prompt"), str) or not c["prompt"].strip():
+            problems.append(f"{p.name}: prompt must be a non-empty string")
+        if not (FIXTURES / c.get("fixture", "sample-app")).is_dir():
+            problems.append(f"{p.name}: fixture {c.get('fixture')!r} not found")
+        for k in ("read_only", "keep_setup_uncommitted"):
+            if k in c and not isinstance(c[k], bool):
+                problems.append(f"{p.name}: {k} must be true/false")
+        for k in ("setup", "check"):
+            if k in c and not isinstance(c[k], str):
+                problems.append(f"{p.name}: {k} must be a string")
+        rubric = c.get("rubric") or {}
+        if not rubric.get("must"):
+            problems.append(f"{p.name}: rubric.must is empty")
+        for k in ("must", "should", "must_not"):
+            for i, item in enumerate(rubric.get(k) or []):
+                if not isinstance(item, str):
+                    problems.append(f"{p.name}: rubric.{k}[{i}] is a {type(item).__name__}, not a string (quote it)")
+    missing = agents - {yaml.safe_load(p.read_text())["agent"] for p in paths if p.exists()}
+    for a in sorted(missing):
+        problems.append(f"no behavior case for agent {a!r}")
+    return problems
 
 
 def run_case(path: Path, opts: argparse.Namespace) -> dict:
@@ -156,12 +240,7 @@ def run_case(path: Path, opts: argparse.Namespace) -> dict:
     after = fingerprint(work)
     touched = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     status = "\n".join(touched)  # files the agent created, modified or deleted
-    diff = ""
-    for f in touched[:25]:
-        old = snapshot / f if (snapshot / f).exists() else Path("/dev/null")
-        new = work / f if (work / f).exists() else Path("/dev/null")
-        diff += subprocess.run(["diff", "-u", "--label", f"a/{f}", "--label", f"b/{f}", str(old), str(new)],
-                               capture_output=True, text=True, errors="replace").stdout
+    diff = render_diff(touched, snapshot, work)
 
     check_ok, check_out = True, ""
     if case.get("check"):
@@ -169,7 +248,7 @@ def run_case(path: Path, opts: argparse.Namespace) -> dict:
         check_ok, check_out = r.returncode == 0, (r.stdout + r.stderr)[-1500:]
 
     judge_prompt = JUDGE_PROMPT.format(agent=agent, prompt=prompt, report=report[:120000],
-                                       status=status or "(no changes)", diff=diff[:30000] or "(none)",
+                                       status=status or "(no changes)", diff=diff or "(none)",
                                        rubric=json.dumps(case.get("rubric", {})))
     verdict = None
     for _ in range(2):
@@ -218,11 +297,18 @@ def main() -> int:
     ap.add_argument("--judge-model", default="sonnet")
     ap.add_argument("--timeout", type=int, default=1200)
     ap.add_argument("--keep", action="store_true", help="keep scratch directories for inspection")
+    ap.add_argument("--lint", action="store_true", help="only validate case files (no model calls)")
     args = ap.parse_args()
 
+    paths = sorted(CASES_DIR.glob("*.yaml"))
+    if args.lint:
+        problems = lint_cases(paths)
+        for prob in problems:
+            print(f"ERROR  {prob}")
+        print(f"{len(paths)} case file(s): {len(problems)} problem(s)")
+        return 1 if problems else 0
     if not shutil.which("claude"):
         sys.exit("the `claude` CLI must be on PATH")
-    paths = sorted(CASES_DIR.glob("*.yaml"))
     if args.only:
         paths = [p for p in paths if p.stem in args.only or yaml.safe_load(p.read_text())["agent"] in args.only]
     if not paths:

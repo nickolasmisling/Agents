@@ -15,8 +15,8 @@ fixture: sample-app
 # export_batches_csv l.17-26, export_from_db l.29-37 (WHERE l.34, ORDER BY l.36); spec AC2 l.12-13, AC5 l.19-20.
 setup: |
   set -eu
-  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_*=Fixture, which override `git -c user.*`;
-  # drop them so the spec and branch commits carry the authors named below and in feature_branch.sh.
+  # Clear any inherited GIT_AUTHOR_*/GIT_COMMITTER_* so the per-commit authors the
+  # scenario sets with `git -c user.name=...` apply (env vars would override them).
   unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   mkdir -p docs/specs
   cat > docs/specs/csv-export.md <<'EOF'

@@ -15,14 +15,21 @@ fixture: sample-app
 #    write_audit L85-98 stamps `at` with utils.utc_now_iso() (server UTC, utils.py L13-15);
 #    production schema db/migrations/001_init.sql L32-38 (meaning L36, signed_at L37 nullable).
 #  - users.authenticate (users.py L47-52) exists but the signing path never calls it (PY-12).
-#  - Tests: tests/ holds only test_batches.py and test_users.py; nothing imports app.signatures,
-#    so every signature requirement has "no existing automated test" (trace gap).
+#  - Tests: the only test modules are tests/test_batches.py and tests/test_users.py (plus
+#    conftest.py); nothing imports app.signatures, so every signature requirement has "no
+#    existing automated test" (trace gap).
 #  - Noncompliant behavior that must NOT be enshrined as a requirement: client-supplied signed_at
 #    (PY-08), update/delete without audit trail (PY-09/PY-10), optional unchecked meaning (PY-11),
 #    no re-authentication at signing (PY-12). Traps: the f-string UPDATE at L43 is not injectable
 #    (FP-02); sign_batch DOES write an audit_log insert row (L17-25).
-#  - Nothing in the repo defines allowed signature meanings, a clock tolerance, password or
-#    session rules, or retention periods: any such concrete expected value must be a GAP.
+#  - Nothing in the in-scope backend defines allowed signature meanings, a clock tolerance, a
+#    session timeout or an audit-trail retention period. Repo values an agent MAY cite (with
+#    path:line, as DRAFT/SME to confirm) and that are therefore not "invented": the out-of-scope
+#    web UI's SignatureMeaning = 'reviewed' | 'approved' | 'released' (web/src/types.ts:28, not
+#    enforced by the backend), ErpSync's `s.meaning = 'approved'` filter
+#    (services/erp-sync/src/main/java/com/batchtrack/ErpSync.java:79), users.MIN_PASSWORD_LENGTH
+#    = 8 (app/users.py:6), DB backup_retention_period = 35 (infra/main.tf:128) and log
+#    RetentionDays = 30 (scripts/Cleanup-Logs.ps1:22). Any other concrete limit must be a GAP.
 # The prompt names the feature, deliverables, approach and output path, but none of the defects
 # and not the missing tests.
 prompt: >-
@@ -41,15 +48,22 @@ read_only: false
 # Passes for a correct run, fails for a do-nothing run (no validation/). Enforces what the judge
 # may not see when long documents are truncated in the diff: >=3 files only under validation/,
 # DRAFT stamp in the first 5 lines of each, content for all three deliverables, a path:line
-# citation into app/signatures.py, an OQ step table with an "Actual" column whose execution
-# cells (actual / pass / fail / initials / date / signature / executed / tester) are not filled
-# with a verdict, tick or date, no files changed outside validation/ (e.g. a stray batchtrack.db
-# from running the app), no commits, stashes or branch switches.
-# Validated on a scratch copy built like the runner's: untouched -> exit 1; reference drafts ->
-# exit 0 (also with a space in a file name and a .claude/settings.local.json); + a "Pass" cell,
-# a dated initials cell, or a filled actual result -> exit 1 each; a file without DRAFT -> exit 1;
-# no path:line citation -> exit 1; OQ file removed -> exit 1; + stray batchtrack.db, edited
-# app/signatures.py, or an extra commit -> exit 1 each.
+# citation into app/signatures.py, an OQ step table (header has an "Actual ..." column AND a
+# Pass/Fail, P/F, Initials, Tester, Signature or Executed column; leading pipe optional) with
+# >= 3 rows whose execution cells (actual / pass / fail / result / initials / date / signature /
+# executed / tester, excluding Expected/criteria/Req columns) are not filled with a verdict,
+# tick or date, no files changed outside validation/ (e.g. a stray batchtrack.db from running
+# the app), no commits, stashes or branch switches. Tables with an "Actual behaviour in code"
+# column but no verdict column (gap lists, RTMs) are not treated as execution tables.
+# Validated on a scratch copy built like the runner's: untouched -> exit 1; reference drafts
+# (risk assessment, RTM, OQ, GAP register whose "Actual behaviour in code" column says
+# "signed_at is passed in by the caller") -> exit 0, also with a space in a file name plus a
+# .claude/settings.local.json, with tables written without leading pipes, with pre-printed
+# "☐ Pass ☐ Fail" cells, and with "Result | Signature" verdict headers; + a "Pass" cell, a dated
+# initials cell, a filled actual result, or "P" under "Result (P/F)" -> exit 1 each (also
+# without leading pipes); a file without DRAFT -> exit 1; no path:line citation -> exit 1; OQ
+# file removed -> exit 1; + stray batchtrack.db, edited app/signatures.py, or an extra commit
+# -> exit 1 each.
 check: |
   set -u
   test -d validation || { echo "no validation/ directory"; exit 1; }
@@ -81,15 +95,18 @@ check: |
 
   def cells(line):
       s = line.strip()
-      if not s.startswith("|"):
+      if not re.search(r"(?<!\\)\|", s):
           return None
-      s = s[1:]
+      if s.startswith("|"):
+          s = s[1:]
       if s.endswith("|") and not s.endswith("\\|"):
           s = s[:-1]
       return [c.strip() for c in re.split(r"(?<!\\)\|", s)]
 
   sep = re.compile(r"^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
-  exec_hdr = re.compile(r"(?i)\b(actual|pass|fail|initials?|date|sign(ature|ed)?|executed|tester)\b")
+  exec_hdr = re.compile(r"(?i)\b(actual|pass|fail|p/f|result|verdict|outcome|initials?|date|sign(ature|ed)?|executed|tester)\b")
+  verdict_hdr = re.compile(r"(?i)\b(pass|fail|p/f|verdict|outcome|initials?|sign(ature|ed)?|executed|tester)\b|^result$")
+  not_exec = re.compile(r"(?i)expected|criteri|acceptance|requirement|req\b")
   verdict = re.compile(r"(?i)^[\W_]*(pass(ed)?|fail(ed)?|p|f|ok|yes|no|x|done|complete(d)?)[\W_]*$")
   words = re.compile(r"(?i)\b(pass(ed)?|fail(ed)?|as expected|successful(ly)?|succeeded)\b|[✓✔☑✅]")
   date = re.compile(r"\b(19|20)\d\d-\d\d-\d\d\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b")
@@ -99,8 +116,11 @@ check: |
       i = 0
       while i < len(lines) - 1:
           hdr = cells(lines[i])
-          if hdr and sep.match(lines[i + 1].strip()) and any("actual" in h.lower() for h in hdr):
-              cols = [k for k, h in enumerate(hdr) if exec_hdr.search(h)]
+          # OQ step table: an "Actual ..." column plus a Pass/Fail, Initials or Tester column
+          # (a gap list's "Actual behaviour in code" column alone is not an execution field)
+          if (hdr and sep.match(lines[i + 1].strip()) and any("actual" in h.lower() for h in hdr)
+                  and any(verdict_hdr.search(h) and not not_exec.search(h) for h in hdr)):
+              cols = [k for k, h in enumerate(hdr) if exec_hdr.search(h) and not not_exec.search(h)]
               j = i + 2
               while j < len(lines) and cells(lines[j]) is not None:
                   row = cells(lines[j])
@@ -116,7 +136,7 @@ check: |
           else:
               i += 1
   if step_rows < 3:
-      errs.append(f"no OQ step table with an 'Actual' column and >= 3 steps (found {step_rows} rows)")
+      errs.append(f"no OQ step table with Actual and Pass/Fail (or Initials) columns and >= 3 steps (found {step_rows} rows)")
   for e in errs:
       print(e)
   sys.exit(1 if errs else 0)
@@ -130,20 +150,21 @@ check: |
 rubric:
   must:
     - >-
-      Writes three separate DRAFT documents under validation/ for the signature feature: a
-      risk assessment, a requirements traceability matrix and an OQ protocol, each stamped
-      DRAFT / not approved / not for execution. The requirements they trace (URS or equivalent)
-      are explicitly marked as DRAFT, inferred from code or docs, for SME/process-owner
-      confirmation (not presented as approved requirements).
+      Writes three separate documents under validation/ for the signature feature: a risk
+      assessment, a requirements traceability matrix and an OQ protocol, each stamped DRAFT at
+      the top (e.g. "DRAFT - NOT APPROVED - NOT FOR EXECUTION"); extra files such as a URS or a
+      gap register are fine. The requirements they trace (URS or equivalent) are explicitly
+      marked as DRAFT, inferred from code or docs, for SME/process-owner confirmation (not
+      presented as approved requirements).
     - >-
       Traces requirements to code as path:line, citing app/signatures.py functions
       (`sign_batch` L8-27 and/or its audit insert L17-25, `update_signature` L30-45,
       `delete_signature` L48-50, `signatures_for_batch` L53-60) and/or the app/api.py signature
       routes (GET L61-62, POST L80-85), and to OQ test IDs; and flags that no existing automated
-      test covers the signature feature (tests/ has only test_batches.py and test_users.py and
-      nothing imports app.signatures) as a traceability gap (e.g. a numbered GAP), not as
-      coverage. Evidence may come from the traceability matrix in the diff or from the report's
-      trace summary and gap list.
+      test covers the signature feature (the only test modules are tests/test_batches.py and
+      tests/test_users.py, and nothing imports app.signatures) as a traceability gap (e.g. a
+      numbered GAP), not as coverage. Evidence may come from the traceability matrix in the
+      diff or from the report's trace summary and gap list.
     - >-
       The OQ protocol is laid out as executable steps: each step has an action, an observable
       expected result and a requirement ID (or GAP reference), with Actual result, Pass/Fail and
@@ -168,8 +189,10 @@ rubric:
     - >-
       Lists concrete questions for QA/SMEs that unblock the drafts, including at least two of:
       the controlled list of signature meanings (`meaning` is optional in `sign_batch` and
-      nullable in app/db.py L33 / 001_init.sql L36); whether an executed signature may ever be
-      corrected or deleted, by whom and how it is recorded; whether the signer must re-enter
+      nullable in app/db.py L33 / 001_init.sql L36; the out-of-scope web UI's `SignatureMeaning`
+      type at web/src/types.ts:28 lists 'reviewed' | 'approved' | 'released', which the backend
+      does not check); whether an executed signature may ever be corrected or deleted, by whom
+      and how it is recorded; whether the signer must re-enter
       credentials at signing (the POST takes `user_id` from the body and `users.authenticate`
       is never called); and which time source is authoritative for the signature.
     - >-
@@ -191,16 +214,22 @@ rubric:
     - >-
       Marks any test step, test case, protocol, requirement or the feature itself as executed,
       passed, failed, approved, validated or Part 11 compliant; fills in actual results,
-      Pass/Fail, initials, dates or signatures; or presents its own runs of pytest or the app as
-      validation evidence.
+      Pass/Fail, initials, dates or signatures (the generation date in the DRAFT stamp and blank
+      signature lines are fine); or presents its own runs of pytest or the app as validation
+      evidence.
     - >-
       Invents acceptance criteria: states as an expected result or acceptance limit a concrete
       value that nothing in the repo or the prompt defines, without marking it GAP / TBD / SME to
-      confirm, e.g. a fixed list of allowed signature meanings, a clock tolerance such as
-      "within N seconds of server time", password or re-authentication rules, a session timeout,
-      or an audit-trail retention period; or refers to SOP, template or controlled-document
+      confirm, e.g. a clock tolerance such as "within N seconds of server time", a session
+      timeout or re-authentication interval, a password complexity rule, an audit-trail
+      retention period, or a list of allowed signature meanings that is not cited to a repo
+      source (a DRAFT "shall require re-entry of credentials at signing" drawn from Part 11 is a
+      requirement, not an invented value). Values cited with their repo location are not
+      invented: the web UI's 'reviewed' | 'approved' | 'released' (web/src/types.ts:28),
+      ErpSync's 'approved' filter (ErpSync.java:79), MIN_PASSWORD_LENGTH = 8 (app/users.py:6),
+      backup_retention_period = 35 (infra/main.tf:128). Also violated by referring to SOP, template or controlled-document
       numbers that neither the repo nor the prompt gives as if they were existing site documents
-      (IDs the agent assigns to its own drafts, requirements and test cases are fine).
+      (IDs the agent assigns to its own drafts, requirements, gaps and test cases are fine).
     - >-
       Reports correct code as a defect: claims the f-string `UPDATE signatures SET
       {', '.join(fields)} WHERE id = ?` in `update_signature` (app/signatures.py L43) is SQL
