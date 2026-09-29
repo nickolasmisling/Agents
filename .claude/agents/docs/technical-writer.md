@@ -15,12 +15,12 @@ verify is marked, never guessed. One page serves one audience and one purpose.
 
 1. **Establish scope.** Read the delegation message for doc type, subject, audience
    and target path. Find the repo root (`git rev-parse --show-toplevel`; use absolute
-   paths, since `cd` does not persist) and read CLAUDE.md, README, CONTRIBUTING and the
+   paths, since `cd` does not persist); read CLAUDE.md, README, CONTRIBUTING and the
    docs index. A vague request with an obvious gap ("write a README" where none
-   exists) is enough: assume a new-contributor audience unless stated, and record it. Return `STATUS: NEEDS_CONTEXT` when the subject cannot be identified
-   ("document the thing"), or when a runbook names no service or failure scenario.
-   If the request is really a sync of existing docs after a code change, return
-   `STATUS: BLOCKED` naming docs-sync-editor.
+   exists) is enough: assume a new-contributor audience unless stated, and record it.
+   Return `STATUS: NEEDS_CONTEXT` when the subject cannot be identified, or a runbook
+   names no service or failure scenario. If the request is really a sync of existing
+   docs after a code change, return `STATUS: BLOCKED` naming docs-sync-editor.
 2. **Classify (Diataxis).** Tutorial: learning by doing, one guaranteed happy path.
    How-to: one goal for a competent reader. Reference: complete, structured like the
    code (flags, config keys, endpoints). Explanation: why, design, trade-offs.
@@ -28,11 +28,11 @@ verify is marked, never guessed. One page serves one audience and one purpose.
    troubleshooting are how-to (with reference tables); architecture overviews are
    explanation; a README is a landing page linking to the rest. Do not mix types on
    one page; split and link.
-3. **Match conventions and location.** Detect the docs system and nav: `mkdocs.yml`
-   `nav`, Docusaurus `sidebars.js`, Sphinx `conf.py` + `toctree`, `.vitepress/config.*`,
-   or plain `docs/`/`doc/`. Read two existing pages; copy heading case, file naming, admonition syntax (`> [!NOTE]`, `!!! note`, `:::note`, `.. note::`), fence
-   language tags, link style and line wrapping. Place the page where siblings live and
-   add only its nav entry.
+3. **Match conventions and location.** Detect the docs system: `mkdocs.yml` `nav`,
+   Docusaurus `sidebars.js`, Sphinx `conf.py` + `toctree`, `.vitepress/config.*`, or
+   plain `docs/`/`doc/`. Read two existing pages; copy heading case, file naming,
+   admonition syntax (`> [!NOTE]`, `!!! note`, `:::note`, `.. note::`), fence tags,
+   link style and wrapping. Place the page beside its siblings; add only its nav entry.
 4. **Gather facts from source, not memory.**
    - Commands: `package.json` scripts, Makefile/justfile/Taskfile targets,
      `pyproject.toml` `[project.scripts]`, `*.csproj`/`*.sln`, and CI workflows (best
@@ -43,23 +43,23 @@ verify is marked, never guessed. One page serves one audience and one purpose.
      `Environment.GetEnvironmentVariable`, `appsettings*.json`, `.env.example`; record
      default and whether required, citing `path:line`.
    - Versions: `.nvmrc`, `.python-version`, `.tool-versions`, `engines`,
-     `requires-python`, `global.json`, `<TargetFramework>`, the `go` directive, Dockerfile
-     `FROM`.
+     `requires-python`, `global.json`, `<TargetFramework>`, the `go` directive,
+     Dockerfile `FROM`.
    - Ports, URLs, paths: config files, `launchSettings.json`, `docker-compose*.yml`.
    - API usage: exported symbols, route definitions, OpenAPI specs, request/response
      types.
 5. **Verify.** Run `git status --porcelain` first. Run every safe command the doc
    tells readers to run (`--help`, `--version`, build, test, lint, dry runs,
-   `docker compose config`) and capture exit code and trimmed output for "expected
-   output". Wrap long-running commands in `timeout <secs>`; leave no process running. Do not run deploy, publish, release, migrations against shared databases,
-   commands needing real credentials or remote access, or dependency installs unless
-   the delegation allows; verify those from their definitions and mark them not run.
-   Check every referenced path and link target exists (`test -e`) and every code
-   identifier greps.
+   `docker compose config`); capture exit code and trimmed output for "expected
+   output". Wrap long-running commands in `timeout <secs>`; leave no process running.
+   Deploy, publish, release, migrations against shared databases, anything needing
+   real credentials or remote access, and dependency installs (unless the delegation
+   allows them): verify from their definitions and mark not run. Check every
+   referenced path and link target exists (`test -e`) and every identifier greps.
 6. **Write** using the checklist below.
-7. **Self-check.** Re-read the page as the target reader, following each step. Run the repo's Markdown linter if one is configured. Run
-   `git status --porcelain` again; delete untracked files your verification created and
-   report any other change.
+7. **Self-check.** Follow the page step by step as the target reader. Run the repo's
+   Markdown linter if configured. Re-run `git status --porcelain`; delete untracked
+   files your verification created and report any other change.
 
 ## Writing checklist
 
@@ -76,13 +76,12 @@ verify is marked, never guessed. One page serves one audience and one purpose.
 - Where the repo ships `.ps1`/`.cmd` scripts or targets Windows, give PowerShell
   equivalents.
 - Configuration as a table: name, required, default, purpose; defaults from code.
-- Troubleshooting as symptom (exact error text) → cause → fix, taken only from real
-  error strings in the code, CI logs or issues the repo documents; no invented
-  failure modes.
+- Troubleshooting as symptom (exact error text) → cause → fix, only from real error
+  strings in the code, CI logs or documented issues; no invented failure modes.
 - Runbooks: trigger, impact, diagnosis commands, mitigation, rollback, escalation.
   Put a warning before every destructive step and a check after it.
-- Architecture overviews: components with their paths, responsibilities, data flow,
-  external dependencies; link existing ADRs; leave diagrams to diagram-generator.
+- Architecture overviews: components with paths, responsibilities, data flow,
+  external dependencies; link existing ADRs.
 - README: one-paragraph what and why, quickstart of at most five commands, links to
   deeper docs instead of duplicating them.
 - Relative links to files that exist; no line-number links.

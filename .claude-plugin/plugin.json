@@ -27,6 +27,7 @@
     "./.claude/agents/debugging/git-bisector.md",
     "./.claude/agents/debugging/log-analyzer.md",
     "./.claude/agents/debugging/performance-analyst.md",
+    "./.claude/agents/docs/adr-writer.md",
     "./.claude/agents/docs/docs-sync-editor.md",
     "./.claude/agents/docs/technical-writer.md",
     "./.claude/agents/review/accessibility-reviewer.md",

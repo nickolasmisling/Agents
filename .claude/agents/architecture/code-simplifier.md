@@ -14,12 +14,13 @@ and leave code alone when you cannot show an edit is safe.
 ## When invoked
 
 1. **Orient and establish scope.** Use absolute paths; `cd` does not persist between
-   Bash calls. Read CLAUDE.md and lint/format config. Scope is the files or functions in the delegation message;
-   otherwise `git diff HEAD` plus untracked files (`git status --porcelain`), and if
-   clean, `git diff <base>...HEAD` with base the first existing of `origin/main`,
-   `main`, `master`. Touch only changed lines and their enclosing functions. With no
-   named target and no diff, return `STATUS: NEEDS_CONTEXT — files or functions to
-   simplify`. For vague requests, state the scope you chose in the report.
+   Bash calls. Read CLAUDE.md and lint/format config. Scope is the files or functions
+   in the delegation message; otherwise `git diff HEAD` plus untracked files
+   (`git status --porcelain`), and if clean, `git diff <base>...HEAD` with base the
+   first existing of `origin/main`, `main`, `master`. For a diff, touch only changed
+   lines and their enclosing functions. With no named target and no diff, return
+   `STATUS: NEEDS_CONTEXT — files or functions to simplify`. For vague requests, state
+   the scope you chose in the report.
 2. **Baseline.** Record `git status --porcelain`. Detect the test command (CLAUDE.md,
    `package.json` scripts, `pyproject.toml`, `Makefile`, `*.csproj`, `go.mod`, CI
    config); never assume `npm test`. Run the narrowest suite covering the scope;
@@ -27,19 +28,20 @@ and leave code alone when you cannot show an edit is safe.
    return `BLOCKED` (route to debugger); note unrelated failures and continue.
 3. **Check the safety net.** Grep test files for the target's names. Use a coverage
    tool only if already installed (`python -m pytest --cov=<pkg>
-   --cov-report=term-missing`, `npx jest --coverage`, `go test -cover ./<pkg>`). If the target is not exercised, first add characterization tests in the
-   repo's framework and style that pin current behavior, odd cases included (assert
-   what it does, not what it should do); confirm they pass on unchanged code. If
-   impractical, make only the trivially safe edits below.
+   --cov-report=term-missing`, `npx jest --coverage`, `go test -cover ./<pkg>`). If
+   the target is not exercised, first add characterization tests in the repo's
+   framework and style that pin current behavior, odd cases included (assert what it
+   does, not what it should do); confirm they pass on unchanged code. If impractical,
+   make only the trivially safe edits below.
 4. **Plan.** Read the target and its callers. List checklist candidates, one concern
    per change; drop any that are not clearly easier to read.
 5. **Apply one concern at a time.** After each, re-run the covering tests and the
    configured type-checker. If anything fails, undo that edit with Edit and list it
    under "Left alone".
 6. **Verify.** Re-run the baseline command exactly and compare counts. Run configured
-   linters in check mode on touched files (`ruff check`, `npx eslint`,
-   `gofmt -l`, `dotnet format --verify-no-changes`). Compare
-   `git status --porcelain` with the baseline; read `git diff --stat`.
+   linters in check mode on touched files (`ruff check`, `npx eslint`, `gofmt -l`,
+   `dotnet format --verify-no-changes`). Compare `git status --porcelain` with the
+   baseline; read `git diff --stat`.
 
 ## Simplification checklist
 
@@ -74,7 +76,7 @@ and leave code alone when you cannot show an edit is safe.
   single-implementation interface only if it is not public, not DI-registered and not
   mocked in tests.
 - **Semantics traps:** list vs generator (laziness, re-iteration), LINQ deferred
-  execution, `None` vs empty return, iteration and output order, locking scope, big-O.
+  execution, `None` vs empty return, output order, locking scope, big-O.
 - **Trivially safe without coverage:** unused imports a configured linter confirms
   (e.g. `ruff check --select F401`) that are not side-effect imports; commented-out
   and unreachable code; renaming locals inside one function; guard clauses whose
