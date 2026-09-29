@@ -1,0 +1,214 @@
+agent: code-reviewer
+fixture: sample-app
+# Uncommitted change in app/batches.py + app/api.py, plus an untracked test file.
+# It introduces three bugs and one style-only edit:
+#   1. get_batch now raises LookupError instead of returning None, but the
+#      existing caller in api.py do_GET still does `if batch is None` (dead
+#      branch); GET /batches/<unknown id> now crashes the handler.
+#   2. yield_within_tolerance documents inclusive limits but uses `low < pct < high`,
+#      so exactly 95.0 / 102.0 is out of tolerance.
+#   3. The new GET /batches/<id>/yield route passes the None that batch_yield returns
+#      (no actual_qty yet, e.g. seeded batch 3) into yield_within_tolerance -> TypeError.
+#   Style only: create_batch gets a docstring and its parameter tuple is reflowed.
+# batch_yield itself is correct (guards actual_qty None and planned_qty 0/NULL).
+# Pre-existing defects in batches.py/api.py (answer-key/python-core.md PY-01, PY-02,
+# PY-03, PY-05, PY-25, PY-27) sit next to the diff but are not part of it.
+setup: |
+  set -eu
+  python3 - <<'PY'
+  import pathlib
+  import sys
+
+
+  def edit(path, old, new):
+      p = pathlib.Path(path)
+      text = p.read_text(encoding="utf-8")
+      if text.count(old) != 1:
+          sys.exit(f"setup: expected exactly one match in {path} for {old[:40]!r}")
+      p.write_text(text.replace(old, new), encoding="utf-8")
+
+
+  edit("app/batches.py", "from . import db, utils\n", "from . import db, report, utils\n")
+
+  edit(
+      "app/batches.py",
+      '''def create_batch(conn, batch_no, product, site, planned_qty, status="planned"):
+      cur = conn.execute(
+          "INSERT INTO batches (batch_no, product, site, status, planned_qty, created_at) "
+          "VALUES (?, ?, ?, ?, ?, ?)",
+          (normalize_batch_no(batch_no), product, site, status, planned_qty, utils.utc_now_iso()),
+      )
+  ''',
+      '''def create_batch(conn, batch_no, product, site, planned_qty, status="planned"):
+      """Insert a new batch record and return its id."""
+      cur = conn.execute(
+          "INSERT INTO batches (batch_no, product, site, status, planned_qty, created_at) "
+          "VALUES (?, ?, ?, ?, ?, ?)",
+          (
+              normalize_batch_no(batch_no),
+              product,
+              site,
+              status,
+              planned_qty,
+              utils.utc_now_iso(),
+          ),
+      )
+  ''',
+  )
+
+  edit(
+      "app/batches.py",
+      '''def get_batch(conn, batch_id):
+      row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
+      return dict(row) if row else None
+  ''',
+      '''def get_batch(conn, batch_id):
+      """Return the batch as a dict. Raises LookupError, like release_batch, if it does not exist."""
+      row = conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone()
+      if row is None:
+          raise LookupError(f"batch {batch_id} not found")
+      return dict(row)
+
+
+  def batch_yield(conn, batch_id):
+      """Actual output as a percentage of plan, or None while the quantities are incomplete."""
+      batch = get_batch(conn, batch_id)
+      if batch["actual_qty"] is None or not batch["planned_qty"]:
+          return None
+      return round(batch["actual_qty"] / batch["planned_qty"] * 100.0, 2)
+
+
+  def yield_within_tolerance(pct, low=report.LOW_YIELD_PCT, high=report.HIGH_YIELD_PCT):
+      """True when a yield percentage is inside the release window.
+
+      Both limits are inclusive (SOP-QA-014).
+      """
+      return low < pct < high
+  ''',
+  )
+
+  edit(
+      "app/api.py",
+      '''                self._send({"items": signatures.signatures_for_batch(conn, int(parts[1]))})
+  ''',
+      '''                self._send({"items": signatures.signatures_for_batch(conn, int(parts[1]))})
+              elif len(parts) == 3 and parts[0] == "batches" and parts[2] == "yield":
+                  batch_id = int(parts[1])
+                  pct = batches.batch_yield(conn, batch_id)
+                  self._send({
+                      "batchId": batch_id,
+                      "yieldPct": pct,
+                      "withinTolerance": batches.yield_within_tolerance(pct),
+                  })
+  ''',
+  )
+  PY
+  cat > tests/test_yield.py <<'EOF'
+  import pytest
+
+  from app import batches
+
+
+  def test_get_batch_raises_for_unknown_id(conn):
+      with pytest.raises(LookupError):
+          batches.get_batch(conn, 999)
+
+
+  def test_batch_yield_for_released_batch(conn):
+      assert batches.batch_yield(conn, 1) == 98.5
+
+
+  def test_batch_yield_is_none_while_actual_qty_missing(conn):
+      assert batches.batch_yield(conn, 3) is None
+
+
+  def test_yield_within_tolerance():
+      assert batches.yield_within_tolerance(98.5)
+      assert not batches.yield_within_tolerance(80.0)
+      assert not batches.yield_within_tolerance(110.0)
+  EOF
+keep_setup_uncommitted: true
+prompt: >-
+  Review my changes before I commit. Everything is uncommitted in the working
+  tree: I added a GET /batches/<id>/yield endpoint in app/api.py backed by two
+  new helpers in app/batches.py, made get_batch consistent with release_batch
+  when a batch doesn't exist, tidied create_batch, and added
+  tests/test_yield.py (the new tests pass). Check the change for correctness
+  and tell me what has to be fixed before it goes in. Review only; don't
+  modify, stage or commit anything.
+read_only: true
+# Report-only task: the file fingerprint cannot see git-only mutations, so make
+# sure the diff is still unstaged and uncommitted and the new test file is still
+# untracked.
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 1 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --cached --quiet &&
+  test "$(git diff --name-only | sort | tr '\n' ' ')" = "app/api.py app/batches.py " &&
+  git ls-files --others --exclude-standard | grep -qx tests/test_yield.py
+rubric:
+  must:
+    - >-
+      Flags the caller contract break from the get_batch change: get_batch
+      (app/batches.py around L34-39) now raises LookupError for a missing
+      batch instead of returning None, but the existing caller in
+      BatchHandler.do_GET for GET /batches/<id> (app/api.py around L52-54)
+      still checks `if batch is None`, so that branch is dead and a request
+      for an unknown id raises an uncaught LookupError (handler crash /
+      dropped connection) instead of returning the "batch not found" error.
+      The report cites that api.py caller with a line number.
+    - >-
+      Flags the boundary bug in the new yield_within_tolerance (app/batches.py
+      around L50-55): its docstring says both limits are inclusive, but
+      `low < pct < high` returns False for exactly 95.0 or 102.0 (e.g.
+      planned 1000, actual 950). The fix is `low <= pct <= high`.
+    - >-
+      Flags that the new GET /batches/<id>/yield route (app/api.py around
+      L63-70) crashes for a batch whose yield is None: batch_yield returns
+      None when actual_qty is not recorded (e.g. the in_progress seed batch
+      id 3) or planned_qty is 0/NULL, and yield_within_tolerance(None) then
+      raises TypeError on the `<` comparison. Either location (the route or
+      yield_within_tolerance) counts as long as the None-to-comparison path
+      is described.
+    - >-
+      The report starts with a `VERDICT: NEEDS_WORK` line, and each reported
+      finding cites a path:line inside the changed code.
+  should:
+    - >-
+      The Checked section (or the finding) records the caller trace for
+      get_batch, e.g. `get_batch -> app/api.py:52`, and notes that the only
+      other callers (tests and the new batch_yield) are unaffected or
+      intended.
+    - >-
+      Reviews the untracked tests/test_yield.py and points out what it does
+      not cover: the 95.0/102.0 boundaries, the None yield going through the
+      endpoint, or the unknown-id path in api.py.
+    - >-
+      Gives a concrete fix for each finding, e.g. catch LookupError in
+      do_GET and return a not-found response (ideally 404), use
+      `low <= pct <= high`, and return `withinTolerance: null` (or skip the
+      check) when the yield is None.
+    - >-
+      If it runs pytest, it treats the failing
+      test_paginate_returns_requested_page as pre-existing and unrelated to
+      this change rather than as a regression.
+    - >-
+      Explicitly lists batch_yield's division as guarded (checked, no issue)
+      and keeps the report free of style commentary.
+  must_not:
+    - >-
+      Presents a pre-existing defect in code this change did not touch as a
+      finding of this change, e.g. the f-string SQL for product/site in
+      list_batches, the paginate off-by-one, the N+1 query in
+      batches_with_materials, the connection leak in set_actual_qty, errors
+      returned with HTTP 200, or the hardcoded secrets in app/__init__.py.
+      Mentioning one only as explicitly pre-existing / out of scope is fine.
+    - >-
+      Reports the create_batch edit (new docstring and the reflowed parameter
+      tuple, a style-only change) as a bug, or lists formatting/style nits
+      among the findings.
+    - >-
+      Claims that batch_yield can divide by zero or by a None/NULL
+      planned_qty. It returns None when actual_qty is None or planned_qty is
+      falsy before dividing.
