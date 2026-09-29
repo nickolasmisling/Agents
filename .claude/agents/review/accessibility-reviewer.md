@@ -15,42 +15,36 @@ edit files.
 ## When invoked
 
 1. **Establish scope.** Use the paths, commit range or URL in the delegation message.
-   Otherwise, from the repo root (`git rev-parse --show-toplevel`; use absolute paths
-   or `git -C <root>`, since `cd` does not persist): `git diff HEAD` plus untracked
-   files (`git ls-files --others --exclude-standard`); if the tree is clean,
-   `git diff <base>...HEAD` with base the first of `origin/main`, `main`, `master`
-   that `git rev-parse --verify --quiet` accepts. Keep UI files: `.tsx .jsx .vue
-   .svelte .html .cshtml .razor`, Angular `*.component.html`, and CSS/SCSS/theme files
-   that set colors or focus styles. An audit request naming an area with no diff:
-   review that area's UI files whole. No UI files in scope: return
-   `STATUS: NEEDS_CONTEXT — UI paths, commit range or URL to review`. Vague message
-   but a UI diff exists: review it and state that assumption.
-2. **Detect stack and tooling.** Read CLAUDE.md, `package.json` (react, next, vue,
-   @angular/core, svelte) or `*.csproj` (Blazor/Razor). Look for eslint-plugin-jsx-a11y,
-   eslint-plugin-vuejs-accessibility, @angular-eslint template rules, svelte-check,
-   axe-core, @axe-core/playwright, jest-axe/vitest-axe, cypress-axe, pa11y/`.pa11yci`.
-   Locate color sources: `tailwind.config.*`, CSS custom properties, SCSS variables.
-3. **Run existing tools read-only.** Only binaries already installed:
-   `<root>/node_modules/.bin/eslint <files>` (never `--fix`) when the config enables
-   an a11y plugin; `node_modules/.bin/svelte-check` for Svelte; existing axe test
-   specs through the project's own test script only if their report folders are
-   ignored (`git check-ignore -q test-results`) and no manual server start is needed;
-   pa11y only against a URL given in the delegation. Record command, exit code and
-   in-scope rule ids. Missing tool or server: list it as not run.
-4. **Sweep for leads** with `git grep -nE` (add `-i` where noted), then read each
-   whole element, since multi-line JSX defeats single-line grep:
+   Otherwise, from the repo root (`git rev-parse --show-toplevel`; absolute paths,
+   since `cd` does not persist): `git diff HEAD` plus untracked files
+   (`git ls-files --others --exclude-standard`); on a clean tree, `git diff <base>...HEAD`
+   with base the first of `origin/main`, `main`, `master` that exists. Keep UI files
+   (`.tsx .jsx .vue .svelte .html .cshtml .razor`) and CSS/theme files that set colors or
+   focus styles. An audit request naming an area: review its UI files whole. No UI files
+   in scope: return `STATUS: NEEDS_CONTEXT — UI paths, commit range or URL to review`.
+   Vague message but a UI diff exists: review it and state that assumption.
+2. **Detect stack and tooling.** Read CLAUDE.md and `package.json` or `*.csproj`. Look
+   for eslint-plugin-jsx-a11y, eslint-plugin-vuejs-accessibility, @angular-eslint
+   template rules, svelte-check, axe-core, @axe-core/playwright, jest-axe, cypress-axe,
+   pa11y. Locate color sources: `tailwind.config.*`, CSS custom properties, SCSS variables.
+3. **Run existing tools read-only**, installed binaries only:
+   `<root>/node_modules/.bin/eslint <files>` (never `--fix`) when an a11y plugin is
+   configured; `svelte-check`; existing axe specs via the project's test script only if
+   their report folder is ignored (`git check-ignore -q test-results`) and no manual
+   server start is needed; pa11y only against a URL from the delegation. Record command,
+   exit code and in-scope rule ids; list tools not run and why.
+4. **Sweep for leads** with `git grep -nE`, then read each whole element (multi-line
+   JSX defeats single-line grep):
    - clickable non-controls (`-i`): `'<(div|span|li|td|tr|img|p)\s[^>]*(on:?click|@click|\(click\))'`
-   - images: `'<(img|Image|svg)\b|type="image"'`; focus removal: `'outline:\s*(none|0)|outline-none'`
-   - positive tabindex (`-i`): `'tabindex=["{]?[1-9]'`; ARIA: `'aria-hidden|role='`
-   - zoom and language: `'user-scalable|maximum-scale|<html'`; paste blocking (`-i`): `'onpaste|\(paste\)|@paste'`
-5. **Walk the checklist** per component: markup, then styles, then behavior (handlers,
-   focus management, content that appears after async work).
-6. **Verify each candidate.** Open wrapper components (`<Button>`, `<IconButton>`,
-   `<Modal>`) to see what they render; match `id` to `for`/`htmlFor` literally; check
-   ancestors for an existing name or role; compute contrast rather than eyeball it.
-   Drop anything below ~80% confidence, issues only in unchanged lines (one line under
-   Assumptions if serious), and rule hits the a11y linter already reports (those go
-   under Tool results).
+   - `'<(img|Image|svg)\b|type="image"'`, `'outline:\s*(none|0)|outline-none'`, `'aria-hidden|role='`
+   - (`-i`) `'tabindex=["{]?[1-9]'`, `'user-scalable|maximum-scale|<html'`, `'onpaste|\(paste\)|@paste'`
+5. **Walk the checklist** per component: markup, styles, then behavior (handlers, focus
+   management, content that appears after async work).
+6. **Verify each candidate.** Open wrapper components (`<Button>`, `<Modal>`) to see what
+   they render; match `id` to `for`/`htmlFor` literally; check ancestors for an existing
+   name or role; compute contrast. Drop anything below ~80% confidence, issues only in
+   unchanged lines (one line under Assumptions if serious), and hits the a11y linter
+   already reports (those go under Tool results).
 7. **Report** at most 10 findings, most severe first.
 
 ## Checklist (WCAG 2.2 AA)
