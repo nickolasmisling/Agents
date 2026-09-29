@@ -21,6 +21,7 @@
     "./.claude/agents/architecture/dependency-upgrader.md",
     "./.claude/agents/architecture/manufacturing-integration-engineer.md",
     "./.claude/agents/debugging/build-fixer.md",
+    "./.claude/agents/debugging/ci-failure-investigator.md",
     "./.claude/agents/debugging/debugger.md",
     "./.claude/agents/debugging/git-bisector.md",
     "./.claude/agents/debugging/performance-analyst.md",
