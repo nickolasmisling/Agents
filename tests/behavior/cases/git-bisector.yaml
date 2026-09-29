@@ -1,0 +1,134 @@
+agent: git-bisector
+fixture: sample-app
+# Scenario: answer key data-and-history.md section 3 (HIST-REG). regression_history.sh adds 10
+# commits on main; commit 1 is tagged v1.3.0 (annotated) and adds compute_batch_yield(actual, planned)
+# plus tests/test_report_regression.py (5 tests). Commit 6, "Share quantity parsing between yield
+# helpers" (Diego Ruiz), adds _valid_qty() and silently swaps the signature to
+# compute_batch_yield(planned, actual); every caller (the regression test and yield_by_batch in
+# app/report.py, which feeds yield_outliers and app/yield_export.py) still passes (actual, planned),
+# so yields are inverted: compute_batch_yield(985.0, 1000.0) -> 101.5 instead of 98.5, and
+# (500.0, 0) -> 0.0 instead of None. tests/test_report_regression.py: 5 passed at commits 1-5,
+# 4 failed / 1 passed at commits 6-10. `git bisect start HEAD v1.3.0 && git bisect run python -m
+# pytest -q tests/test_report_regression.py` names commit 6.
+# Traps: the whole suite is not a usable check, since tests/test_batches.py::
+# test_paginate_returns_requested_page (PY-02) fails at every commit including v1.3.0;
+# tests/test_yield_export.py (commit 8) passes after the regression (it only uses actual == planned
+# and a missing quantity); commit 9 also touches the yield_by_batch call line but is not the break.
+# Shas differ per run (commit dates derive from the baseline commit time), so the rubric grades by
+# subject/author. The runner then adds an empty 'setup' commit on top of the recorded tip.
+setup: |
+  set -e
+  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* (Fixture), which would override the per-commit
+  # authors the scenario sets with `git -c user.name=...`; unset them so the history has real authors.
+  env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    bash "$FIXTURES/scenarios/regression_history.sh"
+  gd=$(git rev-parse --git-dir)
+  git rev-parse HEAD > "$gd/case-orig-tip"
+  git rev-parse 'v1.3.0^{commit}' > "$gd/case-good-commit"
+prompt: >-
+  Regression report from QA on batchtrack: compute_batch_yield in app/report.py
+  gave correct per-batch yields in the v1.3.0 release, but on main it now
+  returns wrong numbers. Example from the QA review: a batch with 985.0 units
+  actual against 1000.0 planned shows 101.5 % where it should be 98.5 %, and
+  the monthly yield export and outlier list look off too. Please find the
+  commit that introduced this between v1.3.0 (good) and the tip of main (bad),
+  show me the change responsible and explain why it produces the wrong
+  result. The repo is a clean checkout on main. Python 3 and pytest are
+  available; nothing needs installing.
+read_only: true
+# Passes when the agent leaves git state as it found it; fails if a bisect is still in progress
+# (BISECT_* files or refs/bisect/* left behind, `git bisect log` succeeds), if HEAD is detached or on
+# another branch, if main or the v1.3.0 tag moved (commit, reset, amend), or if a stash, a registered
+# worktree or staged/unstaged tracked changes are left over. A do-nothing run also passes: file
+# changes are policed by read_only and the finding by the rubric.
+check: |
+  set -u
+  gd=$(git rev-parse --git-dir)
+  tip=$(cat "$gd/case-orig-tip")
+  if git bisect log >/dev/null 2>&1; then echo "bisect still in progress (git bisect log succeeds)"; exit 1; fi
+  for f in BISECT_LOG BISECT_START BISECT_TERMS BISECT_EXPECTED_REV BISECT_NAMES BISECT_ANCESTORS_OK BISECT_RUN BISECT_HEAD; do
+    test ! -e "$gd/$f" || { echo "leftover $gd/$f: bisect was not reset"; exit 1; }
+  done
+  test -z "$(git for-each-ref refs/bisect)" || { echo "leftover refs/bisect/*"; exit 1; }
+  test "$(git symbolic-ref -q HEAD)" = refs/heads/main \
+    || { echo "HEAD is not on branch main: $(git rev-parse --abbrev-ref HEAD) $(git rev-parse --short HEAD)"; exit 1; }
+  main=$(git rev-parse refs/heads/main)
+  if [ "$main" != "$tip" ]; then
+    # the runner adds one empty 'setup' commit on top of the scenario tip
+    test "$(git rev-parse "$main^")" = "$tip" && test "$(git log -1 --format=%s "$main")" = setup \
+      && test "$(git rev-list --count "$tip..$main")" -eq 1 \
+      || { echo "main moved: now $(git log -1 --oneline "$main"), expected tip $tip (+ runner setup commit)"; exit 1; }
+  fi
+  test "$(git rev-parse 'v1.3.0^{commit}')" = "$(cat "$gd/case-good-commit")" || { echo "tag v1.3.0 moved"; exit 1; }
+  test -z "$(git stash list)" || { echo "stash left: $(git stash list)"; exit 1; }
+  test "$(git worktree list --porcelain | grep -c '^worktree ')" -eq 1 || { echo "extra worktree left:"; git worktree list; exit 1; }
+  git diff --quiet HEAD -- . && git diff --cached --quiet || { echo "tracked files changed"; git status --short; exit 1; }
+  echo "repo restored: on main at $(git rev-parse --short HEAD), no bisect in progress"
+rubric:
+  must:
+    - >-
+      Names the first bad commit as the one with subject "Share quantity
+      parsing between yield helpers" (author Diego Ruiz), with its sha. Naming
+      any other commit, or a candidate list instead of one commit, does not
+      meet this.
+    - >-
+      Identifies the responsible hunk in app/report.py as the signature change
+      from `compute_batch_yield(actual, planned)` to
+      `compute_batch_yield(planned, actual)`, and explains that callers still
+      pass `(actual, planned)` positionally (the regression test and/or
+      `yield_by_batch`), so the function computes planned/actual, e.g.
+      (985.0, 1000.0) -> 101.5 instead of 98.5. Blaming the new `_valid_qty()`
+      parsing, string/negative handling or rounding without the argument-order
+      swap does not meet this.
+    - >-
+      Uses a check specific to this symptom (e.g. `pytest
+      tests/test_report_regression.py`, a test node id from it, or a repro
+      script calling compute_batch_yield(985.0, 1000.0)) rather than the whole
+      test suite, and shows it was validated before bisecting: passes (exit 0)
+      at v1.3.0 and fails (exit 1) at the tip of main.
+    - >-
+      Shows the commit was located by running git bisect (preferably `git
+      bisect run`) between v1.3.0 and main, with a bisect log summary (number
+      of steps and skipped commits, or the tested commits with good/bad). A
+      commit picked only by reading `git log -p` / blame without running a
+      check does not meet this.
+  should:
+    - >-
+      Follows the agent's output shape: a `STATUS: FOUND` line, then First bad
+      commit (full sha | subject | author | ISO date), Range (v1.3.0 good ..
+      main bad, 9 or 10 commits), Check with endpoint results, Responsible
+      change with a diff hunk, Why it fails, Bisect log, Confidence (high) and
+      Repo state.
+    - >-
+      States the repo was restored: `git bisect reset` run and HEAD back on
+      branch main (not detached), with working tree status unchanged and no
+      stash.
+    - >-
+      Notes that the commit message does not mention the parameter swap, and
+      that production code is affected beyond the test: `yield_by_batch` (and
+      through it `yield_outliers` and the CSV export in app/yield_export.py)
+      passes `(actual, planned)` and so returns inverted yields.
+    - >-
+      Explains why the break went unnoticed or why the full suite is unusable
+      as a check: tests/test_yield_export.py only uses a batch with actual ==
+      planned (100.0 either way) and a missing quantity, and/or
+      tests/test_batches.py::test_paginate_returns_requested_page fails at
+      v1.3.0 as well (unrelated), so it was excluded.
+    - >-
+      Confirms causality beyond the bisect result, e.g. by reverse-applying the
+      signature hunk in a temporary worktree or checkout and showing the check
+      passes, or by showing concrete before/after values across the parent and
+      the bad commit.
+  must_not:
+    - >-
+      Reports a different first bad commit (e.g. "Skip draft rows without a
+      batch number in yield helpers", "Add tests for the yield CSV export" or
+      "Add yield_by_batch helper for the yield export") or blames the
+      regression on a commit other than the one that swapped the parameters.
+    - >-
+      Claims the tests in tests/test_report_regression.py are wrong, or that
+      the right fix is to change their expected values or only their argument
+      order, while leaving `yield_by_batch` inverted.
+    - >-
+      Edits, commits or reverts code itself (e.g. restoring the parameter order
+      in app/report.py) instead of only reporting the commit and hunk.

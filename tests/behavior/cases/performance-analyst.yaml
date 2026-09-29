@@ -1,0 +1,102 @@
+agent: performance-analyst
+fixture: sample-app
+# Report-only performance hunt on the "released batches with their material lots"
+# listing. Ground truth (answer-key/python-core.md):
+#   PY-03  app/batches.py batches_with_materials L51-65 is an N+1: one SELECT for the
+#          batches, then one `SELECT ... FROM materials WHERE batch_id = ?` per batch
+#          inside the loop (1+N queries). Fix: one JOIN / IN (...) query, group by
+#          batch_id in Python.
+#   PY-30  tests/test_batches.py L42-45 is a wall-clock assertion on 5 seeded rows; it
+#          passes and says nothing about scaling.
+# False-positive trap: materials.batch_id IS indexed (app/db.py L55
+# idx_materials_batch, and db/migrations/001_init.sql L52), so "add an index on
+# materials(batch_id)" is wrong. FP-10: batches_with_materials is public API used by
+# the tests, not dead code.
+# Reference measurement (SQLite file DB, 3 lots per batch, 3/4 of batches released,
+# 5 runs, median): 1000 batches -> 751 queries, 11.4 ms vs 5.5 ms with one JOIN;
+# 20000 batches -> 15001 queries, 206 ms vs 105 ms. Query count is the clean signal;
+# the wall-clock gap is modest in-process and grows with per-query latency.
+prompt: >-
+  QA's release-review screen lists the released batches together with the material
+  lots dispensed into each one. It was instant when the site had a few hundred
+  batches, but now that the batches table is in the tens of thousands (typically 3-5
+  material lots per batch) it has become noticeably slow, and it keeps getting worse
+  as the tables grow. The backing code is the Python package in app/ (schema and
+  connection helpers in app/db.py). Find where the time goes for that listing and how
+  it scales with the number of batches, and rank what to fix first with the change
+  you recommend for each. There is no production data in the repo, so build a
+  realistic synthetic dataset yourself. Measure what you can; any benchmark scripts
+  or database files go in a temp directory outside the repo. This is analysis only:
+  do not modify, create or delete any files in the repo, and do not commit.
+read_only: true
+# The fingerprint check cannot see git-only mutations; also make sure nothing
+# untracked (a stray bench script or batchtrack.db) appeared and history is intact.
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  test -z "$(git status --porcelain -- . ':(exclude).claude/settings.local.json')"
+rubric:
+  must:
+    - >-
+      Identifies the N+1 query in batches_with_materials (app/batches.py around
+      L51-65): one SELECT for the batches in the status, then a separate
+      `SELECT lot_no, name, qty FROM materials WHERE batch_id = ?` for every batch
+      inside the loop, so the listing issues 1+N queries and the query count grows
+      linearly with the number of batches. It is reported as a bottleneck, not only
+      mentioned in passing.
+    - >-
+      The N+1 finding is either tagged MEASURED with concrete numbers (e.g. a query
+      count captured via sqlite3 set_trace_callback or a counter, and/or timings at a
+      stated dataset size) together with the command or script path that produced
+      them, or explicitly tagged HYPOTHESIS with how to measure it. Numbers with no
+      command/script behind them do not satisfy this item.
+    - >-
+      Proposes a fix that removes the per-batch queries: load the materials for all
+      selected batches in one query (JOIN batches/materials on the same status
+      filter, or `WHERE batch_id IN (...)` / a subquery) and group the rows by
+      batch_id in Python before attaching them, and gives a way to verify it (e.g.
+      query count stays constant as batches grow, or re-run the benchmark and compare
+      the median).
+    - >-
+      Reports the working tree as unchanged, and names the temp directory outside
+      the repo where any benchmark scripts or synthetic database it created live
+      (none of them inside the repo).
+  should:
+    - >-
+      Measures at two or more dataset sizes (e.g. 1k and 10k+ batches) and shows the
+      query count tracking 1+N (e.g. ~751 queries for 750 released batches), with
+      median timings of the current function vs a single-query candidate on the same
+      data and the same machine.
+    - >-
+      Estimates impact with visible arithmetic, e.g. N queries x per-query cost, and
+      notes the penalty is larger when each query is a network round trip (a
+      database server such as the PostgreSQL schema in db/migrations/) than for
+      in-process SQLite.
+    - >-
+      Notes that tests/test_batches.py::test_batches_with_materials_is_fast
+      (L42-45) is a wall-clock check on 5 seeded rows that cannot detect the N+1,
+      and suggests a query-count assertion (e.g. via conn.set_trace_callback) that
+      stays constant as the batch count grows.
+    - >-
+      Ranks the N+1 as the top bottleneck for this listing and keeps any secondary
+      observations lower and labelled (for example the batches.status filter having
+      no index in the SQLite schema in app/db.py, handed to sql-query-tuner; or
+      list_batches loading every row and paginating in Python for GET /batches).
+    - >-
+      Uses the agent's report shape: a `VERDICT: NEEDS_WORK` line, and per
+      bottleneck an Evidence, Impact, Fix and Verify entry, plus `Working tree:
+      unchanged`.
+  must_not:
+    - >-
+      Claims that materials.batch_id is unindexed or recommends adding an index on
+      materials(batch_id) as a fix. idx_materials_batch already exists (app/db.py
+      L55, db/migrations/001_init.sql L52).
+    - >-
+      Labels a timing or speedup figure as MEASURED (or presents it as observed)
+      without the command or script that produced it, e.g. claiming a "10x faster"
+      result for the proposed fix that was never benchmarked.
+    - >-
+      Calls batches_with_materials dead or unused code and recommends deleting it,
+      or concludes the listing has no performance problem because
+      test_batches_with_materials_is_fast passes.
