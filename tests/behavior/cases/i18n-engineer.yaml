@@ -1,0 +1,349 @@
+agent: i18n-engineer
+fixture: sample-app
+# No setup: the i18n defects are in the committed web/ fixture (answer key web.md).
+# Ground truth: WEB-16 (all UI text hard-coded English, no i18n library, <html lang="en">),
+# WEB-17 (BatchDetail L73 `new Date(s.signedAt).toLocaleDateString()` with no locale),
+# WEB-18 (`b.actualQty + ' / ' + b.plannedQty + ' kg'` in BatchTable L108 and
+# `m.qty + ' kg'` in BatchDetail L64; a null actualQty renders "null / 1000 kg"),
+# WEB-19 (BatchDetail L69 `' signature' + (n === 1 ? '' : 's')`), WEB-20 (moment
+# `.format('DD MMM YYYY')` in BatchTable L109 hard-codes the pattern and English month
+# abbreviations), WEB-24 (signature shows a date only, no time). The footer "Showing N of M
+# batches" is the answer key's secondary plural finding.
+# Traps: stored/wire enum values (option value="reviewed", BatchStatus keys, STATUS_COLORS
+# keys), aria-sort tokens and API payloads are not user-facing text; the XSS (WEB-01), a11y,
+# typing and fetch defects in the same files are explicitly out of scope.
+# The agent's own instructions say not to install a framework unless the delegation says so,
+# so the prompt clears it to add one to package.json, but forbids npm install: a lockfile
+# would flood the judge's 30k-char diff window and the repo deliberately has none.
+prompt: >-
+  We're rolling the BatchTrack web client (React + TypeScript under web/) out
+  to our Colombian plants, so it has to work in Spanish (Colombia), es-CO,
+  alongside English. Please internationalize web/src/main.tsx,
+  web/src/BatchTable.tsx and web/src/BatchDetail.tsx: every user-facing string
+  goes through a message catalog, and dates, times and quantities are
+  formatted for the active locale rather than the way they are formatted now.
+  English remains the source and fallback locale. There is no i18n library in
+  the app yet; you're cleared to add a standard React one to the dependencies
+  in web/package.json (our translation vendor's TMS works in ICU
+  MessageFormat). Catalog format: flat JSON objects, message id -> ICU
+  MessageFormat string, at web/src/locales/en.json (source) and
+  web/src/locales/es-CO.json, because that is what the vendor imports. Draft
+  the es-CO translations yourself; plant QA staff will review them before
+  release, so mark them accordingly. Don't run npm install or create a
+  lockfile: the repo has none on purpose and CI installs from package.json,
+  so there is no node_modules here. Stay on i18n: other reviewers own the
+  XSS, accessibility, typing and data-fetching issues in these files, so note
+  anything you spot but don't fix it. Keep all changes under web/ and don't
+  commit. Report back in your usual format.
+read_only: false
+# Passes for a correct run, fails for a do-nothing run (no catalogs, literals still in JSX):
+#  - no commits/stash/branch switch; no lockfile or node_modules; changes only under web/;
+#  - both catalogs exist, are flat-ish JSON (FormatJS {defaultMessage}/{message} objects and
+#    nesting are tolerated), have the same ids (ignoring _/$/@ meta keys), >= 20 messages,
+#    every message parses as ICU MessageFormat (plural/select need `other`), each es-CO
+#    message uses exactly the same argument names as its en source, at least one en message
+#    is an ICU plural with one/=1 and other and its es-CO twin is a plural too, en keeps the
+#    original English copy and es-CO is actually Spanish (>= 15 messages differ from en);
+#  - none of the original hard-coded JSX literals, concatenated units/plurals, the no-locale
+#    toLocaleDateString() or the 'DD MMM YYYY' pattern remain in web/src/**/*.ts(x)
+#    (FormatJS in-source defaultMessage strings do not trip these patterns);
+#  - `tsc --noEmit -p web` (global tsc, no node_modules) reports no error other than the
+#    ones caused only by the missing packages (bare-specifier TS2307, jsx-runtime TS2875,
+#    CSS side-effect TS2882, TS7016, TS2688, JSX/React namespace TS2503, ImportMeta.env).
+# Validated: fails on the untouched fixture; passes on a react-intl reference solution that
+# also type-checks and builds with real node_modules.
+check: |
+  set -u
+  fail() { echo "CHECK FAIL: $*"; exit 1; }
+  test "$(git rev-list --count HEAD)" -eq 2 || fail "commit count changed"
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || fail "branch changed"
+  test -z "$(git stash list)" || fail "stash used"
+  test ! -e web/package-lock.json -a ! -e package-lock.json || fail "lockfile created"
+  test ! -e web/node_modules -a ! -e node_modules || fail "npm install was run"
+  stray=$(git status --porcelain --untracked-files=all | grep -Ev '^.. "?(web/|\.claude/)')
+  test -z "$stray" || fail "changes outside web/: $stray"
+  python3 - <<'PY' || exit 1
+  import json
+  import re
+  import sys
+  from pathlib import Path
+
+
+  def fail(msg):
+      sys.exit(f"CHECK FAIL: {msg}")
+
+
+  def load(path):
+      p = Path(path)
+      if not p.is_file():
+          fail(f"missing catalog {path}")
+      try:
+          data = json.loads(p.read_text(encoding="utf-8"))
+      except ValueError as exc:
+          fail(f"{path} is not valid JSON: {exc}")
+      if not isinstance(data, dict):
+          fail(f"{path} is not a JSON object")
+      return flatten(data, "", path)
+
+
+  def flatten(obj, prefix, path):
+      out = {}
+      for k, v in obj.items():
+          if k.startswith(("_", "$", "@")):
+              continue
+          key = prefix + k
+          if isinstance(v, str):
+              out[key] = v
+          elif isinstance(v, dict):
+              for field in ("defaultMessage", "message", "translation", "string", "value", "text"):
+                  if isinstance(v.get(field), str):
+                      out[key] = v[field]
+                      break
+              else:
+                  out.update(flatten(v, key + ".", path))
+          else:
+              fail(f"{path}: {key} is not a string message")
+      return out
+
+
+  class ICUError(Exception):
+      pass
+
+
+  def skip_ws(s, i):
+      while i < len(s) and s[i].isspace():
+          i += 1
+      return i
+
+
+  def parse_msg(s, i, nested, args):
+      while i < len(s):
+          c = s[i]
+          if c == "'":
+              if s.startswith("''", i):
+                  i += 2
+              elif i + 1 < len(s) and s[i + 1] in "{}#|<":
+                  j = s.find("'", i + 1)
+                  i = len(s) if j < 0 else j + 1
+              else:
+                  i += 1
+          elif c == "{":
+              i = parse_arg(s, i + 1, args)
+          elif c == "}" and nested:
+              return i + 1
+          else:  # a stray top-level '}' is literal text, as in FormatJS
+              i += 1
+      if nested:
+          raise ICUError("unterminated sub-message")
+      return i
+
+
+  def parse_arg(s, i, args):
+      i = skip_ws(s, i)
+      m = re.compile(r"[A-Za-z0-9_]+").match(s, i)
+      if not m:
+          raise ICUError(f"bad argument name at {i}")
+      name, i = m.group(), skip_ws(s, m.end())
+      if i < len(s) and s[i] == "}":
+          args.append((name, None, None))
+          return i + 1
+      if i >= len(s) or s[i] != ",":
+          raise ICUError(f"expected ',' or '}}' after {name}")
+      i = skip_ws(s, i + 1)
+      m = re.compile(r"[A-Za-z]+").match(s, i)
+      if not m:
+          raise ICUError(f"bad argument type for {name}")
+      typ, i = m.group(), skip_ws(s, m.end())
+      if i < len(s) and s[i] == "}":
+          args.append((name, typ, None))
+          return i + 1
+      if i >= len(s) or s[i] != ",":
+          raise ICUError(f"expected ',' after type of {name}")
+      i += 1
+      if typ in ("plural", "selectordinal", "select"):
+          branches = set()
+          while True:
+              i = skip_ws(s, i)
+              if i >= len(s):
+                  raise ICUError(f"unterminated {typ} for {name}")
+              if s[i] == "}":
+                  i += 1
+                  break
+              if typ != "select" and s.startswith("offset:", i):
+                  i = skip_ws(s, i + 7)
+                  m = re.compile(r"\d+").match(s, i)
+                  if not m:
+                      raise ICUError("bad plural offset")
+                  i = m.end()
+                  continue
+              m = re.compile(r"=?[^\s{}]+").match(s, i)
+              if not m:
+                  raise ICUError(f"bad {typ} selector for {name}")
+              sel, i = m.group(), skip_ws(s, m.end())
+              if i >= len(s) or s[i] != "{":
+                  raise ICUError(f"expected '{{' after selector {sel}")
+              i = parse_msg(s, i + 1, True, args)
+              branches.add(sel)
+          if "other" not in branches:
+              raise ICUError(f"{typ} for {name} has no 'other' branch")
+          args.append((name, typ, frozenset(branches)))
+          return i
+      j = s.find("}", i)
+      if j < 0:
+          raise ICUError(f"unterminated style for {name}")
+      args.append((name, typ, None))
+      return j + 1
+
+
+  def icu(key, msg, path):
+      args = []
+      try:
+          parse_msg(msg, 0, False, args)
+      except ICUError as exc:
+          fail(f"{path}: {key} is not valid ICU MessageFormat ({exc}): {msg!r}")
+      return args
+
+
+  EN, ES = "web/src/locales/en.json", "web/src/locales/es-CO.json"
+  en, es = load(EN), load(ES)
+  if len(en) < 20:
+      fail(f"only {len(en)} messages in {EN}")
+  if set(en) != set(es):
+      fail(f"message ids differ: only in en {sorted(set(en) - set(es))[:8]}, "
+           f"only in es-CO {sorted(set(es) - set(en))[:8]}")
+  plural_ok = False
+  for key in en:
+      a_en, a_es = icu(key, en[key], EN), icu(key, es[key], ES)
+      if {a[0] for a in a_en} != {a[0] for a in a_es}:
+          fail(f"placeholders differ for {key}: en {en[key]!r} vs es-CO {es[key]!r}")
+      en_pl = [a for a in a_en if a[1] == "plural" and ("one" in a[2] or "=1" in a[2])]
+      if en_pl and any(a[1] == "plural" for a in a_es):
+          plural_ok = True
+  if not plural_ok:
+      fail("no ICU plural message (one/=1 + other) shared by both catalogs")
+  translated = sum(en[k].strip() != es[k].strip() for k in en)
+  if translated < 15:
+      fail(f"only {translated} es-CO messages differ from the English source")
+  en_text = " ".join(en.values()).lower()
+  kept = [p for p in ("sign batch record", "meaning of signature", "search batch number",
+                      "could not load batches", "materials", "password", "cancel") if p in en_text]
+  if len(kept) < 4:
+      fail(f"en.json does not carry the original English UI copy (found {kept})")
+  es_text = " ".join(es.values()).lower()
+  if sum(w in es_text for w in ("cancelar", "contrase", "firm")) < 2:
+      fail("es-CO.json does not look like a Spanish translation")
+
+  PATTERNS = [
+      (r'placeholder="Search batch number"', "search placeholder literal"),
+      (r"setError\('Could not load batches\.'\)", "load-error literal"),
+      (r"^\s*(Batch No\.|Product|Created|Close|Sign batch record|Cancel)\s*$", "JSX text literal"),
+      (r"<th>\s*(Status|Actual / Planned)\s*</th>", "table header literal"),
+      (r"Showing \{rows\.length\} of", "footer literal"),
+      (r">\s*(Loading…|Meaning of signature|Password|Sign|Reviewed|Approved|Released)\s*<", "JSX text literal"),
+      (r"<h2>\s*Batch \{batch\.batchNo\}", "detail title literal"),
+      (r"Status: \{batch\.status\}", "detail meta literal"),
+      (r"Released after approval by user #\{approval", "release note literal"),
+      (r"<h3>\s*(Materials|Sign batch \{batch)", "detail heading literal"),
+      (r"\(lot \{m\.lotNo\}\)", "material line literal"),
+      (r"by user #\{s\.userId\} on", "signature line literal"),
+      (r"' kg'", "unit concatenation"),
+      (r"' signature'", "English-only plural concatenation"),
+      (r"toLocaleDateString\(\)", "date formatted without a locale"),
+      (r"DD MMM YYYY", "hard-coded date pattern"),
+  ]
+  hits = []
+  for f in sorted(Path("web/src").rglob("*.ts*")):
+      if "locales" in f.parts or f.suffix not in (".ts", ".tsx"):
+          continue
+      for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+          for pat, why in PATTERNS:
+              if re.search(pat, line):
+                  hits.append(f"{f}:{n}: {why}: {line.strip()[:80]}")
+  if hits:
+      fail("hard-coded/locale-unaware UI text remains:\n  " + "\n  ".join(hits[:15]))
+  print(f"catalogs OK: {len(en)} messages, {translated} translated; no seeded literals left")
+  PY
+  out=$(tsc --noEmit -p web 2>&1)
+  bad=$(printf '%s\n' "$out" | grep -E 'error TS[0-9]+' \
+    | grep -Ev "error TS(2875|2882|7016|2688):|error TS2307: Cannot find module '[^./]|error TS2503: Cannot find namespace '(JSX|React)'|error TS2339: Property 'env' does not exist on type 'ImportMeta'")
+  test -z "$bad" || fail "tsc errors beyond missing node_modules:
+  $bad"
+  echo "tsc OK (only missing-package errors)"
+rubric:
+  must:
+    - >-
+      Sets up an ICU-capable i18n library for React (react-intl/FormatJS, or
+      i18next + react-i18next with i18next-icu, or Lingui) by declaring it in
+      web/package.json dependencies without installing it, wires its provider
+      at the root in web/src/main.tsx with the en/es-CO catalogs from
+      web/src/locales/, and selects the active locale with English as the
+      fallback (e.g. negotiated from navigator.languages or a stored choice,
+      es-CO -> es -> en).
+    - >-
+      Extracts the user-facing text of web/src/BatchTable.tsx and
+      web/src/BatchDetail.tsx into web/src/locales/en.json with es-CO.json
+      counterparts, including the table headers, the "Search batch number"
+      placeholder, "Could not load batches.", the "Showing N of M batches"
+      footer, "Loading…", the detail title and labels, the Close / "Sign batch
+      record" / Sign / Cancel buttons and the signing dialog's labels; values
+      such as the batch number, lot and user id are ICU arguments inside one
+      whole-sentence message rather than concatenated fragments.
+    - >-
+      Fixes the formatting in both files: `new Date(s.signedAt).toLocaleDateString()`
+      (BatchDetail ~L73) and `moment(b.createdAt).format('DD MMM YYYY')`
+      (BatchTable ~L109) become Intl.DateTimeFormat or the library's
+      formatDate/FormattedDate driven by the active locale; the `+ ' kg'`
+      concatenations (BatchTable ~L108, BatchDetail ~L64) use locale number
+      formatting (Intl.NumberFormat / formatNumber, e.g. unit 'kilogram');
+      and the `signatures.length + ' signature' + (… ? '' : 's')` heading
+      (BatchDetail ~L69) becomes an ICU plural message with `one` and `other`
+      branches in both catalogs.
+    - >-
+      The report says the es-CO strings are machine-drafted and need human
+      (plant QA) review, identifying the file and how they are marked or
+      listed, and gives a "Strings extracted" count and a "Remaining hardcoded
+      strings" count, listing any remaining ones with path:line and reason.
+  should:
+    - >-
+      Handles a null `actualQty` in the Actual / Planned cell (BatchTable
+      ~L108) explicitly (e.g. a translated "not recorded" / dash) instead of
+      rendering "null", and the footer "Showing N of M batches" uses an ICU
+      plural too.
+    - >-
+      Shows translated labels for enum values rendered to users
+      (`batch.status` in the detail line, `s.meaning` in the signature list,
+      and the Reviewed/Approved/Released option labels) via a label map or an
+      ICU `select`, while keeping the enum values themselves unchanged.
+    - >-
+      Signature timestamps show date and time with an explicit or documented
+      time zone (e.g. America/Bogota or the viewer's zone via `timeZone`),
+      not a date only; and the page language follows the active locale
+      (document.documentElement.lang set at runtime, or index.html's
+      hard-coded `lang="en"` flagged).
+    - >-
+      Adds translator context for messages with placeholders (FormatJS
+      `description`, a sidecar notes file or comments naming what `{batchNo}`,
+      `{count}`, `{userId}` hold) and states the es-CO register (usted).
+    - >-
+      Verification is honest: runs tsc and/or a script that validates both
+      JSON catalogs, key parity and placeholder parity, and states that
+      type-check/build against real node_modules was not possible here
+      because npm install was not allowed.
+  must_not:
+    - >-
+      Translates or renames machine values instead of display labels: changes
+      the `<option value="reviewed|approved|released">` values, the
+      BatchStatus/SignatureMeaning type members or STATUS_COLORS keys, the
+      `aria-sort` tokens ('ascending'/'descending'/'none'), API paths or
+      fields, or formats the signBatch payload or stored timestamps with the
+      locale.
+    - >-
+      Makes non-i18n fixes the delegation excluded: rewrites the note's
+      `dangerouslySetInnerHTML`/`formatNote` rendering, the useEffect
+      dependency arrays or fetch error handling, the row `key={index}`, or
+      the request/response handling in web/src/api.ts (an added
+      Accept-Language header is acceptable).
+    - >-
+      Claims the es-CO translations are reviewed/final, or claims the web app
+      type-checks or builds cleanly without evidence (node_modules is absent,
+      so `tsc` cannot pass unfiltered).

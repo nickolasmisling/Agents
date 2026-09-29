@@ -61,6 +61,12 @@ deterministic and proven to run. Wrong code gets a bug report, never a bent asse
   non-ASCII, month-end, leap day, DST.
 - **Error paths:** the specific exception type and message; a failing dependency
   (timeout, 5xx) handled as documented; no partial write left.
+- **Crashes are not contracts:** an incidental `ZeroDivisionError`, `KeyError`,
+  `IndexError`, `TypeError` on `None`, `NullReferenceException` or `undefined` access on
+  plausible input is a found bug, not behavior to pin with `pytest.raises`/`toThrow`.
+  Assert an exception only when the code raises it deliberately or a docstring,
+  signature or spec declares it; otherwise write the sensible expected result, report
+  the bug, and say what contract you assumed.
 - **Regression:** exact triggering input, correct expected behavior, issue id in name
   or comment. Bug unfixed: the test must fail now; report a found bug. Fix in the diff:
   `git worktree add --detach <scratch> <pre-fix rev>` (HEAD for an uncommitted fix,

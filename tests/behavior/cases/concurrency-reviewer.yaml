@@ -25,22 +25,24 @@ rubric:
       DB loads, last write wins).
     - >-
       Flags `_stats["hits"] += 1` / `_stats["misses"] += 1` in `get_batch` (app/cache.py
-      L29/L31) as a separate, non-atomic read-modify-write shared across threads, with
-      the lost-update interleaving (both threads read the same count and both store
-      count+1, so one increment is lost and hits/misses/hit_rate are wrong).
+      L29/L31) as a non-atomic read-modify-write on state shared across threads (as its
+      own finding or as an explicit part of the cache finding), with the lost-update
+      interleaving: both threads read the same count and both store count+1, so one
+      increment is lost and hits/misses/hit_rate are wrong.
     - >-
       Flags the unsynchronised writes to the `found` map in `Reconcile`
       (services/inventory/inventory.go L118, `found[lot.LotNo] = Discrepancy{...}`) from
-      up to 8 concurrent goroutines, and states the consequence (a data race; the Go
-      runtime can abort the process with `fatal error: concurrent map writes`, or the map
-      is corrupted). The fix is a `sync.Mutex` around the write, or sending results over
-      a channel to a single goroutine that writes the map.
+      up to 8 concurrent goroutines, states the consequence (a data race; the Go runtime
+      can abort the process with `fatal error: concurrent map writes`, or the map is
+      corrupted), and recommends a correct fix: a `sync.Mutex` around the write, sending
+      results over a channel to a single goroutine that writes the map, or `sync.Map`.
     - >-
-      Flags the goroutine leak in `onHandWithin` (inventory.go L85-96). `ch` is
-      unbuffered, so when the timeout / `ctx.Done()` branch of the select wins, nobody
-      ever receives and the worker goroutine blocks forever on `ch <- result{...}`, one
-      leaked goroutine per timed-out lot. The fix is `make(chan result, 1)`, or calling
-      `c.OnHand(ctx, lotNo)` directly because it already honours ctx.
+      Flags the goroutine leak in `onHandWithin` (inventory.go L85-97): `ch` is
+      unbuffered (L85), so when the timeout / `ctx.Done()` branch of the select wins,
+      nobody ever receives and the inner goroutine blocks forever on `ch <- result{...}`
+      (L88), leaking one goroutine per timed-out lot. It recommends a correct fix:
+      `make(chan result, 1)`, calling `c.OnHand(ctx, lotNo)` directly (it already honours
+      ctx), or making the send select on `ctx.Done()`.
   should:
     - >-
       The Python fix uses the existing `_lock` (or one equivalent lock, or per-key
@@ -58,21 +60,27 @@ rubric:
       outside the repo) and reports the command and result. Alternatively it states that
       no race run was possible because the package has no `_test.go` files.
     - >-
-      Lists as safe (not as findings) `Reconcile`'s semaphore `sem` capping concurrency at
-      8, the `errs` channel buffered to `len(lots)`, and `clear()` holding `_lock`.
+      Lists at least two of these as safe (not as findings): `Reconcile`'s semaphore
+      `sem` capping concurrency at 8, the `errs` channel buffered to `len(lots)`, and
+      `clear()` holding `_lock`.
     - >-
       Uses the agent's report shape: `VERDICT: NEEDS_WORK`, and for each finding a
       severity, path:line, Actors, Interleaving and Fix. It ranks the concurrent map write
       (process crash) at least as severe as the goroutine leak.
   must_not:
     - >-
-      Reports `clear()` in app/cache.py (which holds `_lock`) as racy, or reports the
-      `hit_rate` division in `stats()` as a possible division by zero (it is guarded by
-      `if total`).
+      Reports any of these Python false positives: that `clear()` itself is
+      unsynchronised or needs its own fix (it already holds `_lock`; naming `clear()` only
+      as the other actor in a `get_batch` race is fine); that the `hit_rate` division in
+      `stats()` can divide by zero (it is guarded by `if total`); or that one sqlite3
+      connection is shared across threads (every `_load` call opens and closes its own
+      connection through `db.session`, app/db.py L72-82).
     - >-
-      Reports the `errs` channel, the `sem` semaphore or `return found, <-errs` in
-      `Reconcile` as a deadlock, a blocked send, a goroutine leak or unbounded
-      concurrency (`errs` is buffered to len(lots) and `sem` caps concurrency at 8).
+      Claims the `errs` channel, the `sem` semaphore or `return found, <-errs` in
+      `Reconcile` can deadlock, block forever, leak goroutines or allow unbounded
+      concurrency (`errs` is buffered to len(lots), so no send blocks; `sem` caps workers
+      at 8 and each worker releases it in a defer). Noting that `sem <-` does not select
+      on `ctx.Done()`, or that only the first error is returned, is not a violation.
     - >-
       Reports a loop-variable capture bug for `lot` in `Reconcile` as a defect (`lot` is
       passed to the goroutine as an argument, and go.mod declares go 1.22).

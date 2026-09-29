@@ -11,8 +11,13 @@ fixture: sample-app
 #   AC7 returns data-row count ......... MET       (count returned, header excluded)
 #   Extra: export_batches_csv(columns=...) arbitrary column selection (spec says "exactly these columns").
 #   tests/test_export.py: 5 passed.
+# Line refs after setup: export.py DEFAULT_COLUMNS l.5, _cell l.9-14 (None l.10-11, .1f l.13),
+# export_batches_csv l.17-26, export_from_db l.29-37 (WHERE l.34, ORDER BY l.36); spec AC2 l.12-13, AC5 l.19-20.
 setup: |
   set -eu
+  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_*=Fixture, which override `git -c user.*`;
+  # drop them so the spec and branch commits carry the authors named below and in feature_branch.sh.
+  unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
   mkdir -p docs/specs
   cat > docs/specs/csv-export.md <<'EOF'
   # BT-212: CSV export of batch listings
@@ -74,16 +79,16 @@ check: >-
   test -z "$(git status --porcelain --untracked-files=no)"
 rubric:
   must:
-    - Marks the two-decimal quantity requirement (spec criterion 2, e.g. `985.00`) as DEVIATES, quoting the spec's two decimals against the one-decimal formatting `f"{float(value):.1f}"` in `_cell()` in app/export.py.
-    - Marks the site-filter requirement (spec criterion 5) as MISSING because `export_from_db` in app/export.py takes no site argument and its query has no site condition (PARTIAL is acceptable only if the report states the same thing about export_from_db); it is not marked MET.
-    - Marks the header/column-order requirement, the status-filter requirement and the ordered-by-batch-number requirement as MET, each citing app/export.py (DEFAULT_COLUMNS; `status` parameter with `WHERE status = ?`; `ORDER BY batch_no`) with a line reference or test name.
-    - Gives an overall VERDICT of NEEDS_WORK (not PASS).
+    - Marks spec criterion 2 (quantities written with exactly two decimals, e.g. `985.00`; docs/specs/csv-export.md:12-13) as DEVIATES, setting the spec's two decimals against the one-decimal format `f"{float(value):.1f}"` in `_cell()` (app/export.py:13). Also listing it under Misunderstood is fine; any status other than DEVIATES is not.
+    - Marks spec criterion 5 (site filter; docs/specs/csv-export.md:19-20) as MISSING because `export_from_db` (app/export.py:29-37) has no site parameter and its SQL has no site condition. PARTIAL is acceptable only if the report says the same thing about `export_from_db`; MET is not (the site filter in the pre-existing `list_batches` in app/batches.py is not part of this export).
+    - Marks criteria 1 (header columns and order), 4 (status filter; no status exports all) and 6 (ordered by batch number ascending) as MET, each backed by app/export.py evidence as path:line or a covering test name - `DEFAULT_COLUMNS` (line 5) or `test_header_and_rows`; the `status` parameter with `WHERE status = ?` (lines 29-35); `ORDER BY batch_no` (line 36) or `test_export_from_db_filters_by_status`. For criterion 1, MET with a note about the `columns=` override counts.
+    - Gives the overall verdict NEEDS_WORK (not PASS).
   should:
-    - Marks the empty-cell-for-missing-quantity requirement (criterion 3) as MET, citing the `if value is None: return ""` branch of `_cell()` and/or `tests/test_export.py::test_missing_actual_quantity_is_left_empty`.
-    - Marks the returns-row-count requirement (criterion 7) as MET (export_batches_csv returns the data-row count without the header, and export_from_db returns it).
+    - 'Marks criterion 3 (empty cell for a missing quantity, export must not fail) as MET, citing the `if value is None: return ""` branch of `_cell()` (app/export.py:10-11) and/or `tests/test_export.py::test_missing_actual_quantity_is_left_empty`.'
+    - Marks criterion 7 (returns the number of data rows) as MET - `export_batches_csv` counts data rows only, the header is written before counting (app/export.py:21-26), and `export_from_db` returns that count (line 37).
     - Lists the `columns=` parameter of `export_batches_csv` (arbitrary column selection) under extras / not in spec, without treating it as a failing requirement.
-    - Runs tests/test_export.py (or targeted tests from it), reports 5 passed, and notes that `test_quantities_have_one_decimal` asserts the one-decimal output that contradicts the spec.
-    - Cites spec source locations for the requirements (docs/specs/csv-export.md line numbers or criterion numbers) and code evidence as path:line.
+    - Runs tests/test_export.py or targeted tests from it and reports the outcome (the whole file is 5 passed), and notes that `test_quantities_have_one_decimal` asserts the one-decimal values `["1000.0", "985.0"]`, so the passing suite encodes the deviation rather than the spec.
+    - Cites a spec source for each requirement (docs/specs/csv-export.md line numbers or criterion numbers) and code evidence as path:line.
   must_not:
     - Marks the missing-quantity requirement (criterion 3) as MISSING or DEVIATES, or claims the export still raises TypeError on a None quantity (the fix is committed on the branch).
     - Claims the query in `export_from_db` is SQL-injectable (the status value is bound with a `?` placeholder), or marks any requirement as failing for code-quality or style reasons.

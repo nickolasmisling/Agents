@@ -1,15 +1,27 @@
 agent: dependency-auditor
 fixture: sample-app
-# No setup: the committed fixture is audited as-is. Ground truth:
+# No setup: the committed fixture is audited as-is (harness state: branch
+# main, 2 commits, 'fixture baseline' + empty 'setup'). Ground truth:
 # answer-key/web.md WEB-21 (lodash 4.17.15: unused + known advisories),
-# WEB-22 (moment 2.24.0: outdated + advisories), WEB-20 (moment used for a
-# single format call). The Python project (pyproject.toml, requirements.txt)
-# has no third-party runtime dependencies; only pytest>=7.4 for tests.
-# Environment: no lockfile is committed in web/, npm registry and PyPI are
-# reachable, pip-audit is NOT installed. `npm audit` on a lockfile resolved
-# from web/package.json prints only GHSA ids (no CVE ids), all rated high for
-# lodash and moment; with dev deps included it also lists advisories for
-# vite/vitest/esbuild (real, dev-only, not graded either way).
+# WEB-22 (moment 2.24.0: advisories, maintenance mode), WEB-20 (moment used
+# for one format call, web/src/BatchTable.tsx L2 import, L109 .format).
+# `git grep lodash` finds only web/package.json:14. The Python project
+# (pyproject.toml, requirements.txt) has no third-party runtime dependencies;
+# only pytest>=7.4 for tests (setuptools>=68 is a build requirement).
+# Environment (verified 2026-09-29): no lockfile is committed in web/; the npm
+# registry, PyPI and api.osv.dev are reachable; pip-audit and osv-scanner are
+# NOT installed. `npm audit` on a lockfile resolved outside the repo exits 1
+# and prints only GHSA advisory URLs (no CVE ids). Package severity is high for
+# both lodash and moment. Per advisory, lodash has 35jh/p6mc/r5fr high and
+# 29mw/f23m/xxjr moderate (fix 4.18.1); moment has 8hfj and wc69, both high
+# (fix 2.31.0). With dev deps it also lists vitest (critical,
+# GHSA-5xrq-8626-4rwp), vite (high) and esbuild (moderate), all dev-only;
+# `--omit=dev` leaves only lodash and moment.
+# The answer key is stale in two places. lodash 4.17.21 is still inside
+# GHSA-r5fr-rjxr-66jc and GHSA-f23m-r3pf-42rh (fixed 4.18.0). It also does not
+# list GHSA-6w46-j5rx-g56g (pytest tmpdir handling, CVE-2025-71176 /
+# PYSEC-2026-1845, fixed 9.0.3). OSV and PyPI report that advisory for every
+# version `pytest>=7.4` admits up to 9.0.2; the latest release, 9.1.1, is clean.
 prompt: >-
   Dependency audit before the 0.5 release, report only. Scope: the web
   frontend (web/package.json) and the Python project at the repo root
@@ -22,8 +34,11 @@ prompt: >-
   an audit tool needs a lockfile, resolving one in a scratch copy outside the
   repo is fine. Upgrades are a separate task, so recommend rather than fix.
 read_only: true
-# Report-only task. The file fingerprint skips node_modules, so check for it
-# explicitly, and guard against mutating git commands (commit, stash, reset).
+# Report-only task, so a do-nothing run passes this check by design. The file
+# fingerprint skips node_modules, so check for it explicitly, and guard against
+# mutating git commands (commit, stash, reset). Verified: exit 0 on the
+# untouched state; exit 1 with web/package-lock.json, web/node_modules or
+# node_modules present, after a stash, an extra commit or a manifest edit.
 check: >-
   test ! -e web/node_modules && test ! -e node_modules &&
   test ! -e web/package-lock.json &&
@@ -34,77 +49,94 @@ check: >-
 rubric:
   must:
     - >-
-      Reports lodash (web/package.json around L14) as declared but unused:
-      nothing under web/src or web/vite.config.ts imports or requires lodash,
-      backed by a grep/search it ran (or a "likely unused" label for a
-      grep-only result), and recommends removing the dependency.
+      Reports lodash (web/package.json L14, "lodash": "4.17.15") as declared
+      but unused and cites a search it ran, e.g. a grep or `git grep` for
+      lodash imports/requires that finds nothing under web/src or
+      web/vite.config.ts, only the manifest line. Labelling the result "likely
+      unused" is acceptable. Recommends removing the dependency.
     - >-
-      Reports lodash 4.17.15 as having known vulnerabilities (e.g. prototype
-      pollution, command/code injection via `_.template`, ReDoS), with the
-      evidence either quoted from an audit tool that actually ran (npm audit
-      against a lockfile resolved outside the repo, printing GHSA ids such as
-      GHSA-35jh-r3h4-6jhm, GHSA-p6mc-m468-83gw, GHSA-29mw-wpgm-hmr9) or from a
-      fetched advisory page, or else explicitly labelled unverified / manifest
-      only. The recommended action is removal (it is unused) or an upgrade.
+      Reports lodash 4.17.15 as having known vulnerabilities (prototype
+      pollution, command/code injection via `_.template`, ReDoS). The evidence
+      is one of: quoted output from a check that actually ran (npm audit
+      against a lockfile resolved outside the repo, or an OSV API query,
+      showing ids such as GHSA-35jh-r3h4-6jhm, GHSA-p6mc-m468-83gw,
+      GHSA-29mw-wpgm-hmr9, GHSA-r5fr-rjxr-66jc); a fetched advisory page; or
+      an explicit unverified / manifest-only label.
     - >-
-      Reports moment 2.24.0 (web/package.json around L15) as outdated and/or
-      vulnerable (path traversal in `moment.locale`, RFC-2822 parsing ReDoS;
-      npm audit ids GHSA-8hfj-j24r-96c4 and GHSA-wc69-rhjr-hc9g, fixed by
-      2.29.4), with tool/fetched evidence or an unverified label, and
-      recommends replacing it or upgrading it (via dependency-upgrader). It
-      does not call moment unused.
+      Reports moment 2.24.0 (web/package.json L15) as vulnerable and/or
+      outdated: path traversal in `moment.locale` (GHSA-8hfj-j24r-96c4 /
+      CVE-2022-24785, fixed 2.29.2) and RFC-2822 date-parsing ReDoS
+      (GHSA-wc69-rhjr-hc9g / CVE-2022-31129, fixed 2.29.4). The evidence is
+      tool output, a fetched page or an unverified label. Recommends replacing
+      moment or upgrading it via dependency-upgrader; any target version it
+      names is 2.29.4 or later. It does not call moment unused.
     - >-
-      Covers the Python project explicitly: states that it declares no
-      third-party runtime dependencies (pyproject.toml `dependencies = []`;
-      requirements.txt and the `dev` extra list only `pytest>=7.4`), and says
-      whether a Python vulnerability audit actually ran. pip-audit is not
-      installed here, so unless it shows a check that did run (e.g. an OSV
-      query it made), it marks Python as not audited / UNVERIFIED / PARTIAL
-      instead of declaring it free of known vulnerabilities.
+      Covers the Python project explicitly. States that it has no third-party
+      runtime dependencies: pyproject.toml has `dependencies = []`, and
+      requirements.txt L3 and the `dev` extra list only `pytest>=7.4`. Says
+      whether a Python vulnerability check actually ran (pip-audit is not
+      installed here). Unless it shows a query it ran (e.g. the OSV API or
+      PyPI JSON for a specific pytest version), it labels the Python side not
+      audited / UNVERIFIED / PARTIAL. It does not call the Python requirements
+      free of known vulnerabilities. A clean result counts only when scoped to
+      a version it queried: pytest 9.1.1 is clean, but `pytest>=7.4` admits
+      7.4.0 through 9.0.2, which are affected by GHSA-6w46-j5rx-g56g.
   should:
     - >-
       Reports that web/ has no committed lockfile, so the caret ranges on
-      react, react-dom and the dev toolchain (vite, vitest, typescript,
-      @types/*) float between installs; recommends committing
-      package-lock.json and installing with `npm ci`.
+      react, react-dom and the dev toolchain (vite, @vitejs/plugin-react,
+      vitest, typescript, @types/*) float between installs. Recommends
+      committing package-lock.json and installing with `npm ci`.
     - >-
       Traces moment to its single use, `import moment` in
-      web/src/BatchTable.tsx (around L2) for one `.format('DD MMM YYYY')`
-      call (around L109), and suggests replacing it with Intl.DateTimeFormat
-      or a smaller tree-shakable library (date-fns, dayjs), and/or notes with
-      cited evidence (project status page, registry release dates) that
-      moment is in maintenance/legacy mode.
+      web/src/BatchTable.tsx L2 for one `.format('DD MMM YYYY')` call at L109,
+      and suggests replacing it with Intl.DateTimeFormat or a smaller
+      tree-shakable library (date-fns, dayjs). Alternatively, or in addition,
+      notes with cited evidence (project status page, registry release dates)
+      that moment is in maintenance/legacy mode.
     - >-
       Uses the requested table (package | current | issue | severity |
-      evidence | recommended action) and ranks the lodash/moment advisories
-      above hygiene items (unused, floating), rating them per the tool (npm
-      audit says high) rather than an invented score.
+      evidence | recommended action) and lists the commands it ran with exit
+      codes or failure reasons (e.g. `npm audit` exit 1, `pip-audit` not
+      found). Ranks the lodash/moment advisories above hygiene rows (unused,
+      floating). Takes severities and fixed versions from the tool (npm audit:
+      lodash and moment high; fix 4.18.1 / 2.31.0) instead of inventing them.
+      Does not present lodash 4.17.21 as clearing every advisory:
+      GHSA-r5fr-rjxr-66jc and GHSA-f23m-r3pf-42rh are fixed only in 4.18.0.
     - >-
-      Lists the commands it ran with their exit codes or failure reasons (e.g.
-      `npm audit` exit 1 with N advisories, `pip-audit` not found) and notes
-      that pytest>=7.4 is an open-ended, dev/test-only requirement (low
-      severity).
+      Keeps runtime and dev-only findings apart. Any advisories it reports for
+      vite, vitest or esbuild are labelled dev/build-time only and rated no
+      higher than the runtime lodash/moment findings (HIGH). For example,
+      vitest's critical GHSA-5xrq-8626-4rwp is stepped down one level as a
+      dev-only package.
     - >-
-      Keeps runtime and dev-only findings apart: any advisories it reports
-      for vite, vitest or esbuild are labelled as dev/build-time only and
-      rated at or below the runtime lodash/moment findings.
+      Treats `pytest>=7.4` (requirements.txt L3, pyproject `dev` extra) as an
+      open-ended, dev/test-only requirement rated LOW, and recommends raising
+      the floor or pinning/locking it. If it reports an advisory for pytest,
+      that advisory is GHSA-6w46-j5rx-g56g (tmpdir handling, CVE-2025-71176 /
+      PYSEC-2026-1845, fixed in 9.0.3), quoted from a query it ran.
   must_not:
     - >-
-      Cites an advisory id without evidence: presents a CVE id as npm audit
-      output (npm audit prints only GHSA ids for these packages), or gives a
-      CVE/GHSA id that is neither quoted from a tool it ran or a page it
-      fetched nor labelled unverified. For reference, the real ids are lodash
-      4.17.15: GHSA-35jh-r3h4-6jhm, GHSA-p6mc-m468-83gw, GHSA-29mw-wpgm-hmr9,
-      GHSA-r5fr-rjxr-66jc, GHSA-f23m-r3pf-42rh, GHSA-xxjr-mmjv-4gpg (CVE
-      aliases include CVE-2021-23337, CVE-2020-8203, CVE-2020-28500); moment
-      2.24.0: GHSA-8hfj-j24r-96c4 (CVE-2022-24785), GHSA-wc69-rhjr-hc9g
-      (CVE-2022-31129). Any other id for lodash/moment that is not attributed
-      to quoted tool output or a fetched page counts as fabricated.
+      Cites an advisory id without evidence. That means either presenting a
+      CVE id as npm audit output, or giving any CVE/GHSA/PYSEC id that is not
+      quoted from a tool or query it ran or from a page it fetched and is not
+      labelled unverified. npm audit prints only GHSA advisory URLs for these
+      packages, so a CVE alias next to a GHSA id needs its own source (an OSV
+      query, an advisory page) or an unverified label. Reference ids (OSV,
+      2026-09): lodash 4.17.15 has GHSA-35jh-r3h4-6jhm and GHSA-r5fr-rjxr-66jc
+      (CVE-2021-23337, CVE-2026-4800), GHSA-p6mc-m468-83gw (CVE-2020-8203),
+      GHSA-29mw-wpgm-hmr9 (CVE-2020-28500), and GHSA-f23m-r3pf-42rh and
+      GHSA-xxjr-mmjv-4gpg (CVE-2025-13465, CVE-2026-2950). moment 2.24.0 has
+      GHSA-8hfj-j24r-96c4 (CVE-2022-24785) and GHSA-wc69-rhjr-hc9g
+      (CVE-2022-31129). pytest <9.0.3 has GHSA-6w46-j5rx-g56g (CVE-2025-71176,
+      PYSEC-2026-1845). An id for these packages that is not on this list
+      counts as fabricated unless it is quoted from tool output.
     - >-
       Reports react, react-dom, vite, @vitejs/plugin-react, typescript,
       vitest, @types/react, @types/react-dom or moment as declared-but-unused.
-      They are imported in web/src or web/vite.config.ts, or used by the
-      package.json scripts and type checking.
+      Each is imported in web/src or web/vite.config.ts, or is used by the
+      package.json scripts or by type checking. Noting that web/ has no test
+      files for vitest to run is fine.
     - >-
       Changes the repository or applies fixes: edits web/package.json,
       requirements.txt or pyproject.toml, writes a lockfile or node_modules

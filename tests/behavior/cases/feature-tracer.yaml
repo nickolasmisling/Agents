@@ -1,0 +1,148 @@
+agent: feature-tracer
+fixture: sample-app
+# No setup: clean tree at HEAD (fixture baseline + empty 'setup' commit).
+# Ground truth (answer-key/python-core.md PY-24, PY-25, PY-27, PY-31, FP-04, "Other
+# legitimate observations"; re-verified by driving BatchHandler on a scratch copy):
+#   Entry: app/api.py BatchHandler.do_GET (L42), db.session(self.db_path) (L44), branch
+#     L57-60: GET /batches/<id>/release. batch_id = int(parts[1]) (L58); user_id =
+#     int(query.get("user_id", 0)) (L59), caller-supplied, defaults to 0, no auth.
+#     A GET that mutates state (PY-24). There is no POST/PATCH release route.
+#   Flow: app/batches.py release_batch L77-86: SELECT status (L78); None -> raise
+#     LookupError (L79-80); status == 'released' -> return False, no write (L81-82);
+#     else UPDATE batches SET status = 'released' (L83), db.write_audit(conn, "batches",
+#     id, "update", old_status, "released", user_id) (L84 -> app/db.py L85-98, INSERT
+#     audit_log with at = utils.utc_now_iso()), conn.commit() (L85), return True.
+#     The UPDATE and the audit INSERT share one connection and implicit sqlite
+#     transaction and commit together; db.session (app/db.py L71-82) commits again on
+#     exit, rolls back on exception, always closes (FP-04: it is correct).
+#   Response: _send (L24-30), always HTTP 200: {"batchId", "status": "released",
+#     "changed": true|false}. Already released -> 200, changed false.
+#   Errors: unknown id -> LookupError; /batches/abc/release or ?user_id=x -> ValueError
+#     from int(). Neither is caught in api.py; db.session rolls back and re-raises;
+#     socketserver prints a traceback and the client gets no response
+#     (RemoteDisconnected), not a 404. {"error": "batch not found"} (L53-54) belongs to
+#     the GET /batches/<id> detail branch, not to release.
+#   No guard: any non-'released' status (planned, in_progress, rejected, ...) is
+#     released; no 'approved' signature, auth or lifecycle check (docs/architecture.md
+#     L30 describes a lifecycle the code does not enforce). Verified: a 'rejected' batch
+#     was released with user_id 7 and one audit_log row.
+#   Config: DB file from BATCHTRACK_DB (app/__init__.py L7, default batchtrack.db) ->
+#     BatchHandler.db_path (L22), overridden by serve(db_path) (L90-91). No flags.
+#   Side effects: none in the request (no events, LIMS, cache invalidation, ERP call).
+#     Downstream: services/erp-sync ErpSync.loadPending (~L74-93) later reads released
+#     batches that have an 'approved' signature and actual_qty directly from the DB.
+#   Web UI: web/src/api.ts updateBatchStatus (L47-52) sends PATCH /batches/{id};
+#     app/api.py has no do_PATCH, so the UI never reaches release_batch.
+#   Tests: tests/test_batches.py test_release_batch (L60-62, no assertion, PY-31) and
+#     test_release_batch_writes_audit_entry (L65-70) call release_batch directly;
+#     nothing in tests/ touches app.api; the already-released and unknown-id branches
+#     and the HTTP route are untested.
+prompt: >-
+  QA has opened a change request to tighten how batches get released in
+  batchtrack, and before anyone designs the change I need to understand
+  exactly what happens today when a batch is released through the backend
+  JSON API (the Python package under app/). Trace it end to end, from the
+  incoming HTTP request to what the client gets back: how the request is
+  routed and parsed, what is checked along the way, what is read and written
+  in the database, what the client receives on success and when things go
+  wrong, any configuration that changes the behavior, and which tests cover
+  which parts. If the web UI or the services in this repo trigger a release
+  or depend on one, say where they join the flow. This is read-only; don't
+  change anything in the repo.
+read_only: true
+# Report-only task. Guards against git-only mutations the file fingerprint cannot see
+# (commit, stash, branch switch, staged edits), against stray files such as a
+# batchtrack.db created by running the server, and against fixture drift that would
+# invalidate the rubric (release branch moving off do_GET, a PATCH/PUT handler or an
+# API test appearing).
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test "$(git log -1 --format=%s)" = setup &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD &&
+  test -z "$(git ls-files --others --exclude-standard)" &&
+  sed -n '42p' app/api.py | grep -q 'def do_GET' &&
+  sed -n '57p' app/api.py | grep -q 'parts\[2\] == "release"' &&
+  sed -n '77p' app/batches.py | grep -q 'def release_batch' &&
+  ! grep -qE 'def do_(PATCH|PUT)' app/api.py &&
+  ! grep -rqE 'app\.api|import api|BatchHandler' tests/
+rubric:
+  must:
+    - >-
+      Identifies the entry point as the `/batches/<id>/release` branch of
+      `BatchHandler.do_GET` in app/api.py (around L57-60, cited as path:line),
+      explicitly states that the HTTP method is GET (not POST/PUT/PATCH), and
+      makes clear that this GET request changes data (it releases the batch).
+    - >-
+      Traces the handler into `batches.release_batch` (app/batches.py around
+      L77-86) with path:line and describes its branches: it reads the batch's
+      status by id; an unknown id raises LookupError; a batch already in
+      'released' returns False without writing; otherwise it runs `UPDATE
+      batches SET status = 'released'` and calls `db.write_audit` (defined in
+      app/db.py around L85), which inserts an `audit_log` row with the old
+      status, the new value 'released' and the user_id, then commits and
+      returns True.
+    - >-
+      Describes what the client receives: on success and for an already
+      released batch the handler returns HTTP 200 with `{"batchId", "status":
+      "released", "changed": true|false}` via `_send`; an unknown batch id
+      (LookupError) and a non-numeric id or user_id (ValueError from `int()`)
+      are not caught anywhere in app/api.py, so they escape do_GET (db.session
+      rolls back and re-raises) and the client gets no JSON error response and
+      no 404 (e.g. the server's default error handling / dropped connection).
+    - >-
+      Names the tests in tests/test_batches.py that call `release_batch`
+      directly (`test_release_batch` around L60-62 and/or
+      `test_release_batch_writes_audit_entry` around L65-70) and states that no
+      test exercises the HTTP route in app/api.py (nothing in tests/ imports
+      app.api or BatchHandler).
+  should:
+    - >-
+      Notes, as short open questions rather than a code review, that a state
+      change is reachable by a plain GET (crawlers, prefetch, link previews,
+      CSRF) and that the acting user is the caller-supplied `user_id` query
+      parameter, defaulting to 0 when absent (app/api.py around L59), with no
+      authentication, so the audit_log attribution is unverified.
+    - >-
+      States that release_batch only checks for 'released' and so releases a
+      batch from any other status (planned, in_progress, rejected, ...) with no
+      'approved'-signature, role or lifecycle check, and notes that the
+      planned -> in_progress -> quarantined -> released lifecycle in
+      docs/architecture.md is not enforced by this code.
+    - >-
+      Explains transaction behavior: the status UPDATE and the audit_log INSERT
+      run on the same connection and are committed together by `conn.commit()`
+      in release_batch (around L85); `db.session` (app/db.py around L71-82)
+      commits again on exit, rolls back on an exception and always closes the
+      connection.
+    - >-
+      Covers where other parts join: the web UI does not call the release
+      route (`updateBatchStatus` in web/src/api.ts around L47-52 sends PATCH
+      /batches/{id}, and app/api.py has no PATCH handler); services/erp-sync
+      ErpSync reads released batches (with an 'approved' signature and
+      actual_qty) from the database later, outside the request; the request
+      itself has no events, LIMS/HTTP calls or cache invalidation; the database
+      file comes from BATCHTRACK_DB (app/__init__.py around L7, default
+      batchtrack.db) via BatchHandler.db_path / serve().
+    - >-
+      On test quality: says `test_release_batch` asserts nothing, and that the
+      already-released (return False) and unknown-id (LookupError) branches
+      and the HTTP response have no test.
+  must_not:
+    - >-
+      Describes the release entry point as a POST, PUT or PATCH route, or
+      claims the web UI's status change (`updateBatchStatus`, PATCH
+      /batches/{id}) reaches `release_batch`.
+    - >-
+      Invents behavior on the release path that the code does not have: an
+      'approved'-signature or QA check, authentication or role checks, status
+      lifecycle validation, a LIMS lookup, cache invalidation, or an event /
+      ERP post during the request; or claims an unknown batch id on the release
+      route returns a 404 or the `{"error": "batch not found"}` body (that body
+      belongs to the GET /batches/<id> detail branch, around L53-54).
+    - >-
+      Claims that `db.session` (app/db.py around L71-82) fails to roll back or
+      close the connection on an error, or that the status UPDATE and the
+      audit_log INSERT are committed separately (e.g. the audit row is written
+      after the commit, or one can persist without the other).

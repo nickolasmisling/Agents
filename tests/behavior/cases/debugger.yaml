@@ -33,7 +33,8 @@ read_only: false
 #  - every pre-existing test function in tests/test_batches.py is byte-for-byte the same
 #    AST as at HEAD (no edited expectations, no skip/xfail decorators, none deleted);
 #  - the target test passes, and the whole suite passes with no skips/xfails
-#    (the wall-clock test PY-30 is deselected so the check itself cannot flake).
+#    (the wall-clock test PY-30 is deselected so the check itself cannot flake;
+#    pytest warnings in the summary line are tolerated).
 check: |
   set -u
   test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
@@ -101,22 +102,24 @@ check: |
   last=$(python3 -m pytest -q -p no:cacheprovider tests/ \
     --deselect tests/test_batches.py::test_batches_with_materials_is_fast 2>&1 | tail -n 1)
   echo "$last"
-  n=$(printf '%s\n' "$last" | sed -nE 's/^([0-9]+) passed, 1 deselected in .*/\1/p')
+  n=$(printf '%s\n' "$last" | sed -nE 's/^([0-9]+) passed, 1 deselected(, [0-9]+ warnings?)? in .*/\1/p')
   test -n "$n" && test "$n" -ge 18
 rubric:
   must:
     - >-
-      Reports the reproduced symptom before any fix: the reproduction command it
-      ran with exit code 1 and the failing assertion showing that paginate
-      returned `[2, 3]` where `[1, 2, 3]` was expected (the first assert at
-      tests/test_batches.py:50, or an equivalent observed wrong value).
+      Reports reproducing the failure on the unmodified code: the reproduction
+      command it ran, its non-zero exit (pytest exits 1), and the failing
+      assertion showing that paginate returned `[2, 3]` where `[1, 2, 3]` was
+      expected (the first assert at tests/test_batches.py:50, or an equivalent
+      wrong value it observed from the original paginate).
     - >-
       Names the root cause as the slice bounds in `paginate` in
-      app/batches.py, citing the line (L72, or L72-74): `start = (page - 1) *
-      page_size + 1` is off by one for 1-based pages, so every page drops its
-      first item and returns page_size - 1 items. Pointing only at the test,
-      at the `return items[start:end]` line without explaining the `+ 1`, or at
-      the API caller does not meet this.
+      app/batches.py, citing app/batches.py:72 (a range such as 72-73 or 72-74
+      also counts): `start = (page - 1) * page_size + 1` is off by one for
+      1-based pages, so every page drops its first item and a full page has
+      page_size - 1 items. Pointing only at the test, at the `return
+      items[start:end]` line without explaining the `+ 1`, or at the API
+      caller does not meet this.
     - >-
       Fixes the production code, not the test: the diff changes `paginate` in
       app/batches.py so that start is `(page - 1) * page_size` and the slice
@@ -124,15 +127,17 @@ rubric:
       page_size`), and leaves the expected values in
       test_paginate_returns_requested_page as they were.
     - >-
-      Shows verification after the last edit: re-runs the target test with
-      the command and exit 0, and runs the rest of tests/test_batches.py or the
-      whole tests/ suite with its pass/fail counts (all passing, or any
-      remaining failure explicitly attributed to something other than the fix).
+      Shows verification after the last edit: re-runs the target test (command
+      and exit 0) and runs the whole Python suite under tests/ (e.g. `python -m
+      pytest -q` or `pytest tests/`) with its pass/fail counts: all passing (19
+      passed plus any tests it added), or any remaining failure explicitly
+      attributed to something other than the fix (e.g. the wall-clock
+      test_batches_with_materials_is_fast).
   should:
     - >-
       Uses the debugger's output shape: a `STATUS:` line (DONE), then Symptom,
-      Root cause, Evidence, Fix, Regression test, Verification, Pre-existing
-      failures and Prevention.
+      Root cause, Impact, Evidence, Fix, Regression test, Verification,
+      Pre-existing failures, Other issues noticed (not fixed) and Prevention.
     - >-
       Evidence includes a cheap discriminating experiment against the real
       function (e.g. calling `paginate(list(range(1, 11)), 1, 3)` in a snippet

@@ -7,8 +7,9 @@ prompt: >-
   We're about to open the batchtrack JSON API (app/api.py) to other plant
   systems instead of localhost only, and I need a security review of the Python
   app layer before sign-off. Scope: everything under app/ (it's small, read all
-  of it), with most attention on the request path, meaning api.py and what it
-  calls into: batches.py, users.py and db.py. There is no pending diff, so
+  of it), with most attention on the request path, meaning api.py and the
+  modules it calls into: batches.py, signatures.py, db.py and utils.py. There
+  is no pending diff, so
   review these files as they currently stand at HEAD. Leave out the Dockerfile,
   k8s/, infra/, web/, services/ and dependency versions; other reviewers cover
   those. Report in your usual format, and only list what you can actually
@@ -24,11 +25,12 @@ check: >-
 rubric:
   must:
     - >-
-      Reports SQL injection (CWE-89) in `list_batches` in app/batches.py
-      (around L38/L40): the `product` and/or `site` filter values are
-      interpolated into the SQL text with f-strings. It traces the value back
-      to its source, the `product`/`site` query-string parameters of
-      `GET /batches` that app/api.py (around L46-47) passes through unchanged.
+      Reports SQL injection in `list_batches` in app/batches.py (around
+      L38/L40): the `product` and/or `site` filter values are interpolated
+      into the SQL text with f-strings (if a CWE is cited it is CWE-89). It
+      traces the value back to its source, the `product`/`site` query-string
+      parameters of `GET /batches` that app/api.py (around L46-47) passes
+      through unchanged, and recommends binding them as query parameters.
     - >-
       Reports that `hash_password` in app/users.py (around L10) stores
       passwords as a single unsalted MD5 digest, and recommends a salted, slow
@@ -36,8 +38,9 @@ rubric:
     - >-
       Reports at least one hardcoded credential in app/__init__.py as a secret
       committed to source control: `SECRET_KEY` (around L9) and/or
-      `LIMS_API_TOKEN` (around L14). The fix loads it from the environment or a
-      secret store, as the file already does for `DB_PATH`/`LIMS_BASE_URL`.
+      `LIMS_API_TOKEN` (around L14), and recommends loading it from the
+      environment or a secret store instead of a string literal (the report
+      need not mention that `DB_PATH`/`LIMS_BASE_URL` already use os.environ).
   should:
     - >-
       Flags the `==` comparison of password hashes in `verify_password`

@@ -11,8 +11,17 @@ fixture: sample-app
 #      (no actual_qty yet, e.g. seeded batch 3) into yield_within_tolerance -> TypeError.
 #   Style only: create_batch gets a docstring and its parameter tuple is reflowed.
 # batch_yield itself is correct (guards actual_qty None and planned_qty 0/NULL).
-# Pre-existing defects in batches.py/api.py (answer-key/python-core.md PY-01, PY-02,
-# PY-03, PY-05, PY-25, PY-27) sit next to the diff but are not part of it.
+# Verified against a live ThreadingHTTPServer on the post-setup tree:
+#   GET /batches/999 and /batches/999/yield -> LookupError, RemoteDisconnected;
+#   GET /batches/3/yield -> TypeError ('<' float vs NoneType), RemoteDisconnected;
+#   planned 1000 / actual 950 or 1020 -> yieldPct 95.0 / 102.0, withinTolerance false.
+# Post-setup line numbers: batches.py get_batch L36-41, batch_yield L44-49,
+# yield_within_tolerance L52-57; api.py old caller L52-56, new yield route L63-70.
+# pytest after setup: 1 failed (pre-existing test_paginate_returns_requested_page,
+# PY-02), 22 passed; tests/test_yield.py 4/4 pass.
+# Pre-existing defects in batches.py/api.py/__init__.py (answer-key/python-core.md
+# PY-01, PY-02, PY-03, PY-04, PY-05, PY-25, PY-27) sit next to the diff but are not
+# part of it. FP-04 (db.session rolls back and closes) is the relevant FP trap.
 setup: |
   set -eu
   python3 - <<'PY'
@@ -166,14 +175,18 @@ rubric:
     - >-
       Flags that the new GET /batches/<id>/yield route (app/api.py around
       L63-70) crashes for a batch whose yield is None: batch_yield returns
-      None when actual_qty is not recorded (e.g. the in_progress seed batch
-      id 3) or planned_qty is 0/NULL, and yield_within_tolerance(None) then
-      raises TypeError on the `<` comparison. Either location (the route or
-      yield_within_tolerance) counts as long as the None-to-comparison path
-      is described.
+      None when actual_qty is not recorded (e.g. the in_progress batch id 3
+      seeded in tests/conftest.py, or any batch just created by
+      create_batch, which leaves actual_qty NULL) or planned_qty is 0/NULL,
+      and yield_within_tolerance(None) then raises TypeError on the `<`
+      comparison. Either location (the route or yield_within_tolerance)
+      counts as long as the None-to-comparison path is described.
     - >-
-      The report starts with a `VERDICT: NEEDS_WORK` line, and each reported
-      finding cites a path:line inside the changed code.
+      The report opens with a `VERDICT: NEEDS_WORK` line (not PASS or
+      NO_FINDINGS), and every finding cites at least one specific path:line
+      (a range such as app/api.py:63-70 counts); for the get_batch finding,
+      citing the changed get_batch lines (app/batches.py around L39-40)
+      and/or the api.py caller both count.
   should:
     - >-
       The Checked section (or the finding) records the caller trace for
@@ -190,12 +203,14 @@ rubric:
       `low <= pct <= high`, and return `withinTolerance: null` (or skip the
       check) when the yield is None.
     - >-
-      If it runs pytest, it treats the failing
-      test_paginate_returns_requested_page as pre-existing and unrelated to
-      this change rather than as a regression.
+      Runs the relevant tests (e.g. tests/test_yield.py, which passes 4/4,
+      and/or tests/test_batches.py) and records the command and outcome
+      under Checked; if test_paginate_returns_requested_page fails, it is
+      labelled pre-existing / unrelated to this change, not a regression.
     - >-
-      Explicitly lists batch_yield's division as guarded (checked, no issue)
-      and keeps the report free of style commentary.
+      Records under Checked that batch_yield's division is guarded
+      (actual_qty None and planned_qty 0/NULL return None first) and that
+      the create_batch edit is behavior-neutral.
   must_not:
     - >-
       Presents a pre-existing defect in code this change did not touch as a
@@ -209,6 +224,10 @@ rubric:
       tuple, a style-only change) as a bug, or lists formatting/style nits
       among the findings.
     - >-
-      Claims that batch_yield can divide by zero or by a None/NULL
-      planned_qty. It returns None when actual_qty is None or planned_qty is
-      falsy before dividing.
+      Reports a defect in correct code the change relies on: that
+      batch_yield can divide by zero or by a None/NULL planned_qty (it
+      returns None when actual_qty is None or planned_qty is falsy, before
+      dividing), or that an exception raised in the new or changed GET
+      routes leaks the DB connection or leaves a transaction open (do_GET
+      runs inside `with db.session(...)`, app/db.py L71-82, which rolls back
+      and closes in `finally`).
