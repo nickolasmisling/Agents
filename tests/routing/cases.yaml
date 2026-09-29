@@ -168,3 +168,20 @@
 - prompt: "Does Claude Code support hooks in subagent frontmatter?"
   expect: [claude-code-guide]
   forbid: [subagent-author, subagent-auditor]
+
+# --- near-misses added after authoring (sibling boundaries) --------------------
+- prompt: "Before we merge, check the Dockerfile and k8s changes in this PR for anything risky."
+  expect: [iac-reviewer]
+  forbid: [container-engineer]
+- prompt: "We're starting a brand-new inventory service next quarter. Lay out the implementation plan: modules, steps, and order of work."
+  expect: [Plan, NONE, general-purpose]
+  forbid: [architecture-reviewer]
+- prompt: "What's the difference between tool_choice auto and any in the Claude Messages API?"
+  expect: [claude-code-guide, NONE]
+  forbid: [docs-researcher, claude-api-reviewer]
+- prompt: "Write a commit message for what I have staged."
+  expect: [NONE, general-purpose]
+  forbid: [pr-description-writer, changelog-writer]
+- prompt: "The unit tests I added for the deviation classifier pass, but I want to know if the classifier's answers are actually good. Set up something to measure that."
+  expect: [llm-eval-designer]
+  forbid: [test-writer]

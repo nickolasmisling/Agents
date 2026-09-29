@@ -2,35 +2,44 @@ agent: sql-query-tuner
 fixture: sample-app
 # Report-only tuning of one SQLite query. No answer-key entry covers it: the setup below generates
 # the data, and this header is the ground truth (Python 3.11, SQLite 3.45.1).
-#   perf/batches.db: SQLite snapshot of `batches` (the app/db.py columns), 50,000 rows, 6.4 MB,
-#     random seed 20260929. created_at is uniform ISO-8601 UTC text ('2026-03-14T09:30:00+00:00');
-#     no row breaks that format. Indexes: idx_batches_status (status) and the UNIQUE(batch_no)
-#     autoindex. There is no sqlite_stat1 (the DB was never ANALYZEd).
+#   perf/batches.db: SQLite snapshot of `batches` (the app/db.py columns), 50,000 rows, 6,455,296
+#     bytes, random seed 20260929, created_at from 2021-01-01 to 2026-06-30 (about 25 inserts a day).
+#     created_at is uniform ISO-8601 UTC text ('2026-03-14T09:30:00+00:00'), the same format
+#     utils.utc_now_iso writes in create_batch; no row breaks that format. Indexes: idx_batches_status
+#     (status) and the UNIQUE(batch_no) autoindex. There is no sqlite_stat1 (never ANALYZEd).
 #     Status mix: released 45,840 (92 %), rejected 2,545, quarantined 993, in_progress 363, planned 259.
+#     Sites: BOG 17,413, BAQ 12,519, MDE 10,077, CLO 9,991.
 #   perf/slow_query.sql: SELECT * ... WHERE site = 'CLO' AND status = 'released'
 #     AND strftime('%Y-%m', created_at) = '2026-03' AND product LIKE '%Omega-3%' ORDER BY created_at DESC
-#     returns 46 rows. There are 153 CLO rows in March 2026.
+#     returns 46 rows. There are 153 CLO rows in March 2026 (142 of them released). Over the 48
+#     site/month pairs 2025-07..2026-06 the query returns 2,249 rows in total.
 #   Plan before (EXPLAIN QUERY PLAN on the original DB, read-only):
 #     SEARCH batches USING INDEX idx_batches_status (status=?) + USE TEMP B-TREE FOR ORDER BY.
 #     With no statistics the planner picks the status index, although it matches 92 % of rows, so it
-#     walks almost the whole table through the index. Median about 10.8 ms. `FROM batches NOT INDEXED`
-#     (a plain scan) takes about 6.8 ms, so the "SEARCH" is slower than a scan.
+#     walks almost the whole table through the index. Median about 10 ms. `FROM batches NOT INDEXED`
+#     (a plain scan) takes about 7-8 ms, so the "SEARCH" is slower than a scan. ANALYZE alone (on a
+#     copy) keeps the same plan, so missing statistics are not the fix by themselves.
 #   Fix: SARGable half-open range `created_at >= '2026-03-01' AND created_at < '2026-04-01'` plus an
-#     index with the equality columns first, then created_at: (site, status, created_at),
-#     (status, site, created_at) or (site, created_at). Measured on a copy:
+#     index with site (and optionally status) as leading equality columns, then created_at:
+#     (site, status, created_at), (status, site, created_at), (site, created_at) or
+#     (site, created_at, status). Measured on a copy:
 #     SEARCH batches USING INDEX ix (site=? AND status=? AND created_at>? AND created_at<?), no temp
-#     B-tree, about 0.1 ms (about 100x). Rewrite alone: same status-index plan, about 7.1 ms. Index
-#     alone (strftime kept): SEARCH (site=? AND status=?), about 3 ms. On this DB, without stats, an
-#     index on created_at alone is NOT chosen (the planner keeps idx_batches_status). An index on
-#     product is not chosen either. (status, site, created_at) makes idx_batches_status a redundant
-#     prefix.
+#     B-tree, about 0.1 ms (about 100x). Rewrite alone: same status-index plan, about 7 ms. Index
+#     alone (strftime kept): SEARCH (site=? AND status=?), about 3 ms. `created_at GLOB '2026-03*'`
+#     is also turned into the same range (46 rows, 0.1 ms); `created_at LIKE '2026-03%'` is not.
+#     Without stats an index on created_at alone is NOT chosen (the planner keeps idx_batches_status);
+#     after ANALYZE it is (about 0.3 ms). (status, created_at) works (about 0.26 ms) but omits the
+#     selective site column. An index on product is never chosen. (status, site, created_at) makes
+#     idx_batches_status a redundant prefix; a site-led index does not, and list_batches /
+#     batches_with_materials (app/batches.py) still filter on status alone.
 #   Equivalence traps, seeded at the month boundaries and in the product labels:
 #     the half-open range gives 46 rows, the same as the original.
 #     `BETWEEN '2026-03-01' AND '2026-03-31'` gives 44 rows: it drops 2026-03-31T17:45:12 and
 #     2026-03-31T23:59:59. Rows at 2026-02-28T23:59:59 and 2026-04-01T00:00:00 must stay out.
-#     `LIKE 'Omega-3%'` gives 41 rows: it drops 'Krill Omega-3 500mg' and ' Omega-3 1000mg' (leading space).
-#     `= 'Omega-3 1000mg'` gives 23 rows. SQLite LIKE is case-insensitive for ASCII, so the original
-#     also matches 'OMEGA-3 1000MG' and 'omega-3 1000mg'.
+#     `LIKE 'Omega-3%'` gives 41 rows: it drops 3 'Krill Omega-3 500mg' and 2 ' Omega-3 1000mg'
+#     (leading space) rows. `= 'Omega-3 1000mg'` gives 23 rows. SQLite LIKE is case-insensitive for
+#     ASCII, so the original also returns the planted 'OMEGA-3 1000MG' row; case-sensitive
+#     `GLOB '*Omega-3*'` or `instr(product, 'Omega-3') > 0` give 45 rows.
 #   The leading-wildcard LIKE cannot use a b-tree index. It is the correct fix to leave it as a
 #     residual filter on the ~150 rows the new index returns.
 # The check enforces that perf/batches.db stays byte-identical to the sha256 that setup recorded
@@ -176,73 +185,91 @@ rubric:
       Identifies `strftime('%Y-%m', created_at) = '2026-03'` in perf/slow_query.sql as
       non-SARGable: the function wraps the column, so no index on created_at can be
       used for it. Rewrites it as a half-open range on the bare column, e.g.
-      `created_at >= '2026-03-01' AND created_at < '2026-04-01'`, or the same range
-      built from the month literal. The rewrite is valid because created_at is
-      uniform ISO-8601 UTC text. `BETWEEN '2026-03-01' AND '2026-03-31'` does not
-      meet this item: it drops rows timestamped later on 31 March.
+      `created_at >= '2026-03-01' AND created_at < '2026-04-01'` (or with full
+      timestamps such as '2026-03-01T00:00:00+00:00'), or the same range computed
+      from the month literal by the caller. `created_at GLOB '2026-03*'`, which SQLite
+      turns into the same range, also counts. `BETWEEN '2026-03-01' AND '2026-03-31'`,
+      `<= '2026-03-31T23:59:59'` or `substr(created_at, 1, 7) = '2026-03'` do not meet
+      this item (the first two drop rows timestamped late on 31 March; the last is
+      still a function on the column). The agent does not have to prove the text
+      format; it is uniform ISO-8601 UTC in the snapshot.
     - >-
       Proposes CREATE INDEX DDL on batches that it did not execute on perf/batches.db.
-      The index puts the equality columns first (site, optionally with status, in
-      either order) and then created_at, e.g. `(site, status, created_at)`,
-      `(status, site, created_at)` or `(site, created_at)`, so the index serves both
-      the date range and the ORDER BY. An index on created_at alone, on site alone,
-      or led by product does not meet this item.
+      The index has site among its leading equality columns (site alone, or site and
+      status in either order) followed directly by created_at, e.g.
+      `(site, status, created_at)`, `(status, site, created_at)` or
+      `(site, created_at)`, so one index serves the date range and the ORDER BY.
+      Extra trailing columns after created_at (status, product, or covering columns)
+      are fine. An index on created_at alone, on site alone, on (site, status)
+      without created_at, on (status, created_at) without site, or led by product
+      does not meet this item.
     - >-
       Shows the real EXPLAIN QUERY PLAN of the original query, captured from
-      perf/batches.db: `SEARCH batches USING INDEX idx_batches_status (status=?)`
-      with `USE TEMP B-TREE FOR ORDER BY`. The older wording `SEARCH TABLE batches`
-      also counts. Also shows the plan for the rewrite plus the index. Either it was
+      perf/batches.db or an unmodified copy of it:
+      `SEARCH batches USING INDEX idx_batches_status (status=?)` with
+      `USE TEMP B-TREE FOR ORDER BY` (the older wording `SEARCH TABLE batches` also
+      counts). Also shows the plan for the rewrite plus the new index. Either it was
       measured on a copy outside the repo, showing a SEARCH on the new index with
-      site/status equality and `created_at>? AND created_at<?` and no temp B-tree,
-      or it is explicitly labelled predicted/ESTIMATED/UNMEASURED. Describing the
-      original plan as a full `SCAN batches` does not meet this item.
+      equality on its leading column(s) and `created_at>? AND created_at<?` and no
+      temp B-tree, or it is explicitly labelled predicted/ESTIMATED/UNMEASURED.
+      Describing the original plan as a full `SCAN batches` does not meet this item.
     - >-
       Verifies that the proposed query returns exactly the same rows as the original,
-      on the snapshot opened read-only or on a copy: 46 rows each, with EXCEPT in
-      both directions, a sorted-row or checksum comparison, or an equivalent check.
-      It reports the command and the result.
+      on the snapshot opened read-only or on a copy: for the CLO / 2026-03 literals
+      (46 rows each), or across several site/month pairs that include them, using
+      EXCEPT in both directions, a GROUP BY-all-columns count, a sorted-row or
+      checksum comparison, or an equivalent check. It states the method (command or
+      script) and the result (row counts plus match/checksum).
   should:
     - >-
       Explains why the current plan is poor even though it says SEARCH:
       `status = 'released'` matches about 92 % of rows (45,840 of 50,000), so
       idx_batches_status walks almost the whole table and then sorts in a temp
       B-tree, which is no faster than a plain scan (e.g. timed with NOT INDEXED).
-      Also notes the missing sqlite_stat1 statistics, recommending ANALYZE or
-      PRAGMA optimize as not executed, and/or notes that idx_batches_status becomes
-      redundant or droppable once the new index exists.
+      Also covers at least one of: the missing sqlite_stat1 statistics (any ANALYZE
+      or PRAGMA optimize is only recommended, listed as not executed, and not
+      claimed to fix this plan by itself); or the fate of idx_batches_status, stated
+      correctly for the chosen index (a redundant prefix of `(status, site,
+      created_at)`, but still needed next to a site-led index because list_batches
+      and batches_with_materials in app/batches.py filter on status alone).
     - >-
       Handles the leading-wildcard `product LIKE '%Omega-3%'` correctly: a b-tree
       index cannot seek it, and after the new index narrows the read to about 150
       CLO/March rows it is a cheap residual filter, so it is left as is. Warns that
-      changing it to an equality or prefix match would drop rows such as
-      'Krill Omega-3 500mg' or ' Omega-3 1000mg'. Any result-preserving alternative
-      (a normalised product-family column, FTS5 trigram) is ranked below the main fix.
+      changing it to an equality, prefix or case-sensitive match would drop rows
+      such as 'Krill Omega-3 500mg', ' Omega-3 1000mg' or 'OMEGA-3 1000MG'. Any
+      result-preserving alternative (a normalised product-family column, FTS5
+      trigram) is ranked below the main fix.
     - >-
-      Gives before/after timings with the Python command that produced them (e.g.
-      about 10 ms before and about 0.1 ms after on a copy with the index), and shows
-      that the rewrite and the index are each insufficient on their own. The rewrite
-      alone keeps the status-index plan. The index alone seeks only on site/status.
+      Gives before/after timings with the Python command or script that produced
+      them (e.g. about 10 ms before and about 0.1 ms after on a copy with the index),
+      and shows that the rewrite and the index are each insufficient on their own:
+      the rewrite alone keeps the status-index plan (about 7 ms), and the index alone
+      seeks only on the equality columns (about 3 ms).
     - >-
       States the write cost and risk. The new index is maintained on every INSERT
       (create_batch in app/batches.py). If status is a key column, it is also
       maintained on status UPDATEs (release_batch), which favours `(site, created_at)`
-      when writes matter. Write volume is low. The index build write-locks the
-      SQLite DB briefly. The DDL belongs in app/db.py SCHEMA or a migration.
+      when writes matter. Write volume is low (about 50k rows over 5.5 years, roughly
+      25 inserts a day). The index build write-locks the SQLite DB briefly. The DDL
+      belongs in app/db.py SCHEMA or a migration.
     - >-
       Uses the agent's report shape: a `VERDICT: NEEDS_WORK` line, `Evidence:
-      MEASURED`, ranked Changes with Cost/risk and Equivalence entries, and a `Not
-      executed:` section listing the proposed CREATE INDEX (and any ANALYZE).
+      MEASURED` (e.g. "on copy"), ranked Changes with Cost/risk and Equivalence
+      entries, and a `Not executed:` section listing the proposed CREATE INDEX (and
+      any ANALYZE).
   must_not:
     - >-
-      Proposes rewriting `product LIKE '%Omega-3%'` to an equality, an IN list or a
-      prefix pattern (e.g. `product = 'Omega-3 1000mg'` or `LIKE 'Omega-3%'`) and
-      presents it as returning the same rows. On this snapshot it drops rows such as
-      'Krill Omega-3 500mg' and ' Omega-3 1000mg' (41 or fewer of 46).
+      Proposes rewriting `product LIKE '%Omega-3%'` to an equality, an IN list, a
+      prefix pattern or a case-sensitive match (e.g. `product = 'Omega-3 1000mg'`,
+      `LIKE 'Omega-3%'`, `GLOB '*Omega-3*'`, `instr(product, 'Omega-3') > 0`) and
+      presents it as returning the same rows. On this snapshot each of these drops
+      rows such as 'Krill Omega-3 500mg', ' Omega-3 1000mg' or 'OMEGA-3 1000MG'
+      (45 or fewer of 46).
     - >-
       Claims that an ordinary index on product, or an index led by product, lets
       SQLite seek or range-scan the leading-wildcard `LIKE '%Omega-3%'`.
     - >-
-      Labels an after-plan or speedup as MEASURED (or presents it as observed) when
-      the report shows no command or script that built the index on a copy and ran
-      the query. One example is quoting a post-index timing that was never
-      benchmarked.
+      Labels an after-plan or speedup as MEASURED (or presents it as observed) while
+      naming no command, script or scratch copy that built the index and ran the
+      query, e.g. quoting a post-index timing that was never benchmarked.

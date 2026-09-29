@@ -96,11 +96,19 @@ validator catch typos.
 | --- | --- |
 | `opus` | Deep reasoning where a miss is expensive: security, architecture, debugging, concurrency, merge conflicts, compliance, prompt/eval design, adversarial verification. |
 | `sonnet` | The default for everything else. |
-| `haiku` | Short, mechanical, high-frequency tasks: running tests, changelogs, PR descriptions, dependency audits. |
+| `haiku` | Pure run-and-summarize work with no judgement, e.g. test-runner. |
 | `inherit` | Where the user's session model should decide (e.g. code-simplifier). |
 
 Always use aliases, never dated model IDs. Users can override every agent at once
 with `CLAUDE_CODE_SUBAGENT_MODEL`.
+
+Behavior tests moved three agents off `haiku`: changelog-writer (summarized commit
+messages and missed a behavior-changing diff), pr-description-writer (dropped the
+evidence labels its prompt requires, inconsistently between runs) and
+dependency-auditor (preamble, an invented release date, miscounted major versions,
+and a dev-only advisory rated CRITICAL against its own rule). On `sonnet` each passed
+repeatedly and was no more expensive, because it needed fewer turns. Use `haiku` only
+when a behavior case passes on it more than once.
 
 ## Colours by category
 

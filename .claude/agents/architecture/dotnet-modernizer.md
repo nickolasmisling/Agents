@@ -78,7 +78,11 @@ green, and you stop at decisions that belong to a human.
   dotnet-svcutil is a human step. `<system.serviceModel>` is ignored: build bindings in
   code.
 - **Config:** `appsettings.json` + `appsettings.{Environment}.json` bound to
-  `IOptions<T>`. The `System.Configuration.ConfigurationManager` package bridges only exe
+  `IOptions<T>`: register with `services.AddOptions<T>().Bind(config.GetSection("X"))`
+  (add `.ValidateDataAnnotations().ValidateOnStart()` for required settings) or
+  `services.Configure<T>(...)`, and inject `IOptions<T>` into consumers; an options
+  class that nothing binds is not a migration. Delete `App.config`/`packages.config`
+  once their content has moved, or say why one stays. The `System.Configuration.ConfigurationManager` package bridges only exe
   hosts (reads `<assembly>.dll.config`); in ASP.NET Core it returns null, so move
   shared-library reads to options first. No secrets in appsettings.json.
 - **BinaryFormatter**, `SoapFormatter`, `NetDataContractSerializer`,

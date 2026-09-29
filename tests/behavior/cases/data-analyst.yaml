@@ -14,14 +14,23 @@ fixture: sample-app
 #    (BAQ, 1000.0 -> 9910.0, 991.0 %).
 #  - DATA-04: released, deduped, DATA-02/03 excluded: BAQ n=28 mean 98.13 / median 97.87; BOG n=30
 #    98.38 / 98.35; CLO n=28 90.24 / 90.24; MDE n=34 97.92 / 97.83. Other variants of the filter
-#    (adding quarantined and/or rejected rows) give CLO 90.00-90.23, others 97.41-98.38, so the
-#    ~8-point gap is robust to that choice. It holds within every product and every CLO operator.
-#    Trap: with the x10 rows kept, means are BAQ ~127-129 %, CLO ~115-118 % (CLO looks above
-#    average); medians are unaffected.
+#    (adding quarantined and/or rejected rows) give CLO 90.00-90.23, others 97.41-98.38, n per
+#    site 28-35 (all non-in_progress: BAQ 30, BOG 33, CLO 32, MDE 35 = 130 rows); pooled
+#    ratio-of-sums yields are CLO 89.88-90.10, others 97.32-98.26. So the ~8-point gap
+#    (7.4-8.2 pp) is robust to that choice. It holds within every product (CLO 89.0-91.0 vs
+#    97.2-99.4 elsewhere) and every CLO operator (ctorres 90.3 n=13, ngarcia 91.1 n=4, pvargas
+#    89.9 n=11; all other operators 97.6-99.2). No monthly trend at CLO (89.6-90.8 per month).
+#    Trap: with the x10 rows kept, means are BAQ ~125-129 %, CLO ~115-118 % (114.6-118.3 depending
+#    on dedup/status filter; CLO looks above average); medians move < 0.5 pt.
 #  - DATA-05: 6 non-ISO date cells (all with day > 12, so unambiguous).
-#  - DATA-06: 7 rows spell "Omega-3 1000mg" differently -> naive group-by sees 11 products, not 5.
-#  - FP traps: in_progress blanks, quarantined rows, rejected rows at 86-89 %, yields 100.0-101.2 %,
-#    PX-/SG- prefixes.
+#  - DATA-06: 7 rows (6 distinct variant strings) spell "Omega-3 1000mg" differently -> naive
+#    group-by sees 11 product strings, not 5. Two of those rows (SG-2026-0335, -0336) are also
+#    quarantined, so flagging their spelling is correct, not an FP.
+#  - FP traps: in_progress blanks, quarantined rows, rejected rows at 86.1-89.2 %, yields
+#    100.0-101.2 %, PX-/SG- prefixes.
+# Verified on a scratch copy built exactly like test_behavior.py (fixture copy + .claude/agents,
+# 'fixture baseline' + empty 'setup' commit): data/batches.csv is byte-identical to a re-run of
+# gen_batches_csv.py and every number above was recomputed with a stdlib script.
 # The prompt defines yield and asks both questions but names no site, issue or batch.
 prompt: >-
   Plant operations is preparing the quarterly site review and wants to use the H1 2026 batch
@@ -38,8 +47,10 @@ read_only: false
 # tracked file may change or be staged, history/branch/stash must be intact, and new files are
 # allowed only under analysis-output/ (plus Claude's own .claude/ files). Validated on a scratch
 # copy: untouched tree -> exit 0; reference run writing analysis-output/site_yield.py and a derived
-# CSV -> exit 0; row appended to data/batches.csv -> exit 1; data/batches_clean.csv -> exit 1;
-# `git add analysis-output` -> exit 1; extra commit -> exit 1.
+# CSV (+ .claude/settings.local.json) -> exit 0; CSV rewritten with identical bytes -> exit 0;
+# row appended to data/batches.csv -> exit 1; data/batches_clean.csv -> exit 1; site_yield.py at
+# the repo root -> exit 1; README.md edited -> exit 1; `git add analysis-output` -> exit 1; extra
+# commit -> exit 1. A do-nothing run passes by design (no file change is required).
 check: |
   cmp -s data/batches.csv "$FIXTURES/sample-app/data/batches.csv" || { echo "data/batches.csv was modified"; exit 1; }
   git diff --quiet HEAD -- data/batches.csv || { echo "data/batches.csv differs from HEAD"; exit 1; }
@@ -54,10 +65,12 @@ rubric:
   must:
     - >-
       Identifies site CLO as the underperformer with numbers computed after cleaning (duplicates
-      removed, blank actual_qty and the two ~10x entries excluded, or medians used): CLO mean
-      and/or median yield about 90 % (roughly 89.5-90.5 %) against about 97.4-98.4 % for each of
-      BAQ, BOG and MDE, i.e. roughly 8 percentage points (~8 %) lower, with n per site (about 28-33
-      per site, e.g. CLO 28, BAQ 28, BOG 30, MDE 34 for released batches only).
+      removed, blank actual_qty and the two ~10x entries excluded, or medians used): CLO mean,
+      median or pooled yield about 90 % (roughly 89.5-90.5 %) against about 97.3-98.4 % for each of
+      BAQ, BOG and MDE, i.e. roughly 8 percentage points (7.4-8.2 pp, ~8 %) lower, and states n
+      for every site (28-35 per site depending on which statuses are kept: CLO 28, BAQ 28, BOG 30,
+      MDE 34 for released batches only; CLO 32, BAQ 30, BOG 33, MDE 35 when rejected and
+      quarantined batches are kept).
     - >-
       Reports the exact duplicate rows: 5 rows that repeat another row in every column (150 data
       rows but 145 unique batch_no; SG-2026-0206, SG-2026-0231, SG-2026-0253, SG-2026-0291,
@@ -78,18 +91,20 @@ rubric:
       PX-2026-0328 `20260613`), parses them with explicit formats, and notes they are unambiguous
       (day > 12).
     - >-
-      Reports the 7 variant spellings of `Omega-3 1000mg` (lower/upper case, double, leading or
-      trailing space, `1000 mg`) that make a naive group-by show 11 products instead of 5, and
-      normalises them before any per-product breakdown.
+      Reports the 7 rows that spell `Omega-3 1000mg` differently (6 distinct variants: lower case
+      x2, upper case, double space, leading space, trailing space, `1000 mg`; e.g. SG-2026-0224,
+      SG-2026-0233, SG-2026-0335) that make a naive group-by show 11 product strings instead of 5,
+      and normalises them before any per-product breakdown.
     - >-
-      Stratifies the site comparison: the CLO gap holds within every product and/or for every CLO
-      operator (ctorres, ngarcia, pvargas all ~90 %), so product mix or a single operator does not
-      explain it; recommends a process/equipment investigation at CLO while stating the data shows
-      an association, not a cause.
+      Stratifies the site comparison: the CLO gap holds within every product (CLO about 89-91 % vs
+      97-99 % elsewhere) and/or for every CLO operator (ctorres, ngarcia, pvargas all about
+      90-91 %), so product mix or a single operator does not explain it; recommends a
+      process/equipment investigation at CLO while stating the data shows an association, not a
+      cause.
     - >-
-      Shows the effect of the ~10x rows (with them kept, site means come out around BAQ ~127-129 %
+      Shows the effect of the ~10x rows (with them kept, site means come out around BAQ ~125-129 %
       and CLO ~115-118 %, making CLO look above average, while medians barely move) and gives row
-      accounting from 150 loaded rows to the ~120 analysed, with the reason for each drop.
+      accounting from 150 loaded rows to the 120-130 analysed, with the reason for each drop.
     - >-
       Method is reproducible: notices pandas is unavailable and uses the stdlib csv module (or
       states what it used), saves the script under analysis-output/ with the command to re-run it,
@@ -97,11 +112,13 @@ rubric:
       line, Key numbers table with n, Data quality issues with severity, Method, Caveats).
   must_not:
     - >-
-      Presents expected states as data errors to correct: the blank actual_qty/end_date of the 7
-      in_progress batches (PX-2026-0339 .. SG-2026-0345), the 4 quarantined batches, the 86-89 %
-      yields of the 6 rejected batches (as outliers or as evidence about a site), yields of
-      100.0-101.2 % (e.g. PX-2026-0315, PX-2026-0268) as outliers, or the PX-/SG- batch prefixes as
-      an inconsistency.
+      Lists an expected state as a data error or a source record to correct (mentioning it as
+      expected, or leaving it out of the comparison because of its status, is fine): the blank
+      actual_qty/end_date of the 7 in_progress batches (PX-2026-0339 .. SG-2026-0345), the
+      quarantined status of SG-2026-0335 .. SG-2026-0338 (flagging the product spelling of -0335
+      and -0336 is correct), the 86-89 % yields of the 6 rejected batches (as entry errors or as
+      evidence about a site), yields of 100.0-101.2 % (e.g. PX-2026-0315, PX-2026-0268) as
+      outliers or errors, or the PX-/SG- batch prefixes as an inconsistency.
     - >-
       Concludes that no site underperforms or names a site other than CLO as the underperformer
       (e.g. from means that still include the two ~10x rows), or fills blank actual_qty with 0 or

@@ -63,6 +63,21 @@ Use the migration-reviewer agent on db/migrations/002_add_site.sql
 To pin every agent to one model (for example, on a budget), set
 `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`.
 
+### Optional: Microsoft Learn docs
+
+`docs-researcher`, `dotnet-modernizer` and `powershell-scripter` can use the free
+[Microsoft Learn MCP server](https://learn.microsoft.com/training/support/mcp) for
+.NET, Azure, SQL Server and PowerShell docs. Without it, they fall back to web fetches.
+Agents refer to MCP tools by full name, so register the server under exactly the name
+`Microsoft_Learn`:
+
+```bash
+claude mcp add --transport http Microsoft_Learn https://learn.microsoft.com/api/mcp
+```
+
+If you register it under another name, the tool names won't match and Claude Code
+silently drops them from these agents.
+
 ## Catalog
 
 <!-- catalog:start -->
@@ -149,10 +164,10 @@ To pin every agent to one model (for example, on a budget), set
 
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
-| [`changelog-writer`](.claude/agents/git/changelog-writer.md) | Updates CHANGELOG.md's Unreleased section from commits/PRs since the last tag: end-user entries in Added/Changed/Deprecated/Removed/Fixed/Security, noise dropped, BREAKING changes flagged with migration notes, PR/SHA refs cited. Also drafts release notes (returned, unpublished). | haiku | read/write |
+| [`changelog-writer`](.claude/agents/git/changelog-writer.md) | Updates CHANGELOG.md's Unreleased section from commits/PRs since the last tag: end-user entries in Added/Changed/Deprecated/Removed/Fixed/Security, noise dropped, BREAKING changes flagged with migration notes, PR/SHA refs cited. Also drafts release notes (returned, unpublished). | sonnet | read/write |
 | [`git-historian`](.claude/agents/git/git-historian.md) | Answers why code is the way it is from version control: when and why a line, function or file changed, which commit, PR or ticket (INC-, JIRA-, #123) introduced it, and who knows it, via git log -L, pickaxe, blame past renames and PR lookups. | sonnet | read-only |
 | [`merge-conflict-resolver`](.claude/agents/git/merge-conflict-resolver.md) | Resolves git merge, rebase, cherry-pick, revert and stash-pop conflicts by combining the intent of both sides instead of picking one: reads base/ours/theirs and each side's commits, fixes semantic conflicts, builds, tests and stages. | opus | read/write |
-| [`pr-description-writer`](.claude/agents/git/pr-description-writer.md) | Drafts a pull request (or merge request) title and description from the branch diff (base...HEAD), mirroring the repo's PR template if present: summary, grouped changes, risk and rollout, testing evidence, linked issues. | haiku | read-only |
+| [`pr-description-writer`](.claude/agents/git/pr-description-writer.md) | Drafts a pull request (or merge request) title and description from the branch diff (base...HEAD), mirroring the repo's PR template if present: summary, grouped changes, risk and rollout, testing evidence, linked issues. | sonnet | read-only |
 
 ### AI engineering & Claude Code
 
