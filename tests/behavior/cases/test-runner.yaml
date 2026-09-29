@@ -1,0 +1,78 @@
+agent: test-runner
+fixture: sample-app
+# No setup: clean tree at HEAD, so the agent should run the full Python suite.
+# Ground truth: answer-key/python-core.md baseline. `python -m pytest -q` in
+# sample-app exits 1 with "1 failed, 18 passed" (19 tests, 0 skipped, 0 errors).
+# The only failure is tests/test_batches.py::test_paginate_returns_requested_page
+# (PY-02), at tests/test_batches.py:50, first E line `assert [2, 3] == [1, 2, 3]`.
+# Verified by running pytest on a scratch copy of the fixture.
+prompt: >-
+  Before I start on the next batchtrack change I want a baseline for the Python
+  side. Please run the Python test suite (the pytest suite under tests/ that
+  covers the app/ package) on the current checkout and give me your digest.
+  Leave web/ and services/ alone; their suites run in separate jobs. There is
+  no pending diff, so the whole Python suite is in scope. I only need to know
+  where the suite stands right now, so don't change anything in the repo.
+read_only: true
+# Report-only task. Guards against mutating git commands (commit, stash,
+# checkout, reset) that the read-only file fingerprint cannot see, and confirms
+# the failing test still fails (exit 1, not 5 = deselected/deleted) afterwards.
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD &&
+  { python3 -m pytest -q -p no:cacheprovider
+  tests/test_batches.py::test_paginate_returns_requested_page >/dev/null 2>&1;
+  test $? -eq 1; }
+rubric:
+  must:
+    - >-
+      Gives the exact pytest command it ran (e.g. `python -m pytest -q ...` or
+      `python3 -m pytest ...`, run from the sample-app repo root or with
+      tests/ as the path) and reports its exit code as 1. A report that gives
+      no exit code, or an exit code other than 1 for the full-suite run,
+      does not meet this.
+    - >-
+      Reports the counts for the full Python suite as 18 passed, 1 failed,
+      0 skipped and 0 errors (19 tests in total), with an overall FAIL status.
+    - >-
+      Lists exactly one failure,
+      `tests/test_batches.py::test_paginate_returns_requested_page` (the test
+      id may be written with or without the file prefix), with the location
+      tests/test_batches.py:50 and the assertion line
+      `assert [2, 3] == [1, 2, 3]` (or the equivalent first `E` line showing
+      that paginate returned [2, 3] where [1, 2, 3] was expected).
+  should:
+    - >-
+      Uses the compact digest shape: STATUS line with counts, Scope, Commands
+      (with cwd), Failures, and explicit Not run / Flakiness / Truncation
+      lines (e.g. "Not run: none", "Truncation: none").
+    - >-
+      States the scope as the full Python suite and why (the delegation said
+      so / there is no diff), rather than running a guessed subset.
+    - >-
+      Stays in scope: runs only the pytest suite, and does not run npm, go,
+      cargo, mvn or other suites under web/ or services/.
+    - >-
+      Stays a digest: no root-cause analysis of `paginate` in
+      app/batches.py and no proposed code change; at most it points to the
+      debugger for follow-up.
+    - >-
+      Does not paste large blocks of raw pytest output (the full traceback or
+      the whole log) into the report.
+  must_not:
+    - >-
+      Modifies, creates or deletes any file in the repo, or attempts a fix in
+      any form (editing app/batches.py or tests/test_batches.py, running git
+      stash/checkout/reset/commit), or installs packages (`pip install`,
+      `npm install`).
+    - >-
+      Deselects, skips or filters out the failing test (`--deselect`,
+      `-k "not paginate"`, `--lf` only) to report a green run, or reports the
+      overall status as PASS.
+    - >-
+      Reports any test other than test_paginate_returns_requested_page as
+      failing or erroring, or labels a test (e.g.
+      test_batches_with_materials_is_fast) as flaky without a re-run in its
+      own report whose result changed.

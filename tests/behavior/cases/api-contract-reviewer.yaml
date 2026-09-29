@@ -1,0 +1,112 @@
+agent: api-contract-reviewer
+fixture: sample-app
+# No setup: the seeded contract defects are in the committed fixture, so this is a
+# full-API review of named paths at HEAD rather than a diff against a base branch.
+# Ground truth: answer-key/python-core.md PY-24 (unsafe GET), PY-25 (errors with 200),
+# PY-26 (casing), PY-27 (unvalidated int ids); answer-key/web.md WEB-10 (types.ts vs
+# wire format), WEB-23 (client ignores status) and its cross-layer notes (missing
+# /materials and PATCH routes, signature body mismatch, `planned` status).
+# False-positive traps: FP-WEB-07 (URL encoding), the camelCase list endpoint that
+# does match types.ts, and the 201s on the two create routes.
+prompt: >-
+  Before we hand the batchtrack HTTP API to the MES team as a supported
+  integration point, I need a contract review of what we would be committing
+  to. Scope: the server side in app/api.py (read into app/batches.py,
+  app/signatures.py and app/db.py only as far as you need to know what each
+  route returns or changes), and the web client's view of the same contract in
+  web/src/api.ts and web/src/types.ts; web/vite.config.ts shows how the
+  client's /api prefix maps onto the Python routes. There is no pending diff
+  and no OpenAPI spec, so treat this as a full review of the contract as it
+  stands at HEAD: pre-existing issues are in scope. Check the two sides against
+  each other as well as against HTTP conventions. Leave authn/authz, injection
+  and the React components to the other reviewers. Report only; do not modify
+  anything.
+read_only: true
+# Report-only task: guard against mutating git commands (commit, stash, checkout,
+# reset), which the read-only file fingerprint cannot see, plus a fixture-drift
+# guard that fails if the seeded code the rubric depends on is no longer there.
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD &&
+  grep -q 'def _send(self, payload, status=200)' app/api.py &&
+  grep -q 'parts\[2\] == "release"' app/api.py &&
+  grep -q 'batches.get_batch(conn, int(parts\[1\]))' app/api.py &&
+  grep -q 'batchNo: string;' web/src/types.ts
+rubric:
+  must:
+    - >-
+      Flags `GET /batches/<id>/release` (app/api.py `do_GET`, around L57-60) as
+      a state-changing GET: it calls `batches.release_batch`, which sets the
+      batch status to `released` and writes an audit row, so the route is
+      neither safe nor idempotent under HTTP semantics (prefetchers, crawlers,
+      retries or a refresh can release batches). The fix moves it to a
+      non-safe method, e.g. `POST /batches/<id>/release` or PATCH/PUT on the
+      batch with a status body.
+    - >-
+      Flags that errors are returned with HTTP 200 because
+      `BatchHandler._send` defaults to `status=200` (around L24) and the error
+      branches do not override it, naming at least one concrete case:
+      `batch not found` (around L54), `no route for ...` (around L64/L87) or
+      `invalid batchNo` (around L73). The fix is a proper 4xx code, e.g. 404
+      for an unknown batch or route and 400/422 for invalid input.
+    - >-
+      Flags the backend/frontend field-casing mismatch: `GET /batches/<id>`
+      returns the raw DB row from `get_batch` in snake_case (`batch_no`,
+      `planned_qty`, `actual_qty`, `created_at`), while the list endpoint's
+      `_summary()` (app/api.py around L10-18) and the `Batch` interface in
+      web/src/types.ts use camelCase (`batchNo`, `plannedQty`, ...), so the
+      client reading `batchNo` from `fetchBatch` gets undefined. The fix is
+      one naming convention at the API boundary (a single serializer or
+      mapper for every response) or explicit mapping in web/src/api.ts.
+    - >-
+      Flags that numeric path or query parameters go through bare `int()`
+      with no validation, citing the batch id `int(parts[1])` (app/api.py
+      around L52/L58/L62/L83) and/or `page`, `page_size` or `user_id` (around
+      L49/L59): a request such as `GET /batches/abc` raises an unhandled
+      ValueError instead of getting a 400 response. The fix validates format
+      and range at the boundary and returns 400 (and 404 for an unknown id).
+  should:
+    - >-
+      Reports the signatures contract mismatch between client and server:
+      `GET /batches/<id>/signatures` returns snake_case `user_id`/`signed_at`
+      (plus `username`, and no batch id) while the `Signature` interface in
+      web/src/types.ts declares `userId`/`signedAt`/`batchId`; and/or
+      `signBatch` sends `SignatureRequest` `{meaning, password}` while the
+      POST handler (around L80-85) reads `data["user_id"]` and
+      `data["signed_at"]`, so the client's request fails with a KeyError.
+    - >-
+      Reports that web/src/api.ts calls routes the server does not implement:
+      `fetchMaterials` -> `GET /batches/<id>/materials` (falls through to the
+      `no route` error, with HTTP 200) and/or `updateBatchStatus` ->
+      `PATCH /batches/<id>` (there is no `do_PATCH`).
+    - >-
+      Notes that `request()` in web/src/api.ts returns `res.json()` without
+      checking `res.ok` or the status, so error bodies are handed to callers
+      as data, and/or recommends one error model for the API such as RFC 9457
+      `application/problem+json` in place of the ad hoc `{"error": ...}`.
+    - >-
+      Reports the status enum mismatch: the backend's default status is
+      `planned` (`create_batch` default and the `batches.status` column
+      default) but `BatchStatus` in web/src/types.ts does not include it.
+    - >-
+      Follows the agent's output shape: a `VERDICT: NEEDS_WORK` line, `Scope:`
+      and `Tools:` lines, and numbered findings tagged with a severity and a
+      category (HTTP, CONSISTENCY, VALIDATION, BREAKING...) that cite
+      path:line.
+  must_not:
+    - >-
+      Claims that the `encodeURIComponent(...)` path segments or the
+      `URLSearchParams` query building in web/src/api.ts allow path or query
+      injection; both are correctly encoded (answer key FP-WEB-07).
+    - >-
+      Claims that the list endpoint `GET /batches` (`_summary()`, app/api.py
+      around L10-18) returns snake_case keys such as `batch_no`, or that its
+      `batchNo`/`product`/`site`/`status`/`plannedQty` keys conflict with the
+      `Batch` interface. Noting that `_summary()` omits `actualQty` and
+      `createdAt`, which `Batch` declares, is correct and not a violation.
+    - >-
+      Calls the 201 returned by `POST /batches` (around L79) or
+      `POST /batches/<id>/signatures` (around L85) the wrong status code for
+      a successful create. Noting a missing `Location` header is fine.

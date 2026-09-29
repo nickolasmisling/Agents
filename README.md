@@ -66,6 +66,50 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
+**23 agents** in 4 categories.
+
+### Code review & auditing
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`accessibility-reviewer`](.claude/agents/review/accessibility-reviewer.md) | WCAG 2.2 AA accessibility review of UI code (React/JSX/TSX, Vue, Angular, Svelte, HTML, Razor/Blazor): alt text, keyboard access, form labels, color contrast, focus and modal handling, ARIA misuse, live regions, target size. | sonnet | read-only |
+| [`api-contract-reviewer`](.claude/agents/review/api-contract-reviewer.md) | Reviews API contracts (REST handlers, OpenAPI, GraphQL, gRPC/protobuf, Kafka/Service Bus/MQTT event schemas, public library signatures) for breaking changes vs the base branch, versioning, naming/error-model/pagination consistency, HTTP semantics and idempotency. | sonnet | read-only |
+| [`architecture-reviewer`](.claude/agents/review/architecture-reviewer.md) | Reviews the structure of a change or codebase area: layering violations, dependency direction and cycles, module/service boundaries, coupling, leaking abstractions, pattern drift, testability seams, fit with documented architecture/ADRs. | opus | read-only |
+| [`code-reviewer`](.claude/agents/review/code-reviewer.md) | Reviews the current change (uncommitted diff, else branch vs main) for correctness bugs: logic errors, off-by-one, null handling, broken error paths, resource leaks, API misuse, caller regressions, CLAUDE.md violations. | sonnet | read-only |
+| [`concurrency-reviewer`](.claude/agents/review/concurrency-reviewer.md) | Reviews concurrent code for races, deadlocks, lost updates and leaks, each shown as a concrete interleaving: threads, async/await, locks, goroutines/channels, thread pools, background jobs, timers, shared caches, DB transactions and isolation. | opus | read-only |
+| [`dependency-auditor`](.claude/agents/review/dependency-auditor.md) | Supply-chain audit of manifests and lockfiles with native tools (npm/pnpm/yarn audit, pip-audit, dotnet list package --vulnerable, govulncheck, cargo audit): known advisories, floating versions, deprecated, unused or duplicate packages, copyleft licenses. | haiku | read-only + web |
+| [`finding-verifier`](.claude/agents/review/finding-verifier.md) | Dispatched with ONE reported finding (bug, vulnerability, failing-test claim, review comment) and its location to try to disprove it: traces callers, data flow and mitigations, runs a throwaway repro, returns a JSON verdict. | opus | read-only |
+| [`security-reviewer`](.claude/agents/review/security-reviewer.md) | Security review of changed code (git diff HEAD) or named paths: injection, XSS, authz/IDOR, CSRF, SSRF, path traversal, unsafe deserialization, weak crypto, hardcoded secrets, insecure defaults. | opus | read-only |
+| [`silent-failure-hunter`](.claude/agents/review/silent-failure-hunter.md) | Hunts error handling that hides failures in the diff or named paths: empty or catch-all catches, log-and-continue, errors returned as HTTP 200, discarded Go errors, unhandled promise rejections, retries without backoff, missing timeouts, parse-failure defaults. | sonnet | read-only |
+| [`spec-compliance-reviewer`](.claude/agents/review/spec-compliance-reviewer.md) | Checks an implementation (current diff or named paths) against a supplied spec, ticket, plan, PRD or acceptance criteria, requirement by requirement: MET / PARTIAL / MISSING / DEVIATES with path:line evidence, plus scope creep and misread requirements. | sonnet | read-only |
+
+### Testing
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`change-verifier`](.claude/agents/testing/change-verifier.md) | Skeptically verifies a claimed fix or feature works before it is called done: rebuild, relevant tests re-run after the last edit, lint/typecheck, direct exercise (CLI, script, curl), each acceptance criterion checked with evidence. | sonnet | read-only |
+| [`e2e-test-writer`](.claude/agents/testing/e2e-test-writer.md) | Writes browser end-to-end tests (Playwright preferred; Cypress, Selenium or WebdriverIO only if the repo already uses them) for a critical user journey and its key error states, with role/label/test-id locators, auto-waiting assertions and isolated data, then runs them headless. | sonnet | read/write |
+| [`flaky-test-investigator`](.claude/agents/testing/flaky-test-investigator.md) | Diagnoses intermittent (flaky) tests: reproduces with repeated, shuffled, isolated and time-shifted runs, finds the nondeterminism (timing, test order/shared state, unseeded randomness, clock/time zone, unordered results, network, leaks, parallel races, float) and makes the test deterministic, with before/after pass rates. | sonnet | read/write |
+| [`release-readiness-gate`](.claude/agents/testing/release-readiness-gate.md) | Go/no-go gate before tagging, cutting a release or deploying: re-runs tests on the release commit, checks build, version bumps, CHANGELOG vs. commits since the last tag, migrations, config/env vars, feature flags, added TODOs, dependency audit, rollback plan and monitoring. | opus | read-only |
+| [`test-gap-analyzer`](.claude/agents/testing/test-gap-analyzer.md) | Finds what is NOT tested in the current diff or named modules, ranked by risk: maps functions and branches to the tests that exercise them (grep, coverage tools) and flags weak tests (no assertions, mocking the unit under test, can't-fail, snapshot-only, time/random-dependent). | sonnet | read-only |
+| [`test-runner`](.claude/agents/testing/test-runner.md) | Runs the project's tests (detected runner, narrowest relevant subset first) and returns a compact digest: command, exit code, pass/fail/skip counts, and each failure's test id, first error line and file:line. | haiku | read-only |
+| [`test-writer`](.claude/agents/testing/test-writer.md) | Writes unit and integration tests for named code or the current diff in the repo's existing framework and style: happy path, boundaries, error paths, regression tests for known bugs; runs them and reports evidence and any bugs found. | sonnet | read/write |
+
+### Debugging & diagnosis
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`build-fixer`](.claude/agents/debugging/build-fixer.md) | Gets a failing build, compile, type-check, lint or dependency restore green with the smallest correct diff (tsc, eslint, mypy, ruff, dotnet, go, cargo, maven, gradle), fixing types, imports and call sites instead of suppressing errors. | sonnet | read/write |
+| [`debugger`](.claude/agents/debugging/debugger.md) | Root-causes runtime errors, exceptions, crashes, consistently failing tests and wrong output: reproduces the failure, tests hypotheses with cheap experiments, fixes the root cause minimally, adds a regression test and re-runs. | opus | read/write |
+| [`git-bisector`](.claude/agents/debugging/git-bisector.md) | Finds the commit that introduced a regression with `git bisect run`: takes a good ref (tag, commit, last release), a bad ref (default HEAD) and a failing test or command (builds one if none), and returns the first bad commit, the responsible diff hunk and the bisect log. | sonnet | read-only |
+| [`performance-analyst`](.claude/agents/debugging/performance-analyst.md) | Finds and quantifies performance bottlenecks (slow endpoints, jobs, tests, pages; memory growth; bundle size) by profiling and benchmarking, labelling anything unmeasured a hypothesis: N+1 queries, quadratic loops, sync I/O, sync-over-async, chatty calls, unbounded caches, re-renders. | sonnet | read-only |
+
+### Architecture & refactoring
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`code-simplifier`](.claude/agents/architecture/code-simplifier.md) | Behavior-preserving cleanup of recently changed or named code: guard clauses for deep nesting, splitting long functions, removing duplication, dead code and needless abstraction, clearer names, simpler conditionals; tests run before and after. | inherit | read/write |
+| [`dependency-upgrader`](.claude/agents/architecture/dependency-upgrader.md) | Upgrades a library, framework, runtime or SDK across major versions (React 17->18, Django 3->5, Spring Boot 2->3, Node 16->22, Python 3.8->3.12, Angular, EF Core) from official migration guides, with codemods, lockfile, CI and docs updated and tests green per step. | sonnet | read/write + web |
 <!-- catalog:end -->
 
 ## What's deliberately not here

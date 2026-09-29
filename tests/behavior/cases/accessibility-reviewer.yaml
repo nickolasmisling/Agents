@@ -1,0 +1,107 @@
+agent: accessibility-reviewer
+fixture: sample-app
+# No setup: the seeded a11y defects are in the committed fixture, so the agent
+# must audit the named web/ files whole at HEAD rather than a diff.
+# Ground truth: answer-key/web.md WEB-02, WEB-03, WEB-04, WEB-05, WEB-06, WEB-07;
+# false-positive traps FP-WEB-02, FP-WEB-03, FP-WEB-04, FP-WEB-10.
+prompt: >-
+  The batchtrack web client (React + TypeScript under web/) is about to roll out
+  to the QA review stations, where some operators work keyboard-only and some
+  use a screen reader, so I need a WCAG 2.2 AA accessibility audit before
+  sign-off. Scope: the components in web/src (main.tsx, BatchTable.tsx,
+  BatchDetail.tsx) together with web/src/index.css and web/index.html. The
+  flows that matter are: pick a site, find and open a batch from the table,
+  read its detail panel, and e-sign the batch record. There is no pending diff;
+  audit these files whole as they stand at HEAD. Leave XSS, TypeScript typing,
+  i18n and data-fetching bugs to the other reviewers. Report only: do not
+  modify, install or commit anything.
+read_only: true
+# Report-only task. The file fingerprint skips node_modules and cannot see git
+# state, so also guard against package installs and mutating git commands, and
+# fail on fixture drift if the seeded markup the rubric depends on disappears.
+check: >-
+  test ! -e web/node_modules && test ! -e node_modules &&
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD &&
+  grep -q '<img src="/logo.svg" className="logo" />' web/src/main.tsx &&
+  grep -q '<div className="link" onClick=' web/src/BatchTable.tsx &&
+  grep -q 'className="status-dot"' web/src/BatchTable.tsx &&
+  grep -q 'placeholder="Search batch number"' web/src/BatchTable.tsx &&
+  grep -q '<div className="overlay">' web/src/BatchDetail.tsx &&
+  grep -q "color: '#aaa'" web/src/BatchDetail.tsx
+rubric:
+  must:
+    - >-
+      Flags the batch-number cell `<div className="link" onClick={() =>
+      onSelect(b.id)}>` in web/src/BatchTable.tsx (around L97) as a clickable
+      div with no role, no tabIndex and no Enter/Space handling, so keyboard
+      and screen-reader users cannot open a batch. Cites SC 2.1.1 and/or SC
+      4.1.2, and the fix is a native `<button type="button">` (or `<a href>`),
+      or else role="button" + tabIndex={0} + an onKeyDown handling Enter and
+      Space.
+    - >-
+      Flags the e-signature modal in web/src/BatchDetail.tsx (the
+      `overlay`/`dialog` divs, around L82-115) for focus management: focus is
+      not moved into it on open, not contained while it is open, and/or not
+      returned to the "Sign batch record" button on close. It also notes the
+      missing dialog semantics (`role="dialog"`, `aria-modal`,
+      `aria-labelledby`) or recommends a native `<dialog>` with
+      `showModal()`. Cites SC 2.4.3 and/or SC 4.1.2 (2.1.2 also acceptable).
+    - >-
+      Flags the status column's `status-dot` span in web/src/BatchTable.tsx
+      (around L102-106) as conveying batch status (e.g. released vs rejected)
+      only by background color, with no text, accessible name or other cue,
+      and cites SC 1.4.1 Use of Color.
+    - >-
+      Flags BOTH of these, each with its SC: (a) the logo
+      `<img src="/logo.svg" className="logo" />` in web/src/main.tsx (around
+      L16) has no `alt` attribute, SC 1.1.1, with a fix of `alt=""`
+      (decorative next to the h1) or `alt="BatchTrack"`; and (b) the search
+      `<input type="search">` in web/src/BatchTable.tsx (around L65-70) has no
+      associated label, only a placeholder, citing SC 1.3.1, 3.3.2 and/or
+      4.1.2, with a fix of a (visually hidden) `<label htmlFor>` or
+      `aria-label`.
+  should:
+    - >-
+      Flags the `style={{ color: '#aaa', fontSize: 12 }}` product/site/status
+      line in web/src/BatchDetail.tsx (around L45) under SC 1.4.3 with a
+      computed contrast ratio of about 2.3:1 (2.32) against the white `.detail`
+      background, and proposes a color that reaches at least 4.5:1 (e.g.
+      #595959 or #767676).
+    - >-
+      The status-dot fix adds visible status text (or another non-color visual
+      cue) next to the dot, e.g. `<span className="status-dot" aria-hidden="true"
+      /> {b.status}`, rather than only an aria-label or title, which would not
+      help sighted color-blind users.
+    - >-
+      The dialog finding also covers Escape not closing the modal and/or
+      pointing `aria-labelledby` at the "Sign batch ..." h3, and gives a
+      concrete TSX fix (useRef + focus() on open and restore on close, or
+      `<dialog>` with showModal()).
+    - >-
+      Each finding names who is affected (screen reader, keyboard, low vision,
+      color-blind) and includes a minimal TSX/JSX fix snippet, and findings are
+      ordered most severe first under a VERDICT of NEEDS_WORK.
+    - >-
+      States that web/package.json has no a11y tooling (no
+      eslint-plugin-jsx-a11y, axe-core, @axe-core/playwright or pa11y) and no
+      installed node_modules, so no tool was run, and that manual keyboard and
+      screen-reader testing was not done.
+  must_not:
+    - >-
+      Reports any real `<button>` as not keyboard-accessible or as a clickable
+      non-control: the sortable column headers in web/src/BatchTable.tsx
+      (around L74-90, `<button type="button">` inside `<th aria-sort>`), or the
+      Close, "Sign batch record", Sign and Cancel buttons in
+      web/src/BatchDetail.tsx (FP-WEB-02, FP-WEB-10).
+    - >-
+      Claims that the signing form's `<select id="sig-meaning">` or `<input
+      id="sig-password">` (web/src/BatchDetail.tsx around L87-105) or the
+      header's `<select id="site-select">` (web/src/main.tsx around L18-32)
+      lacks a label; each has a matching `<label htmlFor>` (FP-WEB-03,
+      FP-WEB-04).
+    - >-
+      Claims web/index.html is missing the `<html lang>` attribute (SC 3.1.1);
+      it has `lang="en"`.

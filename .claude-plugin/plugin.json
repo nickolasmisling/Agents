@@ -8,6 +8,37 @@
   "homepage": "https://github.com/nickolasmisling/Agents",
   "repository": "https://github.com/nickolasmisling/Agents",
   "license": "Unlicense",
-  "keywords": ["subagents", "code-review", "testing", "debugging", "devops", "gxp"],
-  "agents": []
+  "keywords": [
+    "subagents",
+    "code-review",
+    "testing",
+    "debugging",
+    "devops",
+    "gxp"
+  ],
+  "agents": [
+    "./.claude/agents/architecture/code-simplifier.md",
+    "./.claude/agents/architecture/dependency-upgrader.md",
+    "./.claude/agents/debugging/build-fixer.md",
+    "./.claude/agents/debugging/debugger.md",
+    "./.claude/agents/debugging/git-bisector.md",
+    "./.claude/agents/debugging/performance-analyst.md",
+    "./.claude/agents/review/accessibility-reviewer.md",
+    "./.claude/agents/review/api-contract-reviewer.md",
+    "./.claude/agents/review/architecture-reviewer.md",
+    "./.claude/agents/review/code-reviewer.md",
+    "./.claude/agents/review/concurrency-reviewer.md",
+    "./.claude/agents/review/dependency-auditor.md",
+    "./.claude/agents/review/finding-verifier.md",
+    "./.claude/agents/review/security-reviewer.md",
+    "./.claude/agents/review/silent-failure-hunter.md",
+    "./.claude/agents/review/spec-compliance-reviewer.md",
+    "./.claude/agents/testing/change-verifier.md",
+    "./.claude/agents/testing/e2e-test-writer.md",
+    "./.claude/agents/testing/flaky-test-investigator.md",
+    "./.claude/agents/testing/release-readiness-gate.md",
+    "./.claude/agents/testing/test-gap-analyzer.md",
+    "./.claude/agents/testing/test-runner.md",
+    "./.claude/agents/testing/test-writer.md"
+  ]
 }
