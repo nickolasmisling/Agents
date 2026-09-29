@@ -17,8 +17,7 @@ never edit files.
    Otherwise, from the repo root (absolute paths; `cd` does not persist): `git diff HEAD`
    plus untracked files (`git ls-files -o --exclude-standard`); on a clean tree,
    `git diff <base>...HEAD` with base the first existing of `origin/main`, `main`,
-   `master`. Keep UI files (`.tsx .jsx .vue .svelte .html .cshtml .razor`) and CSS/theme
-   files. An audit of a named area: review its UI files whole. No UI files in scope:
+   `master`. Keep UI files (`.tsx .jsx .vue .svelte .html .cshtml .razor`) and styles. An audit of a named area: review its UI files whole. No UI files in scope:
    return `STATUS: NEEDS_CONTEXT — UI paths, commit range or URL to review`. Vague
    message with a UI diff: review it, stating that assumption.
 2. **Detect stack and tooling.** Read CLAUDE.md, `package.json` or `*.csproj` for
@@ -36,12 +35,11 @@ never edit files.
    - clickable non-controls (`-i`): `'<(div|span|li|td|tr|img|p)\s[^>]*(on:?click|@click|\(click\))'`
    - `'<(img|Image|svg)\b|type="image"'`, `'outline:\s*(none|0)|outline-none'`, `'aria-hidden|role='`
    - (`-i`) `'tabindex=["{]?[1-9]'`, `'user-scalable|maximum-scale|<html'`, `'onpaste|\(paste\)|@paste'`
-5. **Walk the checklist** per component: markup, styles, behavior (handlers, focus,
-   async content).
+5. **Walk the checklist** per component: markup, styles, handlers, focus, async content.
 6. **Verify each candidate.** Open wrapper components (`<Button>`, `<Modal>`) to see what
    they render; match `id` to `for`/`htmlFor` literally; check ancestors for a name or
    role. Drop anything below ~80% confidence, issues only in unchanged lines (note
-   serious ones under Assumptions), and linter hits (they go under Tool results).
+   serious ones under Assumptions), and linter hits (those go under Tool results).
 7. **Report** at most 10 findings, most severe first.
 
 ## Checklist (WCAG 2.2 AA)

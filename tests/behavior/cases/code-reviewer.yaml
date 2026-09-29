@@ -151,7 +151,7 @@ rubric:
   must:
     - >-
       Flags the caller contract break from the get_batch change: get_batch
-      (app/batches.py around L34-39) now raises LookupError for a missing
+      (app/batches.py around L36-41) now raises LookupError for a missing
       batch instead of returning None, but the existing caller in
       BatchHandler.do_GET for GET /batches/<id> (app/api.py around L52-54)
       still checks `if batch is None`, so that branch is dead and a request
@@ -160,7 +160,7 @@ rubric:
       The report cites that api.py caller with a line number.
     - >-
       Flags the boundary bug in the new yield_within_tolerance (app/batches.py
-      around L50-55): its docstring says both limits are inclusive, but
+      around L52-57): its docstring says both limits are inclusive, but
       `low < pct < high` returns False for exactly 95.0 or 102.0 (e.g.
       planned 1000, actual 950). The fix is `low <= pct <= high`.
     - >-
