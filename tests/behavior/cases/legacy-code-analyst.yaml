@@ -14,7 +14,7 @@ fixture: sample-app
 #   L29-35 cursor over dbo.tbl_Batch JOIN dbo.tbl_Product, Status = 'Q', optional @SiteCode
 #   L45-52 BR quarantine: FamilyCode 'SG' -> 14 days, else 7; DATEDIFF(dd, QuarantineDate,
 #          GETDATE()) < MinDays -> GOTO NextBatch (no update, stays 'Q'). L45 comment
-#          "softgels 21 days" is stale (commit 2 changed only the value).
+#          "softgels 21 days" is stale (commit 2 changed the value, not the comment).
 #   L55-60 BR min yield by family: SG 96, TB 98, LQ 97, else 95.
 #   L61    yield = QtyActual * 100 / QtyPlanned, all INT -> integer division truncates
 #          (979/1000 -> 97 -> TB hold); NULL QtyActual -> NULL yield -> both yield IFs
@@ -294,13 +294,15 @@ read_only: true
 # Report-only task: guard against mutating git commands (commit, stash, checkout,
 # reset, restore) that the read-only file fingerprint cannot see, and against drift in
 # the setup the rubric depends on. 6 commits = fixture baseline + 4 legacy + 'setup'.
+# .claude/settings.local.json is excluded from the untracked-file test because the
+# runner's own fingerprint ignores it (the CLI may write it; it is not an agent edit).
 check: >-
   test "$(git rev-list --count HEAD)" -eq 6 &&
   test "$(git rev-parse --abbrev-ref HEAD)" = main &&
   test "$(git log -1 --format=%s)" = setup &&
   test -z "$(git stash list)" &&
   git diff --quiet HEAD &&
-  test -z "$(git ls-files --others --exclude-standard)" &&
+  test -z "$(git ls-files --others --exclude-standard -- ':!.claude/settings.local.json')" &&
   test "$(wc -l < legacy/sp_EvaluateBatchRelease.sql)" -eq 153 &&
   grep -q 'SET @MinDays = 14' legacy/sp_EvaluateBatchRelease.sql &&
   grep -q 'softgels 21 days' legacy/sp_EvaluateBatchRelease.sql &&
@@ -324,8 +326,8 @@ rubric:
       'C'/'X') of severity 3 or higher set 'R' (CRITICAL DEVIATION) and severity
       2 sets 'H' (OPEN DEVIATION) when no outcome was decided yet; QC comes from reviewed rows of
       [LIMSPROD].LIMS.dbo.SampleResult, where no reviewed results leaves the batch
-      in 'Q' without update and any ResultCode other than 'PASS' sets 'R' (QC
-      FAILURE).
+      in 'Q' without update and any reviewed row with ResultCode <> 'PASS' sets
+      'R' (QC FAILURE).
     - >-
       Documents the outcomes and side effects: when no rule fires the status is
       'A' (AUTO RELEASE); the proc updates the status and reason on
@@ -337,7 +339,7 @@ rubric:
       Notes that the inline comment "softgels 21 days" (~L45) contradicts the
       coded 14 and uses git history to explain it: commit "CR-0457: shorten
       softgel quarantine hold to 14 days" (Mariana Ortega, 2014-08-21) changed
-      only the value.
+      the coded value from 21 to 14 but left the inline comment unchanged.
     - >-
       Marks the @UseOldLims = 1 branch reading LIMS_OLD.dbo.TestResult (~L92-98)
       as dead because @UseOldLims is hardcoded to 0 (~L27), ideally dating it

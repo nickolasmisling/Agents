@@ -150,11 +150,15 @@ rubric:
       batch per page (the first row of each page).
     - >-
       Either adds a regression test in the repo's pytest style (e.g. in
-      tests/test_batches.py) for a case the existing test does not pin down,
-      such as a full page having exactly page_size items, page_size larger
-      than the list, or a page past the end returning `[]`, and shows it
+      tests/test_batches.py) for a case the existing test does not pin down
+      and that fails on the original code, such as page_size 1
+      (`paginate(items, 1, 1) == [1]`), page_size equal to or larger than the
+      list returning every item, or a middle page of a different size
+      (`paginate(list(range(1, 11)), 2, 4) == [5, 6, 7, 8]`), and shows it
       failing before and passing after the fix; or states in "Regression
-      test:" that the existing failing test already serves as one.
+      test:" that the existing failing test already serves as one. (A
+      "page past the end returns []" test alone does not count: it already
+      passes on the buggy code.)
     - >-
       Keeps the change minimal and in scope: diff limited to `paginate` (plus
       any regression test); unrelated issues it noticed (e.g. the f-string

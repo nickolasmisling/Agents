@@ -32,7 +32,7 @@ fixture: sample-app
 #   L305-L306  pip 26's misleading "no matching distributions available ...: pytest" note
 #   L312       `ERROR: ResolutionImpossible: ...`
 #   L313       `##[error]Process completed with exit code 1.` (end marker)
-#   L314-L349  cascade: "Run tests" never ran (skipped, so absent from the log);
+#   L314-L347  cascade: "Run tests" never ran (skipped, so absent from the log);
 #              "Publish test report" ran only because of `if: always()`:
 #              `##[warning]No file matches path reports/junit.xml` (L340), "No test
 #              results found!" (L343), then a non-fatal `##[error]... Resource not
@@ -373,12 +373,14 @@ prompt: >-
   anything.
 read_only: true
 # Report-only task: guard against mutating git commands (commit, stash, checkout,
-# reset) that the file fingerprint cannot see, and make sure the conflicting pins
-# are still what the run saw.
+# reset, branch/tag, bisect) that the file fingerprint cannot see, and make sure
+# the conflicting pins are still what the run saw. Passes on the untouched
+# post-setup state (nothing is supposed to change).
 check: >-
   test "$(git rev-parse --abbrev-ref HEAD)" = feat/lims-async-polling &&
   test "$(git rev-list --count HEAD)" -eq 5 &&
   test "$(git rev-list --count main)" -eq 2 &&
+  test "$(git for-each-ref | wc -l)" -eq 2 &&
   test -z "$(git stash list)" &&
   git diff --quiet HEAD &&
   grep -qx 'pytest==7.4.4' requirements.txt &&
@@ -387,31 +389,39 @@ check: >-
 rubric:
   must:
     - >-
-      Identifies the failing step as job `python` > `Install dependencies` (the
-      `pip install -r requirements.txt` command) and gives pip's dependency
-      conflict as the first real error, quoting `ERROR: Cannot install -r
-      requirements.txt (line 4) and pytest==7.4.4 because these package versions
-      have conflicting dependencies.` (ci-logs/run-4521.log line 299) and/or the
-      lines under it (`pytest-asyncio 0.24.0 depends on pytest<9 and >=8.2`,
-      L301-303, or `ERROR: ResolutionImpossible`, L312), with a log line number
-      in the L299-L312 range or the line quoted verbatim. Naming only the
-      `##[error]Process completed with exit code 1.` marker (L313) does not meet
-      this.
+      Identifies the failing step as job `python` > step `Install dependencies`
+      (its `pip install -r requirements.txt` command) and reports pip's
+      dependency conflict as the first real error: it quotes `ERROR: Cannot
+      install -r requirements.txt (line 4) and pytest==7.4.4 because these
+      package versions have conflicting dependencies.` and/or the conflict lines
+      under it (`The user requested pytest==7.4.4` / `pytest-asyncio 0.24.0
+      depends on pytest<9 and >=8.2`, or `ERROR: ResolutionImpossible`), and
+      cites its position in ci-logs/run-4521.log as a line number from 299 to
+      312 (the ERROR line is 299). Giving only the `##[error]Process completed
+      with exit code 1.` end marker (line 313) as the first error, or citing a
+      line outside 299-312 for the error, does not meet this.
     - >-
-      Explains the cause concretely: requirements.txt pins `pytest==7.4.4` (line
-      3) while `pytest-asyncio==0.24.0` (line 4) needs pytest >=8.2,<9, so the
-      requirement set cannot be resolved.
+      Explains the cause concretely: requirements.txt pins `pytest==7.4.4` (file
+      line 3) and `pytest-asyncio==0.24.0` (line 4), and pytest-asyncio 0.24.0
+      requires pytest >=8.2,<9, so no pytest version satisfies both and pip
+      cannot resolve the set. (Citing the requirements.txt line numbers is not
+      required.)
     - >-
-      Classifies the failure as a dependency change made in the PR (a
-      code/dependency restore failure), not as a registry/network outage, a
-      flaky test, runner/toolchain drift, a secrets/permissions problem or a
-      YAML/config error, and hands the fix off to build-fixer.
+      Classifies the failure as caused by a dependency change in the PR's own
+      commits (code/dependency-restore class, deterministic: it fails on every
+      attempt), not as a registry/network outage, a flaky test, runner/toolchain
+      drift, a secrets/permissions problem or a YAML/config error, and names
+      build-fixer as the agent to apply the fix (also asking the PR author or QA
+      to choose which pin to keep is fine; handing off only to someone else is
+      not).
     - >-
-      Recommends a concrete compatible combination for requirements.txt: either
-      relax the pytest pin to a version pytest-asyncio 0.24.0 accepts (e.g.
-      `pytest>=8.2,<9` or a specific 8.x), or keep `pytest==7.4.4` and pin
-      pytest-asyncio to a release that still supports pytest 7 (e.g.
-      `pytest-asyncio<0.24` / `==0.23.8`).
+      Recommends a concrete, compatible requirements.txt change: either move
+      pytest into the range pytest-asyncio 0.24.0 accepts (e.g. `pytest>=8.2,<9`,
+      `pytest==8.4.2`, or reverting to `pytest>=7.4`, which pip then resolves to
+      8.x), or keep `pytest==7.4.4` and pin pytest-asyncio to a release
+      that supports pytest 7 (e.g. `pytest-asyncio==0.23.8` or
+      `pytest-asyncio<0.24`). A combination that still conflicts (e.g. pytest
+      8.0/8.1 with pytest-asyncio 0.24.0) does not meet this.
   should:
     - >-
       Ties the conflict to the head commit "build: pin pytest to 7.4.4 to match
@@ -455,8 +465,8 @@ rubric:
       script, or the web job's npm audit/deprecation output), or proposes a
       ci.yml change (e.g. adding `permissions: checks: write`,
       `continue-on-error`, a different python-version, removing `if: always()`)
-      as the fix for this run's failure. Mentioning the permissions error as a
-      separate, secondary observation is fine.
+      as the fix for this run's failure. Mentioning the permissions error, or a
+      ci.yml change for it, as a separate, secondary follow-up is fine.
     - >-
       Claims that pytest ran in run 4521 or that any test failed in it (e.g. the
       tests in tests/test_lims_async.py, or failures seen only in a local pytest

@@ -82,7 +82,11 @@ prompt: >-
 read_only: true
 # Report-only task. Guards git state, which the file fingerprint cannot see: still
 # on main, the fix commit intact under the runner's 'setup' commit, no new commits,
-# reverts, amends or stashes, and no tracked changes.
+# reverts, amends or stashes, and no tracked changes. Verified on scratch copies:
+# exits 0 after a no-op or read-only run (pytest, git show/archive of HEAD~2);
+# exits 1 after revert (with or without --no-commit), commit, amend, reset
+# --soft/--hard, stash, checkout of a branch / detached HEAD / old file, or an
+# uncommitted edit to app/batches.py.
 check: >-
   test "$(git rev-parse --abbrev-ref HEAD)" = main &&
   test "$(git rev-list --count HEAD)" -eq 3 &&
@@ -94,23 +98,26 @@ rubric:
   must:
     - >-
       Gives the overall verdict `VERDICT: NEEDS_WORK` (not VERIFIED, not
-      BLOCKED) and does not accept the green pytest run (20 passed, exit 0) as
-      proof that the fix works.
+      BLOCKED) and does not accept the passing pytest suite (normally 20
+      passed, exit 0) as proof that the fix works.
     - >-
       Shows, from a command or one-off script it actually ran (quoted with its
-      output), that the committed `paginate` in app/batches.py still loses rows
-      at the end of the list, stating observed vs expected. Any of these counts:
+      output), that the committed `paginate` in app/batches.py still loses the
+      list's last item on any page that reaches the end of the list, stating
+      observed vs expected. Any executed example of this counts, e.g.
       `paginate(list(range(1, 11)), 4, 3)` returns `[]` instead of `[10]`;
       `paginate(list(range(1, 11)), 2, 5)` returns `[6, 7, 8, 9]` instead of
-      `[6, 7, 8, 9, 10]`; `paginate([1, 2, 3], 1, 10)` returns `[1, 2]`; or
-      GET /batches returns fewer items than `total` / a batch never appears on
-      any page. A claim based only on reading the code does not meet this.
+      `[6, 7, 8, 9, 10]`; `paginate([1, 2, 3], 1, 10)` returns `[1, 2]`
+      instead of `[1, 2, 3]`; or GET /batches returns fewer items than `total`
+      / a batch never appears on any page. A claim based only on reading the
+      code does not meet this.
     - >-
-      Points out that the commit changed the existing test
-      `test_paginate_returns_requested_page` in tests/test_batches.py by
-      replacing (removing) the short-last-page assertion
-      `paginate(items, 4, 3) == [10]` with `paginate(items, 3, 3) == [7, 8, 9]`,
-      so the passing suite no longer covers the case that fails.
+      Points out that the commit removed the existing assertion
+      `paginate(items, 4, 3) == [10]` from tests/test_batches.py (in
+      `test_paginate_returns_requested_page`, replaced by
+      `paginate(items, 3, 3) == [7, 8, 9]`), so the green suite no longer
+      covers the short last page that fails. Naming the removed `[10]`
+      assertion is required; naming the test function is not.
   should:
     - >-
       Locates the cause in the new clamp `end = min(start + page_size,
@@ -128,8 +135,9 @@ rubric:
       or `git archive` into a temp dir) against the committed code and reports
       that it fails on the `[10]` assertion.
     - >-
-      Exercises the real entry point: starts `app.api` on a free local port
-      with BATCHTRACK_DB pointing into a temp dir, creates batches, shows that
+      Exercises the real entry point: starts the API from app/api.py (`serve`)
+      on a local port with BATCHTRACK_DB (or `serve(db_path=...)`) pointing
+      into a temp dir, puts a few batches in it (POSTed or seeded), shows that
       GET /batches (default page, or the last page with a small page_size)
       returns fewer items than `total` or omits a batch, and stops the server.
       It identifies app/api.py `do_GET` as the only production caller of
@@ -144,17 +152,21 @@ rubric:
       Modifies the repo or its git state in any way: edits app/batches.py or
       tests/test_batches.py (even to demonstrate a fix), writes files into the
       repo (e.g. a `batchtrack.db` from starting the API without BATCHTRACK_DB
-      set to a temp path, or `reports/junit.xml`), or runs git commit, revert,
-      reset, checkout or stash.
+      set to a temp path, or `reports/junit.xml`), or runs a state-changing git
+      command (commit, amend, revert, reset, checkout/switch, stash push/pop,
+      apply). Read-only git (status, diff, log, show, grep, archive,
+      `stash list`) is fine.
     - >-
       Claims the original off-by-one is still present on full pages, e.g. that
       the committed `paginate` still drops the first item of each page or that
       `paginate(list(range(1, 11)), 1, 3)` or page 2 are wrong (they return
       `[1, 2, 3]` and `[4, 5, 6]`).
     - >-
-      Rests the NEEDS_WORK verdict on defects this commit did not touch (the
-      f-string SQL in `list_batches`, the N+1 query in
-      `batches_with_materials`, the connection leak in `set_actual_qty`, the
-      HTTP 200 error responses or the unchecked `int()` / handler crash on
-      `page=0` in app/api.py), or blames this commit for a failure of the
-      timing test `test_batches_with_materials_is_fast`.
+      Blames this commit for defects it did not introduce, i.e. lists one of
+      them as a failing criterion, Problem or regression caused by the fix
+      rather than as pre-existing / out of scope: the f-string SQL in
+      `list_batches`, the N+1 query in `batches_with_materials`, the
+      connection leak in `set_actual_qty`, the HTTP 200 error responses, the
+      unchecked `int()` / dropped connection on `GET /batches?page=0` in
+      app/api.py (paginate itself still raises ValueError, as before), or a
+      failure of the timing test `test_batches_with_materials_is_fast`.

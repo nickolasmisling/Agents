@@ -81,11 +81,12 @@ rubric:
       parsing, string/negative handling or rounding without the argument-order
       swap does not meet this.
     - >-
-      Uses a check specific to this symptom (e.g. `pytest
+      Uses a check tied to this symptom (e.g. `pytest
       tests/test_report_regression.py`, a test node id from it, or a repro
-      script calling compute_batch_yield(985.0, 1000.0)) rather than the whole
-      test suite, and shows it was validated before bisecting: passes (exit 0)
-      at v1.3.0 and fails (exit 1) at the tip of main.
+      script calling compute_batch_yield(985.0, 1000.0)); the unfiltered full
+      test suite does not qualify, since it already fails at v1.3.0. The report
+      shows the check was run at both ends before bisecting: exit 0 at v1.3.0
+      and a "bad" exit (non-zero and not 125, e.g. 1) at the tip of main.
     - >-
       Shows the commit was located by running git bisect (preferably `git
       bisect run`) between v1.3.0 and main, with a bisect log summary (number
@@ -95,10 +96,10 @@ rubric:
   should:
     - >-
       Follows the agent's output shape: a `STATUS: FOUND` line, then First bad
-      commit (full sha | subject | author | ISO date), Range (v1.3.0 good ..
-      main bad, 9 or 10 commits), Check with endpoint results, Responsible
-      change with a diff hunk, Why it fails, Bisect log, Confidence (high) and
-      Repo state.
+      commit (full sha | subject | author | ISO date), a Check line with the
+      range (v1.3.0 good .. main bad, 9 or 10 commits) and endpoint results,
+      Responsible change (path:lines) with a diff hunk, Why it fails, Bisect
+      log, Confidence (high), Repo state and Artifacts.
     - >-
       States the repo was restored: `git bisect reset` run and HEAD back on
       branch main (not detached), with working tree status unchanged and no
@@ -116,9 +117,9 @@ rubric:
       v1.3.0 as well (unrelated), so it was excluded.
     - >-
       Confirms causality beyond the bisect result, e.g. by reverse-applying the
-      signature hunk in a temporary worktree or checkout and showing the check
-      passes, or by showing concrete before/after values across the parent and
-      the bad commit.
+      signature hunk in a temporary worktree outside the repo (then removed)
+      and showing the check passes there, or by showing concrete before/after
+      values across the parent and the bad commit.
   must_not:
     - >-
       Reports a different first bad commit (e.g. "Skip draft rows without a
@@ -130,5 +131,8 @@ rubric:
       the right fix is to change their expected values or only their argument
       order, while leaving `yield_by_batch` inverted.
     - >-
-      Edits, commits or reverts code itself (e.g. restoring the parameter order
-      in app/report.py) instead of only reporting the commit and hunk.
+      Changes the repository instead of only reporting: edits, commits or
+      reverts code in the checkout (e.g. restores the parameter order in
+      app/report.py) or leaves such a change behind. Reverse-applying the hunk
+      in a temporary worktree outside the repo to confirm causality, then
+      removing it, is not a violation.

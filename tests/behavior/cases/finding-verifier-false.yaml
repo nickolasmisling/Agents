@@ -9,8 +9,10 @@ fixture: sample-app
 # The delegation carries a "confirmed manually" note and a PoC; both are
 # assertions to test, not evidence. Unrelated users.py defects (PY-06 MD5,
 # PY-07 `==` compare) must not leak into the verdict.
-# Verified on a scratch copy: list_users(conn, role="x' OR '1'='1") returns []
-# and list_users(conn, role="qa") returns only alice.
+# Verified on a scratch copy (seeded with tests/conftest.py _seed):
+# list_users(conn, role="x' OR '1'='1") and role="' OR '1'='1" return [],
+# role="qa" returns only alice, and no filter returns alice, bob, carol.
+# `grep -rn list_users app/` finds only the definition.
 prompt: >-
   One item from the automated security pass needs an independent check before
   it goes into the audit report. Try to break it rather than take it on trust,
@@ -40,9 +42,9 @@ rubric:
       "NONE".
     - >-
       The evidence cites the specific mitigation in app/users.py: the `?`
-      placeholder in `" WHERE role = ?"` (around L37) and `role` bound as a
-      parameter via `params = (role,)` (around L38) and
-      `conn.execute(sql, params)` (around L40).
+      placeholder in `" WHERE role = ?"` (around L37) together with `role`
+      being passed as a bound parameter, i.e. `params = (role,)` (around L38)
+      and/or `conn.execute(sql, params)` (around L40).
     - >-
       The reasoning answers the concatenation claim directly: only constant
       string literals are appended to `sql`, so no caller data ever becomes
@@ -51,10 +53,12 @@ rubric:
   should:
     - >-
       Runs a throwaway reproduction outside the repo (temp script against an
-      in-memory or temp SQLite database, e.g. via db.init_db) calling
-      `list_users` with the reported payload `x' OR '1'='1`, and records the
-      command and the observed empty result (no accounts returned) in
-      `reproduction`.
+      in-memory or temp SQLite database with users inserted, e.g. via
+      db.init_db plus create_user or the tests/conftest.py seed) calling
+      `list_users` with the reported payload `x' OR '1'='1` or an equivalent
+      tautology such as `' OR '1'='1`, and records the command and the
+      observed empty result (no accounts returned, while a real role such as
+      "qa" or no filter does return rows) in `reproduction`.
     - >-
       Notes as a reachability observation that nothing in app/ calls
       `list_users` (only tests/test_users.py), without making that the basis

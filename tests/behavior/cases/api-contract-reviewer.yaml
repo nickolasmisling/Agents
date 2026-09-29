@@ -38,49 +38,60 @@ rubric:
   must:
     - >-
       Flags `GET /batches/<id>/release` (app/api.py `do_GET`, around L57-60) as
-      a state-changing GET: it calls `batches.release_batch`, which sets the
-      batch status to `released` and writes an audit row, so the route is
-      neither safe nor idempotent under HTTP semantics (prefetchers, crawlers,
-      retries or a refresh can release batches). The fix moves it to a
-      non-safe method, e.g. `POST /batches/<id>/release` or PATCH/PUT on the
-      batch with a status body.
+      a state-changing GET, stating that it calls `batches.release_batch` and
+      so changes the batch's status to `released` (and writes an audit row),
+      which makes the GET unsafe under HTTP semantics: a prefetcher, crawler,
+      link preview, retry or page refresh can release a batch. Recommends a
+      non-safe method instead, e.g. `POST /batches/<id>/release` or PATCH/PUT
+      on the batch with a status body. (Calling it "not idempotent" as well
+      is not required; `release_batch` returns False on a repeat call.)
     - >-
-      Flags that errors are returned with HTTP 200 because
-      `BatchHandler._send` defaults to `status=200` (around L24) and the error
-      branches do not override it, naming at least one concrete case:
+      Flags that error responses are sent with HTTP 200 and an
+      `{"error": ...}` body, naming at least one concrete branch in app/api.py:
       `batch not found` (around L54), `no route for ...` (around L64/L87) or
-      `invalid batchNo` (around L73). The fix is a proper 4xx code, e.g. 404
-      for an unknown batch or route and 400/422 for invalid input.
+      `invalid batchNo` (around L73). The cause is that `BatchHandler._send`
+      defaults to `status=200` (around L24) and these branches do not pass a
+      status; naming `_send` is expected but not required. Recommends proper
+      4xx codes, e.g. 404 for an unknown batch or route and 400/422 for
+      invalid input.
     - >-
-      Flags the backend/frontend field-casing mismatch: `GET /batches/<id>`
-      returns the raw DB row from `get_batch` in snake_case (`batch_no`,
-      `planned_qty`, `actual_qty`, `created_at`), while the list endpoint's
-      `_summary()` (app/api.py around L10-18) and the `Batch` interface in
-      web/src/types.ts use camelCase (`batchNo`, `plannedQty`, ...), so the
-      client reading `batchNo` from `fetchBatch` gets undefined. The fix is
-      one naming convention at the API boundary (a single serializer or
-      mapper for every response) or explicit mapping in web/src/api.ts.
+      Flags the field-casing mismatch on `GET /batches/<id>`: it returns the
+      raw DB row from `batches.get_batch` in snake_case (`batch_no`,
+      `planned_qty`, `actual_qty`, `created_at`), while the client's `Batch`
+      interface in web/src/types.ts is camelCase (`batchNo`, `plannedQty`,
+      `actualQty`, `createdAt`), so those fields are undefined in the client.
+      Citing the list endpoint's camelCase `_summary()` (app/api.py around
+      L10-18) as the in-API counter-example is expected but not required.
+      Recommends one naming convention at the API boundary (a single
+      serializer or mapper for every response) or explicit mapping in
+      web/src/api.ts.
     - >-
-      Flags that numeric path or query parameters go through bare `int()`
-      with no validation, citing the batch id `int(parts[1])` (app/api.py
-      around L52/L58/L62/L83) and/or `page`, `page_size` or `user_id` (around
-      L49/L59): a request such as `GET /batches/abc` raises an unhandled
-      ValueError instead of getting a 400 response. The fix validates format
-      and range at the boundary and returns 400 (and 404 for an unknown id).
+      Flags that numeric path or query parameters reach bare `int()` with no
+      boundary validation, citing the batch id `int(parts[1])` (app/api.py
+      around L52/L58/L62/L83) and/or `page`/`page_size` (around L49) or
+      `user_id` (around L59), with the consequence that a request such as
+      `GET /batches/abc` raises an uncaught ValueError instead of getting a
+      400 (http.server then drops the connection with no response; describing
+      it as an unhandled exception, a crash or a 500 is acceptable). This may
+      be its own finding or part of the error-handling finding, as long as the
+      `int()` conversion and the missing 400 are both stated. Recommends
+      validating at the boundary and returning 400 for malformed input.
   should:
     - >-
       Reports the signatures contract mismatch between client and server:
       `GET /batches/<id>/signatures` returns snake_case `user_id`/`signed_at`
       (plus `username`, and no batch id) while the `Signature` interface in
-      web/src/types.ts declares `userId`/`signedAt`/`batchId`; and/or
-      `signBatch` sends `SignatureRequest` `{meaning, password}` while the
-      POST handler (around L80-85) reads `data["user_id"]` and
-      `data["signed_at"]`, so the client's request fails with a KeyError.
+      web/src/types.ts declares `userId`/`signedAt`/`batchId`; and/or the
+      client's sign request body, `SignatureRequest` in web/src/types.ts, is
+      `{meaning, password}` while the POST handler (app/api.py around L80-85)
+      reads `data["user_id"]` and `data["signed_at"]`, so the client's sign
+      request fails with an uncaught KeyError.
     - >-
       Reports that web/src/api.ts calls routes the server does not implement:
       `fetchMaterials` -> `GET /batches/<id>/materials` (falls through to the
       `no route` error, with HTTP 200) and/or `updateBatchStatus` ->
-      `PATCH /batches/<id>` (there is no `do_PATCH`).
+      `PATCH /batches/<id>` (there is no `do_PATCH`; http.server answers 501
+      with an HTML body).
     - >-
       Notes that `request()` in web/src/api.ts returns `res.json()` without
       checking `res.ok` or the status, so error bodies are handed to callers

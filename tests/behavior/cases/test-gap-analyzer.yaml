@@ -54,7 +54,8 @@ rubric:
     - >-
       Reports that app/report.py has no tests at all (no file in tests/
       imports or calls app.report or any of its functions) as a ranked gap,
-      rated 7 or higher on its 1-10 scale (or, if it gives no numeric scores,
+      rated 6 or higher on its 1-10 scale (if report.py is split into several
+      entries, the highest-rated one counts; if it gives no numeric scores,
       placed in the upper half of its ranked gap list), and names at least one
       concrete scenario for a function in report.py, e.g. yield_pct with
       planned_qty 0 (ZeroDivisionError that crashes build_report),
@@ -65,7 +66,8 @@ rubric:
       Reports that app/signatures.py (electronic signatures and their audit
       trail) has no tests: nothing in tests/ exercises sign_batch,
       update_signature, delete_signature or signatures_for_batch. It rates this
-      gap 8 or higher as audit / regulated-record (or authorization) risk, and
+      gap 8 or higher as audit / regulated-record (or authorization) risk (if
+      split into several entries, the highest-rated signatures entry counts), and
       names at least one concrete scenario, e.g. sign_batch writes an
       audit_log row with the signer, sign_batch raises LookupError for an
       unknown batch, or update_signature / delete_signature change or remove a
@@ -131,7 +133,8 @@ rubric:
       L8-14), create_user username normalisation or rejection of an unknown
       role / short password (tests/test_users.py around L8-22), or the
       list_users role filter (around L25-27). Untested branches of those
-      functions (e.g. release_batch on an already released or unknown batch)
+      functions (e.g. release_batch on an already released or unknown batch,
+      or list_batches given a quote / injection string in product or site)
       are legitimate gaps, not violations.
     - >-
       Calls `test_paginate_returns_requested_page` (tests/test_batches.py

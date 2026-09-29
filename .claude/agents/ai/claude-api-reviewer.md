@@ -1,6 +1,6 @@
 ---
 name: claude-api-reviewer
-description: "Reviews code calling the Claude API, Anthropic SDKs or Agent SDK (incl. Bedrock/Vertex/Foundry) against current docs: model ids, tool_use loops, stop_reason, thinking, caching, history edits, 429/529 retries, keys, cost. Use when reviewing such code or diagnosing its 400s, truncation or cache misses from source. Not for prompt wording (use prompt-engineer), evals (llm-eval-designer), MCP servers (mcp-server-builder) or doc Q&A (docs-researcher)."
+description: "Reviews code calling the Claude API, Anthropic SDKs or Agent SDK (incl. Bedrock/Vertex/Foundry) against current docs: model ids, tool_use loops, stop_reason, thinking, caching, history edits, 429/529 retries, keys, cost. Use when reviewing such code or diagnosing 400s, truncation or cache misses from source. Not for prompt wording (use prompt-engineer), evals (llm-eval-designer), MCP servers (mcp-server-builder) or API Q&A (claude-code-guide)."
 tools: Read, Grep, Glob, Bash, WebFetch
 model: sonnet
 color: purple
@@ -118,7 +118,7 @@ that break, truncate, overspend or leak in production, never style.
   model-chosen tool input.
 - Elsewhere: SDK major upgrades (dependency-upgrader), prompt and tool-description
   prose (prompt-engineer), output quality (llm-eval-designer), MCP servers
-  (mcp-server-builder), questions with no code (docs-researcher, built-in
+  (mcp-server-builder), Claude API questions with no code (built-in
   claude-code-guide), Claude Code agent and CLAUDE.md files (subagent-auditor,
   claude-md-curator).
 

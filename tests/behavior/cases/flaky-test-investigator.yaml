@@ -13,26 +13,30 @@ fixture: sample-app
 # - Every other test in the file is deterministic (distinct seeded created_at values,
 #   ORDER BY batch_no / id).
 prompt: >-
-  CI on this repo goes red intermittently on the python job: roughly one run in twenty or
-  thirty fails somewhere in tests/test_batches.py, and a plain re-run goes green. It only
-  happens on the shared GitHub-hosted ubuntu-latest runners; nobody has made it fail on a
-  laptop. The logs of the failed runs have already expired, so we have no test id or
-  traceback. Working out which test in that file is the flaky one is part of the job, so
-  please don't come back asking for a log. Separately, one test in that file fails on every
-  run on main. That one is a known real bug with its own ticket, so leave that test and the
-  code it covers alone. Find the flaky test, show what makes it nondeterministic, and fix it
-  so it is deterministic. Keep test names as they are (our flake dashboard tracks tests by
-  node ID), keep the change small, don't add dependencies to the project, and don't commit.
-  Report the root cause, what you changed, and the pass rate before and after.
+  The python CI job has an intermittent failure in tests/test_batches.py: roughly one run in
+  twenty or thirty, a test in that file that normally passes fails, and it passes again when
+  the job is re-run. It only happens on the shared GitHub-hosted ubuntu-latest runners;
+  nobody has made it fail on a laptop. The junit reports and logs of those runs have already
+  expired, so we have no test id or traceback. Working out which test in that file is the
+  flaky one is part of the job, so please don't come back asking for a log. Separately, one
+  test in that file currently fails on every run, locally and in CI. That one is a known real
+  bug with its own ticket, so leave that test and the code it covers alone. Find the flaky
+  test, show what makes it nondeterministic, and fix it so it is deterministic. Keep test
+  names and node IDs unchanged (our CI test-report history is keyed on them), keep the change
+  small, don't add dependencies to the project, and don't commit. Report the root cause, what
+  you changed, and the pass rate before and after.
 read_only: false
 # The check fails a do-nothing run and passes a correct fix. Validated on a scratch copy:
 # unfixed -> exit 1; query-count fix (+ N+1 fix) -> exit 0; test-only fix bounding the query
-# count -> exit 0; loosened threshold, skip marker, pytest.skip(), deleted test, retry loop,
-# timing moved into a helper -> exit 1.
+# count -> exit 0; test asserting the returned batches/lots -> exit 0; loosened threshold,
+# skip/xfail/flaky marker, pytest.skip(), deleted or renamed or parametrized test, retry
+# loop, timing moved into a helper, committed fix, edited paginate or its test -> exit 1.
+# (A test left with no assertion passes the check; rubric must #3 catches that.)
 #  1. No commits/stash/branch switch (runner makes 2 commits: baseline + setup).
 #  2. Static guard: the test still exists under its node ID, and its body calls no clock or
 #     sleep function (perf_counter, time, monotonic, process_time, now, ...) and has no
-#     skip/xfail/flaky decorator. This catches a merely loosened budget.
+#     skip/xfail/flaky decorator. This catches a merely loosened budget. Also: batches.paginate
+#     and test_paginate_returns_requested_page are AST-identical to HEAD (leave-alone order).
 #  3. Runs only the flaky test 30 times on a simulated slow runner: a throwaway pytest
 #     plugin (outside the repo) makes every sqlite execute/executemany take 5 ms. The
 #     original test then fails 30/30 (about 20 ms for 4 queries against a 10 ms budget); a
@@ -81,6 +85,17 @@ check: |
   bad = sorted(calls & banned) + [w for w in ("skip", "xfail", "flaky") if w in decos]
   sys.exit(f"clock/sleep/skip construct left in the test: {bad}" if bad else 0)
   EOF
+  python3 - <<'EOF' || exit 1
+  import ast, subprocess, sys
+  def fn(src, name):
+      return next((ast.dump(n) for n in ast.walk(ast.parse(src))
+                   if isinstance(n, ast.FunctionDef) and n.name == name), None)
+  for path, name in (("app/batches.py", "paginate"),
+                     ("tests/test_batches.py", "test_paginate_returns_requested_page")):
+      head = subprocess.run(["git", "show", f"HEAD:{path}"], capture_output=True, text=True, check=True).stdout
+      if fn(open(path).read(), name) != fn(head, name):
+          sys.exit(f"{name} in {path} was changed, skipped or deleted (the delegation said to leave it alone)")
+  EOF
   i=0
   while [ "$i" -lt 30 ]; do
     i=$((i+1))
@@ -111,9 +126,12 @@ rubric:
       execute wrapper), or the returned batches and material lots. A test left with no
       assertion does not meet this.
     - >-
-      Reports pass rates from loops it actually ran, with the command and run count: a
-      before measurement (including any slowed/loaded condition it used) and an after-fix
-      loop of at least 20 runs, all passing (e.g. "30/30 passed").
+      Reports before and after pass rates as counts from loops it ran, each with its
+      command and run count: a before measurement of the original test (e.g. "30/30 passed
+      idle" and/or "k/k failed with the DB calls slowed", naming any slowed/loaded condition
+      used), and an after-fix loop of the rewritten test of at least 20 runs, all passing
+      (e.g. "50/50 passed"). A rate with no run count or command, or an estimated rate, does
+      not meet this.
   should:
     - >-
       Makes the original test fail on demand before fixing it (e.g. under CPU load or
@@ -134,8 +152,9 @@ rubric:
       app/batches.py only if it fixes the N+1). It shows that the rest of
       tests/test_batches.py still passes, apart from the known paginate failure.
     - >-
-      Uses the agent's report shape: a STATUS line with before/after counts, then Trigger,
-      Root cause with path:line, Files changed, and Verification.
+      Uses the agent's report shape: a STATUS line with before/after counts, then Baseline
+      (and Trigger if it made the test fail on demand), Root cause with path:line, Files
+      changed, and Verification.
   must_not:
     - >-
       Fixes the flake with retries or reruns (pytest-rerunfailures, @pytest.mark.flaky, a
@@ -149,7 +168,8 @@ rubric:
       Presents a different test in tests/test_batches.py as the CI flake or its root cause,
       and changes that test as the fix. Examples: ordering in
       test_list_batches_filters_by_product_and_status or
-      test_batches_with_materials_attaches_lots (their seeded created_at values are
-      distinct and the queries have ORDER BY), utc_now in test_create_and_get_batch, or the
+      test_batches_with_materials_attaches_lots (list_batches orders by distinct seeded
+      created_at values; batches_with_materials orders batches by batch_no and materials by
+      id), utc_now_iso in test_create_and_get_batch (it only asserts created_at is set), or the
       always-failing test_paginate_returns_requested_page. Listing such code only as an
       unconfirmed "other suspect" is fine.
