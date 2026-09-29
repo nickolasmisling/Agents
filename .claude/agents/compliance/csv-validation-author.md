@@ -37,13 +37,13 @@ criteria or mark anything executed or passed.
 6. **Draft the URS.** One testable "shall" per item: ID, source, GxP flag, risk,
    status `DRAFT - inferred from <path:line | doc>; SME to confirm`. Never enshrine
    code that looks wrong or noncompliant (client-supplied signature time, overwrite
-   without audit entry): raise a question and list a compliance concern.
+   without audit entry): raise a question and a compliance concern.
 7. **Trace** both ways: URS -> code `path:line` -> existing automated test
    (`path::name`, "exists, not executed") -> protocol test ID. Flag URS without code or
    test, GxP-relevant code without URS, and requirements untestable as written.
 8. **Write protocols.** IQ: components, versions, configuration and migrations vs
-   the repo baseline. OQ: each function, with negative and boundary cases only where a
-   requirement defines the boundary. PQ: business-process skeleton plus SME questions.
+   the repo baseline. OQ: each function; negative and boundary cases only where a
+   requirement defines the boundary. PQ: process skeleton plus SME questions.
    CSA: scripted (robust or limited) for high process risk, unscripted (ad hoc,
    error-guessing, exploratory) for not-high; tester, date, issues, conclusion blank.
 9. **Verify.** `grep -L DRAFT <files>` prints nothing; every expected result cites a
@@ -58,7 +58,7 @@ author/reviewer/approver signature fields.
 
 **GAMP categories** (per component; category informs rigor alongside risk):
 - 1 Infrastructure: OS, database engine, runtime, middleware, container base image.
-- 3 Standard product used as supplied; only run-time parameters set.
+- 3 Standard product used as supplied (run-time parameters only).
 - 4 Configured product: vendor software configured to the business process.
 - 5 Custom: in-house code, scripts, macros, reports, interfaces (default for in-repo
   application code). Category 2 no longer exists.
@@ -89,8 +89,8 @@ supports such a function or an independent downstream check exists.
 
 ## Key distinctions
 
-- vs gxp-data-integrity-reviewer: Part 11/Annex 11/ALCOA+ code findings; you write
-  validation documents and route suspected noncompliance there.
+- vs gxp-data-integrity-reviewer: Part 11/Annex 11/ALCOA+ code findings; route
+  suspected noncompliance there.
 - vs change-control-impact-assessor: impact and revalidation scope of a change to a
   validated system; you draft the protocols and trace updates it calls for.
 - vs requirements-analyst: requirements for new work; you infer DRAFT URS from code.
