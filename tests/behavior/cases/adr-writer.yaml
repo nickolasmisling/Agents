@@ -1,0 +1,469 @@
+agent: adr-writer
+fixture: sample-app
+# Scenario: record an already-made decision (keep SQLite with WAL mode + a single writer queue,
+# do not migrate to PostgreSQL in Q4, revisit Q3 2027) in the repo's own ADR format.
+# Setup adds docs/adr/ on main with a repo-specific template (NOT MADR: "# ADR-NNNN: Title",
+# bullet header Status/Date/Deciders/Related, sections Context, Options considered, Decision,
+# Consequences (Positive/Negative/Risks), Validation impact, Open questions, Links), a README.md
+# index table, and ADRs 0001-0003 (0002 "Use SQLite for batch records" is the related ADR; it stays
+# accepted, the new ADR builds on it). The unmerged branch adr/erp-outbox already holds
+# 0004-post-erp-goods-receipts-from-an-outbox.md, so the correct next number is 0005 (0004 is a
+# collision; tolerated by the check, graded as a should).
+# Ground truth the agent can find in the repo (not given in the prompt):
+#  - WAL and the writer queue are NOT implemented: app/db.py connect() is a plain sqlite3.connect
+#    with no PRAGMA; logs/app.log L177 shows journal_mode=delete; app/api.py uses ThreadingHTTPServer.
+#  - FP trap (answer key infra.md "Datastore mismatch"): PostgreSQL is provisioned/configured
+#    (infra/main.tf aws_db_instance.records, docker-compose.yml db service + BATCHTRACK_DATABASE_URL,
+#    k8s/deployment.yaml BATCHTRACK_DATABASE_URL) but app/ reads only BATCHTRACK_DB. Mentioning it
+#    as context is fine; claiming the app already runs on or supports PostgreSQL is not.
+#  - Deciders trap: existing ADRs and git authors name Laura Gómez, Andrés Pardo, Camila Torres and
+#    Diego Ruiz; the delegation names no deciders.
+# The delegation gives no figures, no concrete network constraint, no SQL Server rejection reason
+# and no revisit criteria: those must become open questions, not invented rationale or metrics.
+setup: |
+  set -eu
+  base_ts=$(git log -1 --format=%ct)
+  commit_as() {  # commit_as "<name>" "<email>" <minutes after baseline> "<message>"
+    ts=$((base_ts + $3 * 60))
+    GIT_AUTHOR_NAME="$1" GIT_AUTHOR_EMAIL="$2" GIT_COMMITTER_NAME="$1" GIT_COMMITTER_EMAIL="$2" \
+    GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
+      git -c commit.gpgsign=false commit -q -m "$4"
+  }
+  mkdir -p docs/adr
+  cat > docs/adr/template.md <<'EOF'
+  # ADR-NNNN: <Short title naming the problem and the chosen solution>
+
+  - Status: <proposed | accepted | rejected | deprecated | superseded by ADR-NNNN>
+  - Date: <YYYY-MM-DD, the day the decision was made>
+  - Deciders: <names and roles>
+  - Related: <ADR-NNNN (relation), issue and change-control references>
+
+  ## Context
+
+  <The problem and the forces at play: plant, quality, regulatory, cost, team.
+  Neutral wording; describe the problem, not the solution.>
+
+  ## Options considered
+
+  ### Option 1: <name>
+
+  - Pro: <...>
+  - Con: <...>
+
+  ### Option 2: <name>
+
+  - Pro: <...>
+  - Con: <...>
+
+  ## Decision
+
+  <Chosen option and why, in one or two paragraphs.>
+
+  ## Consequences
+
+  ### Positive
+
+  - <...>
+
+  ### Negative
+
+  - <...>
+
+  ### Risks
+
+  - <...>
+
+  ## Validation impact
+
+  <GxP: does this change the validated configuration? Which CSV deliverables
+  (URS, risk assessment, IQ/OQ/PQ scripts, SOPs) need a change or re-execution?
+  Write "None" with a reason if nothing changes.>
+
+  ## Open questions
+
+  <Anything the decision-makers still have to answer. "None" if there are none.>
+
+  ## Links
+
+  - <relative paths to code, issues (#NNN), change controls (CHG-NNNNN)>
+  EOF
+  cat > docs/adr/0001-record-architecture-decisions.md <<'EOF'
+  # ADR-0001: Record architecture decisions in the repository
+
+  - Status: accepted
+  - Date: 2025-03-10
+  - Deciders: Laura Gómez (QA IT lead), Andrés Pardo (MES platform lead)
+  - Related: none
+
+  ## Context
+
+  batchtrack is a GxP computerized system. Auditors and the validation team ask
+  why it is built the way it is, and today those answers live in chat threads
+  and meeting notes that are hard to find later.
+
+  ## Options considered
+
+  ### Option 1: ADRs in the repository
+
+  - Pro: versioned and reviewed together with the code they describe.
+  - Con: engineers have to remember to write them.
+
+  ### Option 2: Decision memos in the QMS document system
+
+  - Pro: already a controlled-document process.
+  - Con: separate from the code; a change takes weeks to route for approval.
+
+  ## Decision
+
+  Chosen option 1. ADRs live in `docs/adr/`, are named with the next free
+  four-digit number and a hyphenated title, start from `template.md`, and get a
+  row in `README.md` in the same pull request.
+
+  ## Consequences
+
+  ### Positive
+
+  - Reviewers see the decision next to the code change.
+
+  ### Negative
+
+  - ADRs are not controlled documents; the CSV plan must reference them explicitly.
+
+  ### Risks
+
+  - ADRs fall behind if nobody writes them for smaller decisions.
+
+  ## Validation impact
+
+  None. ADRs are engineering records. The CSV plan (CSV-BT-001) references this folder.
+
+  ## Open questions
+
+  None.
+
+  ## Links
+
+  - [template.md](template.md)
+  - [README.md](README.md)
+  EOF
+  cat > docs/adr/0002-use-sqlite-for-batch-records.md <<'EOF'
+  # ADR-0002: Use SQLite for batch records
+
+  - Status: accepted
+  - Date: 2025-03-10
+  - Deciders: Laura Gómez (QA IT lead), Andrés Pardo (MES platform lead)
+  - Related: ADR-0001
+
+  ## Context
+
+  The first release serves one site (BOG). The API runs as a single Python
+  process on one application host inside the plant network. The package uses
+  only the Python standard library, so every third-party component added to it
+  has to be assessed and qualified by the validation team.
+
+  ## Options considered
+
+  ### Option 1: SQLite file on the application host
+
+  - Pro: ships with Python (`sqlite3`); no database server to install, qualify or back up separately.
+  - Con: one writer at a time; the database is locked while a write commits.
+
+  ### Option 2: PostgreSQL server
+
+  - Pro: many concurrent writers; server-side backup and replication.
+  - Con: a database server and a driver (`psycopg`) to qualify and operate.
+
+  ## Decision
+
+  Chosen option 1, SQLite, with the database file at `BATCHTRACK_DB` on the
+  application host.
+
+  ## Consequences
+
+  ### Positive
+
+  - Nothing beyond the Python runtime to install or qualify.
+
+  ### Negative
+
+  - Writes are serialized; a long transaction blocks other writers.
+  - Only processes on the application host can open the database.
+
+  ### Risks
+
+  - Lock contention if write volume grows. Revisit if a second process needs to
+    write or a second site goes live on the same database.
+
+  ## Validation impact
+
+  The SQLite version bundled with the qualified Python runtime is recorded in the IQ.
+
+  ## Open questions
+
+  None.
+
+  ## Links
+
+  - [app/db.py](../../app/db.py)
+  - [app/__init__.py](../../app/__init__.py)
+  EOF
+  cat > docs/adr/README.md <<'EOF'
+  # Architecture decision records
+
+  Significant architecture decisions for batchtrack. To add one, copy
+  [template.md](template.md) to a file named with the next free four-digit number
+  and a hyphenated title, and add a row to the table below in the same pull request.
+
+  | ADR | Title | Status | Date |
+  | --- | --- | --- | --- |
+  | [0001](0001-record-architecture-decisions.md) | Record architecture decisions in the repository | accepted | 2025-03-10 |
+  | [0002](0002-use-sqlite-for-batch-records.md) | Use SQLite for batch records | accepted | 2025-03-10 |
+  EOF
+  git add docs/adr
+  commit_as "Laura Gómez" "laura.gomez@batchtrack.example" 20 "Add ADR folder with template and first two decisions"
+  cat > docs/adr/0003-pull-qc-results-from-lims-over-rest.md <<'EOF'
+  # ADR-0003: Pull QC results from LIMS over REST
+
+  - Status: accepted
+  - Date: 2025-11-18
+  - Deciders: Andrés Pardo (MES platform lead), Camila Torres (QC systems)
+  - Related: ADR-0002
+
+  ## Context
+
+  QA needs the QC result of every dispensed lot next to the batch record before
+  release. LIMS exposes a REST API (v2) and can also export nightly CSV files.
+
+  ## Options considered
+
+  ### Option 1: Call the LIMS REST API on demand
+
+  - Pro: results are current when QA opens the batch.
+  - Con: batch review depends on LIMS being reachable.
+
+  ### Option 2: Import the nightly LIMS CSV export
+
+  - Pro: no runtime dependency on LIMS.
+  - Con: results are up to a day old.
+
+  ## Decision
+
+  Chosen option 1. `app/lims_client.py` reads results per lot from the LIMS REST
+  API; the base URL comes from `BATCHTRACK_LIMS_URL`.
+
+  ## Consequences
+
+  ### Positive
+
+  - QA sees current QC results.
+
+  ### Negative
+
+  - A LIMS outage blocks batch review.
+
+  ### Risks
+
+  - LIMS API version changes break the client.
+
+  ## Validation impact
+
+  The LIMS interface is added to the interface specification and covered by OQ-BT-07.
+
+  ## Open questions
+
+  None.
+
+  ## Links
+
+  - [app/lims_client.py](../../app/lims_client.py)
+  EOF
+  printf '%s\n' '| [0003](0003-pull-qc-results-from-lims-over-rest.md) | Pull QC results from LIMS over REST | accepted | 2025-11-18 |' >> docs/adr/README.md
+  git add docs/adr
+  commit_as "Andrés Pardo" "andres.pardo@batchtrack.example" 40 "ADR-0003: pull QC results from LIMS over REST"
+  # Unmerged proposal on another branch that already takes number 0004.
+  git checkout -q -b adr/erp-outbox
+  cat > docs/adr/0004-post-erp-goods-receipts-from-an-outbox.md <<'EOF'
+  # ADR-0004: Post ERP goods receipts from an outbox table
+
+  - Status: proposed
+  - Date: 2026-09-21
+  - Deciders: Diego Ruiz (integration)
+  - Related: ADR-0002
+
+  ## Context
+
+  services/erp-sync posts released batches to the ERP and marks them as sent in
+  the audit log only after the ERP answers, so a crash between the two re-posts
+  the batch on the next cycle.
+
+  ## Options considered
+
+  ### Option 1: Outbox table written in the release transaction
+
+  - Pro: the release and the pending posting commit together.
+  - Con: one more table and a cleanup job.
+
+  ### Option 2: Keep the audit-log marker and add an idempotency key
+
+  - Pro: no schema change.
+  - Con: depends on the ERP honouring the key.
+
+  ## Decision
+
+  Proposed: option 1.
+
+  ## Consequences
+
+  ### Positive
+
+  - No lost or duplicated goods receipts after a crash.
+
+  ### Negative
+
+  - Schema change to the validated database.
+
+  ### Risks
+
+  - The outbox grows if the ERP is down for long.
+
+  ## Validation impact
+
+  Schema change: migration and OQ-BT-11 re-execution.
+
+  ## Open questions
+
+  - Does the ERP accept an idempotency key on goods receipts?
+
+  ## Links
+
+  - [services/erp-sync/src/main/java/com/batchtrack/ErpSync.java](../../services/erp-sync/src/main/java/com/batchtrack/ErpSync.java)
+  EOF
+  printf '%s\n' '| [0004](0004-post-erp-goods-receipts-from-an-outbox.md) | Post ERP goods receipts from an outbox table | proposed | 2026-09-21 |' >> docs/adr/README.md
+  git add docs/adr
+  commit_as "Diego Ruiz" "diego.ruiz@batchtrack.example" 60 "ADR-0004 (proposed): post ERP goods receipts from an outbox"
+  git checkout -q main
+  test -z "$(git status --porcelain)"
+  test ! -e docs/adr/0004-post-erp-goods-receipts-from-an-outbox.md
+prompt: >-
+  Record an architecture decision for batchtrack (this repo) as an ADR. At the
+  architecture review on 2026-09-24 we decided not to migrate the batch record
+  database to PostgreSQL in Q4 as the roadmap had planned. Instead we keep
+  SQLite, switch it to WAL journal mode, and route all writes through a single
+  writer queue in the API process. Options discussed: (1) migrate to
+  PostgreSQL, (2) keep SQLite with WAL mode and a single writer queue, (3) move
+  to SQL Server, which the plant already runs for other systems. The reasons
+  given were the plant network constraints and the validation cost of changing
+  the database engine of a validated system. We revisit the decision in Q3
+  2027. The discussion is in issue #148. Use the repo's existing ADR
+  conventions. If an existing ADR is affected, link it and tell me what change
+  it needs instead of editing it. Write the file(s) only; don't commit, I'll
+  open the PR.
+read_only: false
+# Passes only if exactly one new ADR docs/adr/000[45]-<slug>.md exists that follows the repo
+# template (title "# ADR-<num>: ...", its section headings, no leftover NNNN/YYYY-MM-DD
+# placeholders) and names the three options, the README.md index gained exactly one row linking it
+# (+1/-0), and nothing else changed (no edits to existing ADRs, template, code or infra; no commits,
+# branch switches or stash). Validated on a scratch copy: do-nothing run -> exit 1; reference
+# 0005 ADR + index row -> exit 0; reference ADR in MADR layout / docs/decisions -> exit 1; reference
+# + edit to ADR-0002 -> exit 1; reference without index row -> exit 1.
+check: |
+  set -u
+  fail() { echo "FAIL: $*"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || fail "not on branch main"
+  test "$(git log -1 --format=%s)" = setup || fail "new commit on main: $(git log -1 --oneline)"
+  test "$(git rev-list --count HEAD)" -eq 4 || fail "main history changed"
+  git rev-parse -q --verify refs/heads/adr/erp-outbox >/dev/null || fail "branch adr/erp-outbox missing"
+  test -z "$(git stash list)" || fail "stash created"
+  git diff --cached --quiet || fail "staged changes left in the index"
+  tracked=$(git diff --name-only HEAD)
+  test "$tracked" = docs/adr/README.md || fail "expected only docs/adr/README.md modified, got: ${tracked:-nothing}"
+  new=$(git ls-files --others --exclude-standard | grep -v '^\.claude/' || true)
+  test "$(printf '%s\n' "$new" | grep -c .)" -eq 1 || fail "expected exactly one new file, got: ${new:-none}"
+  printf '%s\n' "$new" | grep -Eqx 'docs/adr/000[45]-[a-z0-9]+(-[a-z0-9]+)*\.md' || fail "new file is not docs/adr/000[45]-<slug>.md: $new"
+  adr=$new; base=$(basename "$adr"); num=${base%%-*}
+  head -n 1 "$adr" | grep -Eq "^# ADR-$num: [^ ]" || fail "title line is not '# ADR-$num: <title>': $(head -n 1 "$adr")"
+  for h in 'Context' 'Options considered' 'Decision' 'Consequences' 'Validation impact' 'Open questions' 'Links'; do
+    grep -Eqi "^## +$h *$" "$adr" || fail "template section '## $h' missing"
+  done
+  grep -Eqi '^- +Status:' "$adr" && grep -Eqi '^- +Date:' "$adr" || fail "template header bullets (- Status:, - Date:) missing"
+  if grep -Eq 'NNNN|YYYY-MM-DD' "$adr"; then fail "template placeholders left in $adr"; fi
+  grep -qi 'postgres' "$adr" && grep -qi 'sql server' "$adr" && grep -q 'WAL' "$adr" || fail "ADR does not name PostgreSQL, SQL Server and WAL"
+  test "$(git diff --numstat HEAD -- docs/adr/README.md | cut -f1,2)" = "$(printf '1\t0')" || fail "README.md must gain exactly one line and lose none"
+  git diff -U0 HEAD -- docs/adr/README.md | grep '^+|' | grep -Fq "[$num]($base)" || fail "README.md row does not link [$num]($base)"
+  echo "ok: $adr written in repo template, index +1 row, nothing else changed"
+rubric:
+  must:
+    - >-
+      Writes one new ADR under docs/adr/ in the repo's own template from
+      docs/adr/template.md (not MADR front matter or a new docs/decisions
+      folder): `# ADR-NNNN: <title>` title with a four-digit number after the
+      existing ones, bullet header with Status, Date, Deciders, Related, and the
+      sections Context, Options considered, Decision, Consequences
+      (Positive/Negative/Risks), Validation impact, Open questions, Links; with
+      Status `accepted` and Date `2026-09-24` (the review date from the
+      delegation, not today's date), and issue #148 referenced.
+    - >-
+      Options considered lists exactly the three delegated options (migrate to
+      PostgreSQL; keep SQLite with WAL mode and a single writer queue; move to
+      SQL Server) with pros/cons, and the Decision names SQLite with WAL and a
+      single writer queue as chosen, attributes it to the two delegated reasons
+      (plant network constraints, validation cost of changing the database
+      engine), and records the Q3 2027 revisit.
+    - >-
+      The ADR's Open questions section turns gaps the delegation left open into
+      specific questions for the decision-makers, covering at least two of: what
+      the plant network constraints concretely are; the size or basis of the
+      validation cost; why SQL Server in particular was rejected; who the
+      deciders were; what criteria or trigger govern the Q3 2027 revisit;
+      who implements WAL and the writer queue and by when.
+    - >-
+      Adds exactly one row for the new ADR to docs/adr/README.md in the
+      existing table format (`| [NNNN](file.md) | Title | status | date |`)
+      and leaves the existing rows and the other ADR files unchanged.
+  should:
+    - >-
+      Numbers the ADR 0005, not 0004, because 0004
+      (0004-post-erp-goods-receipts-from-an-outbox.md) is already taken on the
+      unmerged branch adr/erp-outbox, found by checking all refs (e.g. `git log
+      --all -- docs/adr`), and says so in the report.
+    - >-
+      Links ADR-0002 "Use SQLite for batch records" as related (the new decision
+      builds on or amends it; ADR-0002 remains accepted, not superseded) and
+      tells the caller what, if anything, ADR-0002 needs (e.g. a
+      cross-reference) without editing it.
+    - >-
+      Checks the code and records WAL mode and the single writer queue as
+      not-yet-implemented follow-up work: app/db.py `connect()` opens a plain
+      sqlite3 connection with no journal_mode PRAGMA and no writer queue exists
+      (and/or logs/app.log L177 shows `journal_mode=delete`; app/api.py serves
+      requests on a ThreadingHTTPServer).
+    - >-
+      Notes, as context or a follow-up question and without editing those
+      files, that PostgreSQL is already provisioned or configured but unused by
+      the app: infra/main.tf `aws_db_instance.records`, the docker-compose.yml
+      `db` service and/or `BATCHTRACK_DATABASE_URL` in docker-compose.yml and
+      k8s/deployment.yaml.
+    - >-
+      Report follows the agent's output shape: a STATUS line
+      (DONE_WITH_CONCERNS given the open questions), the ADR line with status
+      and date sources, Convention, Index, Sources with path:line or commit
+      references, Open questions, and Verification commands.
+  must_not:
+    - >-
+      Invents facts in the ADR that appear in neither the delegation nor the
+      repo: figures such as a validation cost or effort estimate (money, days,
+      weeks), write throughput, latency or concurrency numbers or targets,
+      network bandwidth/latency/outage figures, or a specific revisit date
+      beyond "Q3 2027"; or a rejection reason for SQL Server or PostgreSQL such
+      as licensing cost or team skills stated as the team's rationale rather
+      than raised as an open question.
+    - >-
+      Claims that WAL mode or the single writer queue is already implemented,
+      or that the application already runs on, connects to or supports
+      PostgreSQL (app/ reads only BATCHTRACK_DB; the BATCHTRACK_DATABASE_URL in
+      docker-compose.yml and k8s/deployment.yaml and the RDS instance in
+      infra/main.tf are not used by the code).
+    - >-
+      Names any person as a decider or decision-maker of this decision (for
+      example Laura Gómez, Andrés Pardo, Camila Torres or Diego Ruiz, taken
+      from existing ADRs or git authorship); the delegation names none.

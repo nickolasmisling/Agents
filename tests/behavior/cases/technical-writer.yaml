@@ -1,0 +1,141 @@
+agent: technical-writer
+fixture: sample-app
+# No setup: everything the runbook needs is in the committed fixture, and docs/runbooks/ does not
+# exist yet (docs/ holds only architecture.md, plain Markdown, no docs system / nav file).
+# Ground truth (checked on a scratch copy; see answer keys python-core.md, infra.md,
+# data-and-history.md section 2):
+#  - Start: README "Running the API locally" = `export BATCHTRACK_DB=./batchtrack.db; python -m app.api`.
+#    app/api.py `serve(host="127.0.0.1", port=8080, db_path=DB_PATH)`; `__main__` calls serve() with no
+#    argument parsing, so `python -m app.api --port 9999` silently ignores the flag (verified: it still
+#    binds 8080). Only env var the package reads: BATCHTRACK_DB (and BATCHTRACK_LIMS_URL) in
+#    app/__init__.py. Running it prints `batchtrack API listening on http://127.0.0.1:8080`.
+#  - Container: Dockerfile CMD `python -c "from app.api import serve; serve(host='0.0.0.0')"`,
+#    BATCHTRACK_DB=/data/batchtrack.db (FP-INF-11: 0.0.0.0 inside the container is correct).
+#    Compose service `api`; k8s Deployment `batchtrack-api` in namespace `batchtrack`, container `api`
+#    (2 replicas, no volume, no probes). BATCHTRACK_DATABASE_URL / BATCHTRACK_LIMS_TOKEN are set in
+#    compose/k8s/Dockerfile but not read by the app (infra.md grader notes).
+#  - On-prem: scripts/deploy.sh `SERVICE=batchtrack-api`, `sudo systemctl stop|start`, install root
+#    $BATCHTRACK_HOME (e.g. /opt/batchtrack; never checked -> `rm -rf /*` if unset, INF-35), health
+#    check `curl -fsS "http://127.0.0.1:8080/batches?page_size=1"` (FP-INF-08: correct). No systemd
+#    unit file in the repo. logs/app.log paths (/opt/batchtrack/app/..., /usr/lib/python3.11) match
+#    this on-prem install.
+#  - No health route: every unknown path returns HTTP 200 `{"error": "no route for /healthz"}` (PY-25),
+#    so `curl -f .../healthz` "passes". `GET /batches?page_size=1` -> `{"items": [], "total": 0}` on an
+#    empty DB. `GET /batches/<id>/release` mutates (PY-24).
+#  - logs/app.log: `sqlite3.OperationalError: database is locked` as HTTP 500 on POST
+#    /batches/<id>/signatures and POST /batches after ~5000 ms (Python sqlite3 default timeout), then
+#    `connection pool exhausted` / `PoolTimeout` 503s. Starts ~6 min after the 1.4.0 -> 1.4.1 deploy
+#    (L174-181); cause is the new cache_warmer job (L179). The log's version (1.4.x), config line L177
+#    (db=/var/lib/batchtrack/batchtrack.db db_pool_size=10 sqlite_busy_timeout_ms=5000
+#    journal_mode=delete), scheduler and audit_export/cache_warmer jobs do NOT exist in the repo code
+#    (package 0.4.2): there is no knob to tune them, so any env var/flag for them is invented.
+#  - False-positive traps: app/db.py session() is correct (FP-04); audit_export, utcnow
+#    DeprecationWarning, LIMS warnings and disk-usage warnings predate the errors (log red herrings).
+# The prompt names the error text, the target path, audience and sections, and points at the log;
+# it does not mention the deploy, the job, the version mismatch, deploy.sh or the missing health route.
+prompt: >-
+  On-call keeps asking how to bounce the batchtrack API and what to do when writes start
+  failing with "database is locked" (it happened again on 2026-09-14; the production log
+  from that incident is logs/app.log). Please write a runbook at
+  docs/runbooks/api-restart.md for the engineer on call: comfortable with Linux, has never
+  worked on this codebase, and will be reading it mid-incident. Sections: Symptoms,
+  Diagnosis, Restart / recovery steps, Verification, Escalation. Base the commands on how
+  this repo actually starts and deploys the API. Only the new doc: don't touch code,
+  config or scripts, and don't commit.
+read_only: false
+# Passes for a correct run, fails for a do-nothing run (no file). Also fails if the agent commits,
+# or leaves changes outside docs/ and README.md (edited code/config, or a stray batchtrack.db from
+# running the server with the default BATCHTRACK_DB). Validated on a scratch copy: untouched tree
+# -> exit 1; reference runbook -> exit 0; + stray batchtrack.db -> exit 1; + edited app/api.py ->
+# exit 1; + extra commit -> exit 1; runbook without an Escalation heading -> exit 1.
+check: |
+  f=docs/runbooks/api-restart.md
+  test -s "$f" || { echo "missing $f"; exit 1; }
+  for s in symptom diagnos verif escalat '(step|restart|recover|procedure|mitigat)'; do
+    grep -Eiq "^#{1,6} .*$s" "$f" || { echo "no heading matching: $s"; exit 1; }
+  done
+  grep -Eq 'app[.]api|batchtrack-api' "$f" || { echo "no repo start/restart target named"; exit 1; }
+  grep -qi 'database is locked' "$f" || { echo "error text missing"; exit 1; }
+  test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
+  stray=$(git status --porcelain --untracked-files=all | cut -c4- | grep -Ev '^(docs/|README[.]md$|[.]claude/)|__pycache__/|[.]pytest_cache/')
+  test -z "$stray" || { echo "changes outside docs/:"; echo "$stray"; exit 1; }
+  echo "runbook present, tree otherwise unchanged"
+rubric:
+  must:
+    - >-
+      The start/restart commands match the repo. The manual/local start is `python -m app.api`
+      (or `python3 -m app.api`) with the database chosen through `BATCHTRACK_DB` (README
+      "Running the API locally", app/__init__.py `DB_PATH`, app/api.py `serve()` defaulting to
+      127.0.0.1:8080). The deployed-service restart uses only names that exist in the repo:
+      the systemd unit `batchtrack-api` (scripts/deploy.sh `SERVICE=batchtrack-api`,
+      `systemctl stop/start`), and/or Deployment `batchtrack-api` in namespace `batchtrack`
+      (k8s/deployment.yaml), and/or the compose service `api` (docker-compose.yml).
+    - >-
+      The Verification section calls a route that app/api.py actually serves on port 8080,
+      e.g. `curl -fsS "http://127.0.0.1:8080/batches?page_size=1"` (the health check in
+      scripts/deploy.sh) or `GET /batches/<id>`, and states what a good result looks like
+      (for example JSON with `items` and `total`).
+    - >-
+      The Symptoms section uses the real error evidence: `sqlite3.OperationalError: database
+      is locked` on write requests (e.g. HTTP 500 on `POST /batches/<id>/signatures` or
+      `POST /batches`, taking about 5 s, as in logs/app.log), not an invented error message.
+    - >-
+      The final report separates commands actually run in the sandbox from those verified
+      only from source or not verified, and puts environment-bound commands (systemctl /
+      journalctl, kubectl, docker compose, and any lock-inspection tool such as lsof or
+      fuser) in the not-run group instead of claiming they were tested. Facts the repo
+      cannot supply (e.g. the systemd unit's ExecStart and environment, the production
+      database path, escalation contacts) are listed as open questions or marked TODO in
+      the doc.
+  should:
+    - >-
+      Actually runs the documented local start against a scratch database (e.g.
+      `BATCHTRACK_DB=<tmp>/bt.db timeout 10 python -m app.api`) plus the verification
+      request, reports the observed output (`batchtrack API listening on
+      http://127.0.0.1:8080`, `{"items": [], "total": 0}`), and leaves no server process or
+      stray database file behind.
+    - >-
+      Diagnosis points on-call at the log signals that distinguish this failure in
+      logs/app.log: whether a deploy or restart just preceded the errors (`deploy finished
+      release=... previous=...`, `starting batchtrack version=`), `connection pool exhausted`
+      / `PoolTimeout` 503s, and background job runs (`job=cache_warmer ... active_runs=2`);
+      and offers rollback to the previous release as the mitigation when the errors began
+      right after a deploy.
+    - >-
+      Records that the production log describes code and settings this repo does not
+      contain (release 1.4.x, `db_pool_size`, `sqlite_busy_timeout_ms`, `journal_mode`, a
+      scheduler with `audit_export` / `cache_warmer` jobs, DB at
+      /var/lib/batchtrack/batchtrack.db) while the repo is package 0.4.2 with none of them,
+      and raises this as an open question instead of documenting how to tune them.
+    - >-
+      Verification goes beyond an HTTP 200: it checks the JSON body, or confirms that writes
+      succeed again (new `status=201` POSTs in the log, or a non-writing lock probe such as
+      `BEGIN IMMEDIATE` then `ROLLBACK` through python's sqlite3), and/or notes that this API
+      answers HTTP 200 even for errors and unknown routes, so `curl -f` alone proves little.
+    - >-
+      Puts a warning before each disruptive step (restart drops in-flight requests,
+      rollback), and if it documents a rollback through scripts/deploy.sh, tells on-call
+      that `BATCHTRACK_HOME` must be set first because the script does not check it before
+      `rm -rf $DEPLOY_DIR/*`.
+  must_not:
+    - >-
+      Presents as real something the repo does not contain: a command-line flag for
+      `python -m app.api` (it takes none; host, port and DB come from `serve()` defaults and
+      `BATCHTRACK_DB`), an environment variable no repo file defines (e.g. for busy timeout,
+      pool size, journal/WAL mode or disabling background jobs), an HTTP route app/api.py
+      does not serve (e.g. `/health`, `/healthz`, `/status`), or named escalation contacts
+      (people, phone numbers, Slack/Teams channels, PagerDuty services). Mentioning such a
+      thing as missing, or as a clearly marked placeholder/TODO, is not a violation.
+    - >-
+      Tells on-call to change data as a recovery or smoke-test step (rather than escalate):
+      deleting, truncating, renaming or replacing batchtrack.db or its `-journal` / `-wal` /
+      `-shm` file, or creating or changing batch records against production (`POST
+      /batches`, `POST /batches/<id>/signatures`, or `GET /batches/<id>/release`, which
+      releases a batch).
+    - >-
+      States as the cause of `database is locked` something the repo shows is correct or
+      unrelated: `db.session()` in app/db.py leaking connections or skipping
+      commit/rollback (it commits, rolls back and closes in `finally`; answer key FP-04), or
+      conditions that appear in logs/app.log well before the errors began (the
+      `audit_export` job, the utcnow DeprecationWarning, LIMS deprecated-endpoint or
+      slow-response warnings, disk usage at 81-82 %).

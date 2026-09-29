@@ -18,28 +18,33 @@ fixture: sample-app
 # for jobs pr-title (green), web (green) and python (red); it is git-ignored via
 # .git/info/exclude so the tree at HEAD equals the run's SHA. SHAs and timestamps in
 # the log are filled in from the scratch repo; the line numbers are fixed:
-#   L1-L28     pr-title: the step's script text contains `echo "::error::PR title ..."`
-#              (never executed; title passes). Early noise.
-#   L29-L168   web: npm deprecation warnings + "7 vulnerabilities (... 2 critical)". Noise.
-#   L169-L343  python job. Token permissions in Set up job: Contents/Metadata/Packages read.
-#   L276       pip `WARNING: Retrying ... ReadTimeoutError ... pypi.org` during the pip
-#              self-upgrade, which then succeeds (L277-L286). Red herring (not an outage).
-#   L296       FIRST REAL ERROR: `ERROR: Cannot install -r requirements.txt (line 4) and
+#   L1-L35     pr-title (green): the step's script text at L29 contains
+#              `echo "::error::PR title ..."` (never executed; the title passes). Noise.
+#   L36-L176   web (green): npm deprecation warnings, "7 vulnerabilities (... 2 critical)"
+#              at L136. Noise.
+#   L177-L355  python (red). Token permissions (L192-L196): Contents/Metadata/Packages read.
+#   L277       pip `WARNING: Retrying ... ReadTimeoutError ... pypi.org` during the pip
+#              self-upgrade, which then succeeds (L287). Red herring, not an outage.
+#   L299       FIRST REAL ERROR: `ERROR: Cannot install -r requirements.txt (line 4) and
 #              pytest==7.4.4 because these package versions have conflicting dependencies.`
-#   L298-L300  "The conflict is caused by: The user requested pytest==7.4.4 /
+#   L301-L303  "The conflict is caused by: The user requested pytest==7.4.4 /
 #              pytest-asyncio 0.24.0 depends on pytest<9 and >=8.2"
-#   L309       `ERROR: ResolutionImpossible: ...`
-#   L310       `##[error]Process completed with exit code 1.` (end marker)
-#   L311-L341  cascade: "Run tests" never ran (skipped); "Publish test report" ran only
-#              because of `if: always()`: `##[warning]No file matches path
-#              reports/junit.xml` (L331), "No test results found!", then a non-fatal
-#              `##[error]... Resource not accessible by integration` (L335, token has no
-#              Checks permission; latent INF-13, not why the run is red).
+#   L305-L306  pip 26's misleading "no matching distributions available ...: pytest" note
+#   L312       `ERROR: ResolutionImpossible: ...`
+#   L313       `##[error]Process completed with exit code 1.` (end marker)
+#   L314-L349  cascade: "Run tests" never ran (skipped, so absent from the log);
+#              "Publish test report" ran only because of `if: always()`:
+#              `##[warning]No file matches path reports/junit.xml` (L340), "No test
+#              results found!" (L343), then a non-fatal `##[error]... Resource not
+#              accessible by integration` (L345; the token has no Checks permission, a
+#              latent INF-13 issue that would also hit green runs, not why this run is red).
 # The pip text is real pip 26.2.1 output for this requirements.txt (checked with
 # `pip install --dry-run`). pytest-asyncio 0.24.0 requires pytest>=8.2,<9; 0.23.8
-# requires pytest>=7.0.0,<9. Verified in scratch venvs: at commit A with pytest 8.4.x +
-# pytest-asyncio 0.24.0 the suite passes (21 passed); with pytest==7.4.4 +
-# pytest-asyncio==0.23.8 it also passes, so both fixes are valid.
+# requires pytest>=7.0.0,<9. Verified in scratch venvs: at commit A with pytest 8.4.2 +
+# pytest-asyncio 0.24.0 the suite passes (21 passed); at commit B with pytest==7.4.4 +
+# pytest-asyncio==0.23.8 it also passes (21 passed), so both fixes are valid.
+# Locally (system pytest 9.x, no pytest-asyncio) the two async tests fail; that is an
+# environment artifact, not part of run 4521. gh is not installed in the test env.
 # Expected: classification = code/dependency change in the PR (restore failure),
 # hand-off build-fixer. Not: registry outage, flaky, drift, permissions, YAML.
 setup: |
@@ -142,12 +147,14 @@ setup: |
 
 
   def job(name, start, steps):
+      # A line is "text" (a few ms after the previous one) or (seconds_before, "text").
       t = T0 + dt.timedelta(seconds=start)
       for step, secs, lines in steps:
-          for i, line in enumerate(lines):
-              ts = t + dt.timedelta(seconds=secs * i / max(len(lines), 1))
-              out.append(f"{name}\t{step}\t{ts.strftime('%Y-%m-%dT%H:%M:%S.%f')}1Z {line}".rstrip())
           t += dt.timedelta(seconds=secs)
+          for i, line in enumerate(lines):
+              delay, text = line if isinstance(line, tuple) else (0.0031 + (i * 7919 % 13) / 1000, line)
+              t += dt.timedelta(seconds=delay)
+              out.append(f"{name}\t{step}\t{t.strftime('%Y-%m-%dT%H:%M:%S.%f')}{i % 10}Z {text}".rstrip())
 
 
   def set_up(name, runner, actions):
@@ -170,10 +177,10 @@ setup: |
           lines.append("Getting action download info")
           lines += [f"Download action repository '{a}' (SHA:{s})" for a, s in actions]
       lines.append(f"Complete job name: {name}")
-      return ("Set up job", 3, lines)
+      return ("Set up job", 0.0, lines)
 
 
-  CHECKOUT = ("Run actions/checkout@v4", 2, [
+  CHECKOUT = ("Run actions/checkout@v4", 0.35, [
       "##[group]Run actions/checkout@v4", "with:", f"  ref: {SHA}", f"  repository: {REPO}",
       "  token: ***", "  ssh-strict: true", "  ssh-user: git", "  persist-credentials: true",
       "  clean: true", "  sparse-checkout-cone-mode: true", "  fetch-depth: 1", "  fetch-tags: false",
@@ -189,7 +196,7 @@ setup: |
       f"[command]/usr/bin/git remote add origin https://github.com/{REPO}", "##[endgroup]",
       "##[group]Fetching the repository",
       f"[command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin {SHA}",
-      f"From https://github.com/{REPO}", f" * branch            {SHA} -> FETCH_HEAD", "##[endgroup]",
+      (0.61, f"From https://github.com/{REPO}"), f" * branch            {SHA} -> FETCH_HEAD", "##[endgroup]",
       "##[group]Checking out the ref", f"[command]/usr/bin/git checkout --progress --force {SHA}",
       f"Note: switching to '{SHA}'.", "",
       "You are in 'detached HEAD' state. You can look around, make experimental",
@@ -198,14 +205,14 @@ setup: |
       f"HEAD is now at {SHORT} build: pin pytest to 7.4.4 to match the validated toolchain",
       "##[endgroup]", "[command]/usr/bin/git log -1 --format=%H", SHA,
   ])
-  POST_CHECKOUT = ("Post Run actions/checkout@v4", 1, [
+  POST_CHECKOUT = ("Post Run actions/checkout@v4", 0.28, [
       "Post job cleanup.", "[command]/usr/bin/git version", "git version 2.51.0",
       f"[command]/usr/bin/git config --global --add safe.directory {WORK}",
       "[command]/usr/bin/git config --local --name-only --get-regexp http\\.https\\:\\/\\/github\\.com\\/\\.extraheader",
       "http.https://github.com/.extraheader",
       "[command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader",
   ])
-  COMPLETE = ("Complete job", 1, ["Cleaning up orphan processes"])
+  COMPLETE = ("Complete job", 0.21, ["Cleaning up orphan processes"])
   PYENV = ["env:", f"  pythonLocation: {PYLOC}", f"  PKG_CONFIG_PATH: {PYLOC}/lib/pkgconfig",
            f"  Python_ROOT_DIR: {PYLOC}", f"  Python2_ROOT_DIR: {PYLOC}", f"  Python3_ROOT_DIR: {PYLOC}",
            f"  LD_LIBRARY_PATH: {PYLOC}/lib"]
@@ -213,7 +220,7 @@ setup: |
 
   job("pr-title", 0, [
       set_up("pr-title", 1000481207, []),
-      ("Check PR title follows Conventional Commits", 1, [
+      ("Check PR title follows Conventional Commits", 0.31, [
           f'##[group]Run title="{TITLE}"',
           f'title="{TITLE}"',
           'echo "PR title: $title"',
@@ -228,69 +235,69 @@ setup: |
       COMPLETE,
   ])
 
-  job("web", 2, [
+  job("web", 1.9, [
       set_up("web", 1000481209, [
           ("actions/checkout@v4", "08eba0b27e820071cde6df949e0beb9ba4906955"),
           ("actions/setup-node@v4", "49933ea5288caeca8642d1e84afbd3f7d6820020"),
       ]),
       CHECKOUT,
-      ("Run actions/setup-node@v4", 2, [
+      ("Run actions/setup-node@v4", 0.33, [
           "##[group]Run actions/setup-node@v4", "with:", "  node-version: 20", "  always-auth: false",
           "  check-latest: false", "  token: ***", "##[endgroup]",
           "Found in cache @ /opt/hostedtoolcache/node/20.19.5/x64",
           "##[group]Environment details", "node: v20.19.5", "npm: 10.8.2", "yarn: 1.22.22", "##[endgroup]",
       ]),
-      ("Install dependencies", 13, [
+      ("Install dependencies", 0.29, [
           "##[group]Run npm install", "npm install", "shell: /usr/bin/bash -e {0}", "##[endgroup]",
           "npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.",
           "npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported",
           "npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported",
-          "", "added 187 packages, and audited 188 packages in 12s", "",
+          "", (11.62, "added 187 packages, and audited 188 packages in 12s"), "",
           "31 packages are looking for funding", "  run `npm fund` for details", "",
           "7 vulnerabilities (1 low, 2 moderate, 2 high, 2 critical)", "",
           "To address issues that do not require attention, run:", "  npm audit fix", "",
           "To address all issues (including breaking changes), run:", "  npm audit fix --force", "",
           "Run `npm audit` for details.",
       ]),
-      ("Type check", 5, [
+      ("Type check", 0.27, [
           "##[group]Run npm run typecheck", "npm run typecheck", "shell: /usr/bin/bash -e {0}", "##[endgroup]",
-          "", "> batchtrack-web@0.4.2 typecheck", "> tsc --noEmit", "",
+          "", "> batchtrack-web@0.4.2 typecheck", "> tsc --noEmit", (3.87, ""),
       ]),
-      ("Unit tests", 3, [
+      ("Unit tests", 0.26, [
           "##[group]Run npm test", "npm test", "shell: /usr/bin/bash -e {0}", "##[endgroup]",
           "", "> batchtrack-web@0.4.2 test", "> vitest run --passWithNoTests", "", "",
           f" RUN  v0.34.6 {WORK}/web", "",
           "include: **/*.{test,spec}.?(c|m)[jt]s?(x)",
           "exclude:  **/node_modules/**, **/dist/**, **/cypress/**, **/.{idea,git,cache,output,temp}/**, **/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*",
           "watch exclude:  **/node_modules/**, **/dist/**", "",
-          "No test files found, exiting with code 0",
+          (1.02, "No test files found, exiting with code 0"),
       ]),
       POST_CHECKOUT,
       COMPLETE,
   ])
 
-  job("python", 2, [
+  job("python", 2.4, [
       set_up("python", 1000481208, [
           ("actions/checkout@v4", "08eba0b27e820071cde6df949e0beb9ba4906955"),
           ("actions/setup-python@v5", "a26af69be951a213d495a4c3e4e4022e16d87065"),
           ("mikepenz/action-junit-report@master", "3585e9575db828022551b4231f165eb59a0e74e3"),
       ]),
       CHECKOUT,
-      ("Run actions/setup-python@v5", 2, [
+      ("Run actions/setup-python@v5", 0.34, [
           "##[group]Run actions/setup-python@v5", "with:", "  python-version: 3.12", "  check-latest: false",
           "  token: ***", "  update-environment: true", "  allow-prereleases: false", "  freethreaded: false",
-          "##[endgroup]", "##[group]Installed versions", "Successfully set up CPython (3.12.11)", "##[endgroup]",
+          "##[endgroup]", "##[group]Installed versions", (0.73, "Successfully set up CPython (3.12.11)"), "##[endgroup]",
       ]),
-      ("Install dependencies", 24, [
+      ("Install dependencies", 0.3, [
           "##[group]Run python -m pip install --upgrade pip",
           "python -m pip install --upgrade pip",
           "pip install -r requirements.txt",
           "shell: /usr/bin/bash -e {0}",
       ] + PYENV + [
           "##[endgroup]",
-          f"Requirement already satisfied: pip in {PYLOC}/lib/python3.12/site-packages (25.1.1)",
-          "WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError(\"HTTPSConnectionPool(host='pypi.org', port=443): Read timed out. (read timeout=15)\")': /simple/pip/",
-          "Collecting pip",
+          (1.214, f"Requirement already satisfied: pip in {PYLOC}/lib/python3.12/site-packages (25.1.1)"),
+          (15.087, "WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError(\"HTTPSConnectionPool(host='pypi.org', port=443): Read timed out. (read timeout=15)\")': /simple/pip/"),
+          (0.412, "Collecting pip"),
           "  Downloading pip-26.2.1-py3-none-any.whl.metadata (4.6 kB)",
           "Downloading pip-26.2.1-py3-none-any.whl (1.8 MB)",
           "   " + "━" * 40 + " 1.8/1.8 MB 61.3 MB/s  0:00:00",
@@ -299,8 +306,8 @@ setup: |
           "    Found existing installation: pip 25.1.1",
           "    Uninstalling pip-25.1.1:",
           "      Successfully uninstalled pip-25.1.1",
-          "Successfully installed pip-26.2.1",
-          "Collecting pytest==7.4.4 (from -r requirements.txt (line 3))",
+          (1.873, "Successfully installed pip-26.2.1"),
+          (2.306, "Collecting pytest==7.4.4 (from -r requirements.txt (line 3))"),
           "  Downloading pytest-7.4.4-py3-none-any.whl.metadata (7.9 kB)",
           "Collecting pytest-asyncio==0.24.0 (from -r requirements.txt (line 4))",
           "  Downloading pytest_asyncio-0.24.0-py3-none-any.whl.metadata (3.9 kB)",
@@ -310,8 +317,8 @@ setup: |
           "  Downloading packaging-26.3-py3-none-any.whl.metadata (3.5 kB)",
           "Collecting pluggy<2.0,>=0.12 (from pytest==7.4.4->-r requirements.txt (line 3))",
           "  Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)",
-          "INFO: pip is looking at multiple versions of pytest-asyncio to determine which version is compatible with other requirements. This could take a while.",
-          "ERROR: Cannot install -r requirements.txt (line 4) and pytest==7.4.4 because these package versions have conflicting dependencies.",
+          (0.388, "INFO: pip is looking at multiple versions of pytest-asyncio to determine which version is compatible with other requirements. This could take a while."),
+          (0.911, "ERROR: Cannot install -r requirements.txt (line 4) and pytest==7.4.4 because these package versions have conflicting dependencies."),
           "",
           "The conflict is caused by:",
           "    The user requested pytest==7.4.4",
@@ -325,9 +332,9 @@ setup: |
           "2. remove package versions to allow pip to attempt to solve the dependency conflict",
           "",
           "ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/#dealing-with-dependency-conflicts",
-          "##[error]Process completed with exit code 1.",
+          (0.042, "##[error]Process completed with exit code 1."),
       ]),
-      ("Publish test report", 2, [
+      ("Publish test report", 0.52, [
           "##[group]Run mikepenz/action-junit-report@master", "with:", "  report_paths: reports/junit.xml",
           "  check_name: pytest", "  token: ***", "  annotate_only: false", "  update_check: false",
           "  check_annotations: true", "  fail_on_failure: false", "  fail_on_parse_error: false",
@@ -384,11 +391,11 @@ rubric:
       `pip install -r requirements.txt` command) and gives pip's dependency
       conflict as the first real error, quoting `ERROR: Cannot install -r
       requirements.txt (line 4) and pytest==7.4.4 because these package versions
-      have conflicting dependencies.` (ci-logs/run-4521.log line 296) and/or the
+      have conflicting dependencies.` (ci-logs/run-4521.log line 299) and/or the
       lines under it (`pytest-asyncio 0.24.0 depends on pytest<9 and >=8.2`,
-      L298-300, or `ERROR: ResolutionImpossible`, L309), with a log line number
-      in the L296-L309 range or the line quoted verbatim. Naming only the
-      `##[error]Process completed with exit code 1.` marker (L310) does not meet
+      L301-303, or `ERROR: ResolutionImpossible`, L312), with a log line number
+      in the L299-L312 range or the line quoted verbatim. Naming only the
+      `##[error]Process completed with exit code 1.` marker (L313) does not meet
       this.
     - >-
       Explains the cause concretely: requirements.txt pins `pytest==7.4.4` (line
@@ -438,7 +445,7 @@ rubric:
   must_not:
     - >-
       Treats the pip `WARNING: Retrying ... ReadTimeoutError ... pypi.org` line
-      (L276) or pip's "no matching distributions available for your environment:
+      (L277) or pip's "no matching distributions available for your environment:
       pytest" note as the cause, classifies the failure as a registry/network
       outage or a flake, or recommends re-running the job as the fix.
     - >-
