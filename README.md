@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**25 agents** in 4 categories.
+**29 agents** in 5 categories.
 
 ### Code review & auditing
 
@@ -103,6 +103,7 @@ To pin every agent to one model (for example, on a budget), set
 | [`ci-failure-investigator`](.claude/agents/debugging/ci-failure-investigator.md) | Investigates a failed CI/CD run (GitHub Actions, Azure Pipelines, GitLab CI, Jenkins): pulls the logs, finds the failing step and first real error, compares with the last green run, and classifies the cause (code, flaky test, toolchain drift, registry outage, secrets, YAML, timeout). | sonnet | read-only |
 | [`debugger`](.claude/agents/debugging/debugger.md) | Root-causes runtime errors, exceptions, crashes, consistently failing tests and wrong output: reproduces the failure, tests hypotheses with cheap experiments, fixes the root cause minimally, adds a regression test and re-runs. | opus | read/write |
 | [`git-bisector`](.claude/agents/debugging/git-bisector.md) | Finds the commit that introduced a regression with `git bisect run`: takes a good ref (tag, commit, last release), a bad ref (default HEAD) and a failing test or command (builds one if none), and returns the first bad commit, the responsible diff hunk and the bisect log. | sonnet | read-only |
+| [`log-analyzer`](.claude/agents/debugging/log-analyzer.md) | Digests large logs, traces and exports (plain text, JSON lines, syslog, CI logs, Windows events): time range, first failure, normalized error clusters with counts, timeline around deploys/restarts, correlated trace ids, red herrings, likely root cause with line-cited evidence. | sonnet | read-only |
 | [`performance-analyst`](.claude/agents/debugging/performance-analyst.md) | Finds and quantifies performance bottlenecks (slow endpoints, jobs, tests, pages; memory growth; bundle size) by profiling and benchmarking, labelling anything unmeasured a hypothesis: N+1 queries, quadratic loops, sync I/O, sync-over-async, chatty calls, unbounded caches, re-renders. | sonnet | read-only |
 
 ### Architecture & refactoring
@@ -111,7 +112,15 @@ To pin every agent to one model (for example, on a budget), set
 | --- | --- | --- | --- |
 | [`code-simplifier`](.claude/agents/architecture/code-simplifier.md) | Behavior-preserving cleanup of recently changed or named code: guard clauses for deep nesting, splitting long functions, removing duplication, dead code and needless abstraction, clearer names, simpler conditionals; tests run before and after. | inherit | read/write |
 | [`dependency-upgrader`](.claude/agents/architecture/dependency-upgrader.md) | Upgrades a library, framework, runtime or SDK across major versions (React 17->18, Django 3->5, Spring Boot 2->3, Node 16->22, Python 3.8->3.12, Angular, EF Core) from official migration guides, with codemods, lockfile, CI and docs updated and tests green per step. | sonnet | read/write + web |
+| [`legacy-code-analyst`](.claude/agents/architecture/legacy-code-analyst.md) | Extracts business rules from legacy or undocumented code (stored procedures, VB6/VBA, WebForms, classic ASP, COBOL, Excel macros, batch/cron jobs, old Java/.NET): rules catalog with path:line, data flows, hidden dependencies, side effects, error behavior, dead paths, fact vs inference. | sonnet | read-only |
 | [`manufacturing-integration-engineer`](.claude/agents/architecture/manufacturing-integration-engineer.md) | Designs and reviews ISA-95 Level 2-4 integrations: MES<->ERP/SAP (B2MML), OPC UA, MQTT/Sparkplug B, historians (PI), ISA-88 batch, LIMS, label printing, serialization; checks buffering, idempotency, ordering, timestamps, reconciliation. | opus | read/write |
+
+### Documentation
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`docs-sync-editor`](.claude/agents/docs/docs-sync-editor.md) | Fixes documentation that drifted after a code change, with minimal line edits: README, docs/*.md and docstrings that still cite renamed or removed CLI flags, config keys, env vars, function signatures, endpoints, setup steps or examples. | sonnet | read/write |
+| [`technical-writer`](.claude/agents/docs/technical-writer.md) | Writes NEW documentation: README, getting-started, how-to guides, runbooks, API usage guides, onboarding and troubleshooting pages, architecture overviews, with every command, flag, env var and path verified against the repo. | sonnet | read/write |
 <!-- catalog:end -->
 
 ## What's deliberately not here
