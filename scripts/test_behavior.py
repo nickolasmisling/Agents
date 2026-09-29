@@ -109,7 +109,8 @@ def sh(cmd: str, cwd: Path, timeout: int = 300) -> subprocess.CompletedProcess:
     env = dict(os.environ, FIXTURES=str(FIXTURES), REPO_ROOT=str(ROOT),
                PYTHONDONTWRITEBYTECODE="1", GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.com",
                GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.com")
-    return subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
+    return subprocess.run(cmd, shell=True, executable="/bin/bash", cwd=cwd, capture_output=True,
+                          text=True, timeout=timeout, env=env)
 
 
 def fingerprint(root: Path) -> dict[str, str]:

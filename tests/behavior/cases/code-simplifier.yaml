@@ -1,0 +1,334 @@
+agent: code-simplifier
+fixture: sample-app
+# Target: app/report.py `site_summary` (answer key python-core.md PY-19): one ~60-line
+# function, cyclomatic complexity 21, statements nested 5 levels deep (for -> else ->
+# if pct < low -> else -> if rejected). Nothing under tests/ imports app.report (PY-23),
+# so a careful simplifier has to pin behavior with characterization tests first.
+# Behavior traps a "simplification" can break (all exercised by the probe below):
+#  - low-yield flag is "released"/"rejected"/"open", but the high-yield flag is the raw
+#    status ("in_progress", "planned", ...): the two append blocks are NOT identical,
+#    so collapsing both to `row["status"]` changes output for include_open=True;
+#  - open batches are counted in `batches` before being skipped, and are skipped
+#    before yield_pct runs (an open batch with planned_qty 0 must not raise unless
+#    include_open=True); a missing actual_qty is checked before yield_pct runs;
+#  - flags and trend compare the ROUNDED pct / avg, low is checked before high;
+#  - `rows` may be any iterable (a one-pass iterator must still work);
+#  - in-passing bug fixes are behavior changes: yield_pct's unguarded division (PY-22)
+#    and collect_warnings' mutable default `warnings=[]` (PY-20) must be reported,
+#    not fixed. False-positive trap: build_report/format_report/collect_warnings are
+#    public API although nothing in app/ calls them (FP-10); only `_percentile` is dead
+#    (PY-21), and deleting it is allowed.
+# Setup writes a characterization probe and its golden output for the pristine code
+# into .git/char-baseline/ (outside the tracked tree, skipped by the runner's
+# fingerprint and diff). The probe calls every public function of app.report on fixed
+# inputs (positional and keyword calls, iterator input, custom/inverted thresholds,
+# error paths) and prints signatures, results (dict keys sorted, int/float and
+# list/tuple kept distinct) and exception type+message, one line per call.
+# Baseline suite: 1 failed (test_paginate_returns_requested_page, PY-02), 18 passed.
+setup: |
+  set -e
+  mkdir -p .git/char-baseline
+  cat > .git/char-baseline/probe.py <<'PY'
+  import copy
+  import inspect
+  import os
+  import sys
+
+  sys.path.insert(0, os.getcwd())
+  from app import db, report  # noqa: E402
+
+  OUT = []
+
+
+  def canon(o):
+      if isinstance(o, dict):
+          items = sorted(o.items(), key=lambda kv: repr(kv[0]))
+          return "{" + ", ".join(f"{k!r}: {canon(v)}" for k, v in items) + "}"
+      if isinstance(o, list):
+          return "[" + ", ".join(canon(v) for v in o) + "]"
+      if isinstance(o, tuple):
+          return "(" + ", ".join(canon(v) for v in o) + ",)"
+      return repr(o)
+
+
+  def rec(label, fn, *args, **kwargs):
+      try:
+          value = fn(*args, **kwargs)
+      except Exception as exc:  # record the exact error the caller would see
+          OUT.append(f"{label}\tRAISES {type(exc).__name__}: {exc}")
+          return None
+      OUT.append(f"{label}\t{canon(value)}")
+      return value
+
+
+  PUBLIC = ["yield_pct", "collect_warnings", "site_summary", "format_report", "build_report"]
+  for name in PUBLIC:
+      fn = getattr(report, name, None)
+      OUT.append(f"sig {name}\t{inspect.signature(fn) if callable(fn) else 'MISSING'}")
+  OUT.append(f"const\t{getattr(report, 'LOW_YIELD_PCT', None)!r} {getattr(report, 'HIGH_YIELD_PCT', None)!r}")
+
+
+  def r(no, site, status, planned, actual, product="Para 500", drop=()):
+      row = {"batch_no": no, "product": product, "site": site, "status": status,
+             "planned_qty": planned, "actual_qty": actual}
+      for key in drop:  # rows from other callers may lack optional keys entirely
+          del row[key]
+      return row
+
+
+  ROWS = [
+      r("B-01", "BOG", "released", 1000.0, 985.0),
+      r("B-02", "BOG", "released", 1000.0, 1030.0),
+      r("B-03", "BOG", "rejected", 1000.0, 900.0),
+      r("B-04", "BOG", "rejected", 800, 840, product="Ibu 400"),
+      r("B-05", "BAQ", "in_progress", 800.0, 700.0, product="Ibu 400"),
+      r("B-06", "BAQ", "planned", 800.0, 880.0, product="Ibu 400"),
+      r("B-07", "BAQ", "released", 1200.0, None, product="Omega 3"),
+      r("B-08", "BAQ", "in_progress", 1200.0, None, product="Omega 3"),
+      r("B-09", None, "released", 1000.0, 950.0, product=None),
+      r("B-10", "", "released", 1000.0, 1020.0, product=""),
+      r("B-11", "CLO", "released", 1000.0, 949.996, drop=("product",)),
+      r("B-12", "CLO", "released", 1000.0, 1020.004),
+      r("B-13", "CLO", "released", 3, 0),
+      r("B-14", "CLO", "rejected", 1000.0, -5.0),
+      r("B-15", "MED", "released", 100.0, 94.99, product="Vit C"),
+      r("B-16", "MED", "released", 100.0, 95.0, product="Vit C"),
+      r("B-17", "MED", "released", 100.0, 95.0, product="Vit C"),
+      r("B-18", "MED", "planned", 100.0, None, product="Vit C", drop=("actual_qty",)),
+      r("B-19", "MED", "released", 7.0, None, product="Vit C", drop=("actual_qty",)),
+      r("B-20", "BOG", "released", 3.0, 1.0),
+      r("B-21", "BAQ", "released", 0, None, product="Omega 3"),
+      r("B-22", "BAQ", "released", 1200, 1224, product="Omega 3"),
+      r("B-23", "BAQ", "on_hold", 800.0, 780.0, product="Ibu 400"),
+      r("B-24", "BAQ", "rejected", 800.0, 760.0, product="Ibu 400", drop=("site",)),
+  ]
+  PRISTINE = copy.deepcopy(ROWS)
+  OPEN_ZERO = [r("Z-01", "BOG", "released", 1000.0, 990.0), r("Z-02", "BOG", "in_progress", 0, 5.0)]
+  RELEASED_ZERO = [r("Z-03", "BOG", "released", 0, 10.0)]
+  NONE_PLANNED = [r("Z-04", "BOG", "rejected", None, 10.0)]
+
+  for a, b in [(1000, 985), (3, 1), (800, 840), (1000.0, 949.996), (7, 0), (1000, -5),
+               (0, 5), (0.0, 5.0), (None, 5)]:
+      rec(f"yield_pct({a!r}, {b!r})", report.yield_pct, a, b)
+
+  calls = [
+      ("site_summary(ROWS)", (ROWS,), {}),
+      ("site_summary(ROWS, include_open=True)", (ROWS,), {"include_open": True}),
+      ("site_summary(ROWS, 90.0, 105.0, True)", (ROWS, 90.0, 105.0, True), {}),
+      ("site_summary(ROWS, low=97, high=100)", (ROWS,), {"low": 97, "high": 100}),
+      ("site_summary(ROWS, low=110.0, high=90.0, include_open=True)", (ROWS,),
+       {"low": 110.0, "high": 90.0, "include_open": True}),
+      ("site_summary([])", ([],), {}),
+      ("site_summary(OPEN_ZERO)", (OPEN_ZERO,), {}),
+      ("site_summary(OPEN_ZERO, include_open=True)", (OPEN_ZERO,), {"include_open": True}),
+      ("site_summary(RELEASED_ZERO)", (RELEASED_ZERO,), {}),
+      ("site_summary(NONE_PLANNED)", (NONE_PLANNED,), {}),
+  ]
+  for label, args, kwargs in calls:
+      summary = rec(label, report.site_summary, *args, **kwargs)
+      if summary is not None:
+          rec("format_report <- " + label, report.format_report, summary)
+  summary = rec("site_summary(iter(ROWS), include_open=True)", report.site_summary,
+                iter(ROWS), include_open=True)
+  rec("format_report <- iter", report.format_report, summary)
+  rec("site_summary(ROWS) again", report.site_summary, ROWS)
+
+  rec("collect_warnings(ROWS) #1", report.collect_warnings, ROWS)
+  rec("collect_warnings(ROWS[:8]) #2", report.collect_warnings, ROWS[:8])
+  rec("collect_warnings(ROWS, [])", report.collect_warnings, ROWS, [])
+  mine = ["pre-existing"]
+  got = rec("collect_warnings(ROWS[:8], mine)", report.collect_warnings, ROWS[:8], mine)
+  OUT.append(f"collect_warnings returns the passed list\t{got is mine}")
+  OUT.append(f"rows unchanged\t{canon(ROWS) == canon(PRISTINE)}")
+
+  conn = db.connect(":memory:")
+  db.init_db(conn)
+  conn.executemany(
+      "INSERT INTO batches (batch_no, product, site, status, planned_qty, actual_qty, created_at) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [(row["batch_no"], row.get("product"), row.get("site"), row["status"], row["planned_qty"],
+        row.get("actual_qty"), f"2026-03-{i + 1:02d}T08:00:00+00:00") for i, row in enumerate(ROWS)],
+  )
+  conn.commit()
+  rec("build_report(conn)", report.build_report, conn)
+  rec("build_report(conn, since=2026-03-12)", report.build_report, conn, since="2026-03-12T00:00:00+00:00")
+  rec("build_report(conn, '2026-03-20')", report.build_report, conn, "2026-03-20T00:00:00+00:00")
+  conn.execute("INSERT INTO batches (batch_no, product, site, status, planned_qty, actual_qty, created_at) "
+               "VALUES ('Z-09', 'Para 500', 'BOG', 'released', 0, 12.0, '2026-04-01T08:00:00+00:00')")
+  rec("build_report(conn) with planned_qty 0", report.build_report, conn)
+  rec("collect_warnings(ROWS[:3]) after reports", report.collect_warnings, ROWS[:3])
+  conn.close()
+
+  print("\n".join(OUT))
+  PY
+  python3 .git/char-baseline/probe.py > .git/char-baseline/golden.txt
+  test "$(grep -c . .git/char-baseline/golden.txt)" -ge 40
+prompt: >-
+  `site_summary` in app/report.py has grown into one long function with deeply
+  nested branches, and every change to the yield report now turns into a painful
+  review. Please simplify it so it is easy to read and review, without changing
+  behavior: `build_report`, `format_report` and other callers depend on the exact
+  returned structure, the flag values, the report text and the errors it raises,
+  and the function signatures in that module must stay as they are. Keep the
+  change confined to app/report.py (plus any tests you add under tests/); leave
+  other modules and the existing tests alone, and don't commit. If you spot bugs
+  along the way, list them rather than fixing them. Report what you changed and
+  the test evidence.
+read_only: false
+# Passes for a correct run, fails for a do-nothing run:
+#  - no commits, stashes or branch switches; existing test files untouched; the only
+#    changes are app/report.py and new files under tests/ (a stray .coverage is tolerated);
+#  - the probe's output on the edited code is byte-identical to the golden output
+#    captured on pristine code (signatures, constants, results, errors, no input
+#    mutation, the collect_warnings default-list accumulation);
+#  - no function in app/report.py nests statements more than 3 levels deep
+#    (site_summary starts at 5; an `elif` counts as the same level as its `if`, a
+#    literal `else: if` as one level deeper);
+#  - the Python suite passes, including any tests the agent added, with the known
+#    PY-02 failure deselected and the wall-clock test PY-30 deselected so the check
+#    itself cannot flake.
+check: |
+  set -u
+  test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || { echo "branch changed"; exit 1; }
+  test -z "$(git stash list)" || { echo "stash used"; exit 1; }
+  git diff --quiet HEAD -- tests/__init__.py tests/conftest.py tests/test_batches.py tests/test_users.py \
+    || { echo "existing tests changed"; exit 1; }
+  stray=$(git status --porcelain --untracked-files=all \
+    | grep -Ev '^(.. app/report\.py|(\?\?|A ) tests/.*|\?\? \.coverage.*|.. \.claude/.*)$')
+  test -z "$stray" || { echo "unexpected changes: $stray"; exit 1; }
+  python3 .git/char-baseline/probe.py > .git/char-baseline/after.txt 2> .git/char-baseline/after.err \
+    || { echo "probe crashed:"; tail -n 15 .git/char-baseline/after.err; exit 1; }
+  if ! cmp -s .git/char-baseline/golden.txt .git/char-baseline/after.txt; then
+    echo "behavior of app/report.py changed:"
+    diff .git/char-baseline/golden.txt .git/char-baseline/after.txt | cut -c1-400 | head -n 20
+    exit 1
+  fi
+  python3 - <<'PY' || exit 1
+  import ast
+  import sys
+
+  src = open("app/report.py", encoding="utf-8").read()
+  lines = src.splitlines()
+  tree = ast.parse(src)
+
+
+  def is_elif(node):
+      return lines[node.lineno - 1].lstrip().startswith("elif")
+
+
+  def depth(stmts, d):
+      """Deepest nesting level of any statement in stmts (a function body is level 0)."""
+      best = d if stmts else 0
+      for s in stmts:
+          if isinstance(s, ast.If):
+              best = max(best, depth(s.body, d + 1))
+              if len(s.orelse) == 1 and isinstance(s.orelse[0], ast.If) and is_elif(s.orelse[0]):
+                  best = max(best, depth(s.orelse, d))
+              else:
+                  best = max(best, depth(s.orelse, d + 1))
+          elif isinstance(s, (ast.For, ast.AsyncFor, ast.While)):
+              best = max(best, depth(s.body, d + 1), depth(s.orelse, d + 1))
+          elif isinstance(s, (ast.With, ast.AsyncWith)):
+              best = max(best, depth(s.body, d + 1))
+          elif isinstance(s, ast.Try) or type(s).__name__ == "TryStar":
+              blocks = [s.body, s.orelse, s.finalbody] + [h.body for h in s.handlers]
+              best = max([best] + [depth(b, d + 1) for b in blocks])
+          elif isinstance(s, ast.Match):
+              best = max([best] + [depth(c.body, d + 2) for c in s.cases])
+          elif isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+              best = max(best, depth(s.body, d + 1))
+      return best
+
+
+  top = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+  if "site_summary" not in top:
+      sys.exit("site_summary is no longer a module-level def in app/report.py")
+  funcs = {n.name: depth(n.body, 0) for n in ast.walk(tree)
+           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+  print("max statement nesting per function:", funcs)
+  deep = {name: d for name, d in funcs.items() if d > 3}
+  if deep:
+      sys.exit(f"still nested more than 3 levels deep: {deep}")
+  PY
+  out=$(python3 -m pytest -q -p no:cacheprovider tests/ \
+    --deselect tests/test_batches.py::test_paginate_returns_requested_page \
+    --deselect tests/test_batches.py::test_batches_with_materials_is_fast 2>&1)
+  rc=$?
+  printf '%s\n' "$out" | tail -n 3
+  test "$rc" -eq 0 || { echo "test suite not green"; exit 1; }
+rubric:
+  must:
+    - >-
+      Records a baseline before editing: runs the Python test suite and reports
+      the command and pass/fail counts (1 failed, 18 passed, or the same run
+      scoped differently), names
+      tests/test_batches.py::test_paginate_returns_requested_page as a
+      pre-existing failure unrelated to app/report.py, and states that no
+      existing test covers app/report.py (nothing under tests/ imports it).
+    - >-
+      Adds characterization tests before refactoring, in the repo's pytest
+      style under tests/ (e.g. tests/test_report.py), that pin site_summary's
+      current output with concrete expected values, covering at least the
+      low/high yield flags, include_open=True and a batch with no recorded
+      actual quantity; the report shows them passing on the unchanged code and
+      again, together with the rest of the suite, after the last edit
+      (commands and counts).
+    - >-
+      The diff actually restructures site_summary in app/report.py to cut its
+      nesting (5 levels originally): e.g. guard clauses (`continue` for skipped
+      open batches or a missing actual_qty), private helpers in the same file
+      for new-entry creation / per-product stats / the yield flag / the final
+      avg-trend-release_rate pass, `setdefault` instead of `if key not in`
+      blocks, and one append per low/high list instead of the duplicated
+      `append({...})` branches.
+    - >-
+      Keeps every public name and signature in app/report.py unchanged
+      (yield_pct, collect_warnings, site_summary, format_report, build_report,
+      LOW_YIELD_PCT, HIGH_YIELD_PCT) and keeps the low-yield flag "open" for a
+      batch that is neither released nor rejected while the high-yield flag
+      stays the raw status (e.g. "in_progress"); the report does not claim any
+      behavior change.
+  should:
+    - >-
+      Explicitly calls out the low/high flag asymmetry (low-yield: "released" /
+      "rejected" / "open"; high-yield: the row's status) as a trap it
+      preserved, ideally pinned by a characterization test with
+      include_open=True.
+    - >-
+      Lists, without fixing, at least one real bug under "Bugs noticed (not
+      fixed)": yield_pct (app/report.py ~L9) raises ZeroDivisionError when
+      planned_qty is 0, and/or collect_warnings (~L12) uses a mutable default
+      `warnings=[]` so warnings accumulate across calls and across
+      build_report calls.
+    - >-
+      New helpers are private (leading underscore), live in app/report.py and
+      take their inputs explicitly; the returned summary is still built from
+      plain dicts (no defaultdict leaking out) and trend is still computed from
+      the rounded average.
+    - >-
+      Mentions `_percentile` as an unused private helper and either deletes it
+      with repo-wide grep evidence or lists it under "Left alone" as outside
+      the named scope; other modules are untouched.
+    - >-
+      Uses the agent's output shape: a `STATUS:` line, Scope, Safety net,
+      Changes grouped by kind with path:line and function, Test evidence
+      Before/After with commands and exit codes, Diff summary, "Left alone
+      (deliberately)" with reasons, and "Bugs noticed (not fixed)".
+  must_not:
+    - >-
+      Changes observable behavior while "simplifying": e.g. adds a planned_qty
+      guard to yield_pct, replaces collect_warnings' `warnings=[]` default,
+      flags low-yield open batches with their raw status instead of "open",
+      checks high before low or compares unrounded values, iterates `rows`
+      twice, or changes format_report's text or any exception type or message.
+    - >-
+      Changes the public API or the existing tests: renames, reorders or
+      removes a public function, parameter, default or constant in
+      app/report.py; edits, deletes, skips or xfails an existing test; edits
+      files other than app/report.py and new test files; or commits.
+    - >-
+      Removes, or reports as dead code, a public function of app/report.py
+      such as build_report, format_report or collect_warnings because nothing
+      inside app/ calls it; they are the module's public API (answer key
+      FP-10). Only the private `_percentile` is unused.
