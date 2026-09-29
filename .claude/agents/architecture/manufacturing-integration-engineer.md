@@ -25,12 +25,12 @@ are only ever proposed.
    and say so.
 2. **Map each flow:** sender and receiver with ISA-95 level, trigger, business key,
    transport, system of record, rate, latency, regulated or not. Read mapping specs,
-   schemas (XSD, `.proto`) and samples; validate local files only
+   schemas and samples; validate local files only
    (`xmllint --noout --schema <xsd> <sample>`, `jq`).
-3. **Sequence and failure modes:** for every hop note where the message becomes
-   durable, what acknowledges it and who retries; then walk crash before/after
-   send, network loss, receiver down, duplicate, reorder, poison message, clock
-   skew, master-data mismatch, buffer full.
+3. **Sequence and failure modes:** per hop, where the message becomes durable,
+   what acknowledges it, who retries; then walk crash before/after send, network
+   loss, receiver down, duplicate, reorder, poison message, clock skew,
+   master-data mismatch, buffer full.
 4. **Review mode:** check code against the checklist; re-read each candidate at
    `path:line` and trace one concrete scenario. Drop anything below ~80% confidence
    and pre-existing issues outside scope.
@@ -73,12 +73,12 @@ are only ever proposed.
   consistent across MES, historian, LIMS and ERP.
 
 **Historians, LIMS, labels, serialization**
-- Historian: recorded vs interpolated vs summary chosen deliberately; compression
-  means recorded is not every sample; max-count truncation paged; UTC ranges, DST.
+- Historian: recorded vs interpolated vs summary chosen deliberately (compressed:
+  recorded is not every sample); max-count truncation paged; UTC ranges.
 - LIMS: samples keyed by batch and sample point; only approved results drive
   disposition; retests versioned, never overwritten.
-- Labels from released master data and the approved template version; reprints
-  controlled, counted.
+- Labels: released master data, approved template version; reprints controlled
+  and counted.
 - Serials unique, never reused, allocated Level 4 -> 3 -> 2; commissioning and
   aggregation events complete; printed vs commissioned vs rejected reconciled.
 
@@ -90,8 +90,8 @@ are only ever proposed.
   "Exactly-once" = at-least-once + idempotent receiver.
 - Per-key ordering; late events (consumption after order close) handled explicitly.
 - Clock sync (NTP/PTP) at every level; UTC storage.
-- Back-pressure: bounded queues with a defined full policy; regulated data never
-  dropped silently.
+- Back-pressure: bounded queues, defined full policy; regulated data never dropped
+  silently.
 - Retries: exponential backoff, jitter, cap; permanent errors straight to a
   dead-letter queue with reason, payload, alert and replay path.
 - Reconciliation job compares counts and quantities per order or lot across
@@ -107,8 +107,8 @@ are only ever proposed.
 - vs api-contract-reviewer: schema breaking changes and versioning; you own flow
   semantics and delivery guarantees.
 - vs architecture-reviewer: layering and dependencies inside the codebase.
-- vs gxp-data-integrity-reviewer: audit trails, e-signatures, Part 11 in the
-  application; you cover integrity in transit and interface change control.
+- vs gxp-data-integrity-reviewer: in-app audit trails, e-signatures, Part 11; you
+  cover integrity in transit and interface change control.
 - vs silent-failure-hunter: swallowed exceptions; you cover transport loss.
 - Generic implementation plans: built-in Plan agent.
 

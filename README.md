@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**32 agents** in 6 categories.
+**34 agents** in 7 categories.
 
 ### Code review & auditing
 
@@ -123,10 +123,17 @@ To pin every agent to one model (for example, on a budget), set
 | [`docs-sync-editor`](.claude/agents/docs/docs-sync-editor.md) | Fixes documentation that drifted after a code change, with minimal line edits: README, docs/*.md and docstrings that still cite renamed or removed CLI flags, config keys, env vars, function signatures, endpoints, setup steps or examples. | sonnet | read/write |
 | [`technical-writer`](.claude/agents/docs/technical-writer.md) | Writes NEW documentation: README, getting-started, how-to guides, runbooks, API usage guides, onboarding and troubleshooting pages, architecture overviews, with every command, flag, env var and path verified against the repo. | sonnet | read/write |
 
+### Data & databases
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`data-analyst`](.claude/agents/data/data-analyst.md) | Answers questions from data files (CSV, TSV, Excel, JSON, Parquet) and databases via read-only SQL: profiles first (rows, types, nulls, duplicates, ranges, dates), flags data quality issues, then computes the answer with reproducible pandas/DuckDB/SQL code, group comparisons and statistical caveats. | sonnet | read/write |
+
 ### Git & pull-request workflow
 
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
+| [`changelog-writer`](.claude/agents/git/changelog-writer.md) | Updates CHANGELOG.md's Unreleased section from commits and PRs since the last tag: end-user entries under Added/Changed/Deprecated/Removed/Fixed/Security, refactor/test/chore/CI noise dropped, BREAKING changes flagged with migration notes, PR numbers/SHAs cited. | haiku | read/write |
 | [`git-historian`](.claude/agents/git/git-historian.md) | Answers why code is the way it is from version control: when and why a line, function or file changed, which commit, PR or ticket (INC-, JIRA-, #123) introduced it, and who knows it, via git log -L, pickaxe, blame past renames and PR lookups. | sonnet | read-only |
 | [`pr-description-writer`](.claude/agents/git/pr-description-writer.md) | Drafts a pull request (or merge request) title and description from the branch diff (base...HEAD), mirroring the repo's PR template if present: summary, grouped changes, risk and rollout, testing evidence, linked issues. | haiku | read-only |
 <!-- catalog:end -->

@@ -1,0 +1,173 @@
+agent: debugger
+fixture: sample-app
+# No setup: the defect is in the committed fixture (answer key python-core.md PY-02).
+# `paginate` in app/batches.py computes `start = (page - 1) * page_size + 1` (L72) and
+# `end = page * page_size` (L73), so every page loses its first item and returns
+# page_size - 1 items: paginate(range(1, 11), 1, 3) == [2, 3]. Baseline:
+# `python -m pytest -q` gives 1 failed, 18 passed; the only failure is
+# tests/test_batches.py::test_paginate_returns_requested_page (tests/test_batches.py:50,
+# `assert [2, 3] == [1, 2, 3]`). The test's expectations are correct (1-based pages;
+# app/api.py:49 calls paginate with page defaulting to 1). Reference fix:
+# `start = (page - 1) * page_size; end = start + page_size`. The `page < 1` guard
+# (L70-71) is correct and test_paginate_rejects_zero_page depends on it.
+# Nearby seeded defects that are out of scope for this task: PY-01 (f-string SQL in
+# list_batches) and PY-30 (wall-clock test_batches_with_materials_is_fast).
+prompt: >-
+  tests/test_batches.py::test_paginate_returns_requested_page is failing on main,
+  both locally and in CI, and it blocks the batchtrack release. Repro from the
+  repo root: `python -m pytest -q -p no:cacheprovider
+  tests/test_batches.py::test_paginate_returns_requested_page`. Please find the
+  root cause and fix it properly, add a regression test if you think the
+  existing coverage is not enough, and confirm the rest of the Python suite under
+  tests/ still passes. Keep the change scoped to this failure: if you notice
+  unrelated problems, list them in your report instead of fixing them. Leave
+  web/ and services/ alone, and don't commit anything.
+read_only: false
+# Passes for a correct run, fails for a do-nothing run:
+#  - no commits, stashes or branch switches by the agent;
+#  - conftest, test_users.py, pyproject.toml and app/api.py untouched, and the only
+#    changed/untracked paths are app/batches.py and test files under tests/;
+#  - no leftover DEBUG-TMP markers or print() calls in app/batches.py;
+#  - paginate is correct in general (not special-cased to the test's inputs) and the
+#    page/page_size validation still raises ValueError;
+#  - every pre-existing test function in tests/test_batches.py is byte-for-byte the same
+#    AST as at HEAD (no edited expectations, no skip/xfail decorators, none deleted);
+#  - the target test passes, and the whole suite passes with no skips/xfails
+#    (the wall-clock test PY-30 is deselected so the check itself cannot flake).
+check: |
+  set -u
+  test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || { echo "branch changed"; exit 1; }
+  test -z "$(git stash list)" || { echo "stash used"; exit 1; }
+  git diff --quiet HEAD -- tests/conftest.py tests/test_users.py tests/__init__.py pyproject.toml app/api.py \
+    || { echo "files outside the fix changed"; exit 1; }
+  stray=$(git status --porcelain --untracked-files=all | grep -Ev '^.. (app/batches\.py|tests/[A-Za-z0-9_/]*\.py|\.claude/.*)$')
+  test -z "$stray" || { echo "unexpected changes: $stray"; exit 1; }
+  if git grep -n --untracked -I DEBUG-TMP -- . ':(exclude).claude'; then echo "instrumentation left"; exit 1; fi
+  if grep -nE '^\s*(print\(|breakpoint\(|import pdb)' app/batches.py; then echo "debug output left in app/batches.py"; exit 1; fi
+  python3 - <<'PY' || exit 1
+  import ast
+  import subprocess
+  import sys
+
+  from app import batches
+
+  p = batches.paginate
+  items = list(range(1, 11))
+  letters = list("abcdefg")
+  cases = [
+      ((items, 1, 3), [1, 2, 3]),
+      ((items, 2, 3), [4, 5, 6]),
+      ((items, 3, 3), [7, 8, 9]),
+      ((items, 4, 3), [10]),
+      ((items, 5, 3), []),
+      ((items, 1, 10), items),
+      ((items, 1, 25), items),
+      ((items, 2, 10), []),
+      ((items, 2, 4), [5, 6, 7, 8]),
+      ((letters, 2, 2), ["c", "d"]),
+      ((letters, 4, 2), ["g"]),
+      ((letters, 1, 1), ["a"]),
+      (([], 1, 5), []),
+  ]
+  for args, want in cases:
+      got = p(*args)
+      if list(got) != want:
+          sys.exit(f"paginate(<{args[0]!r}>, {args[1]}, {args[2]}) -> {got!r}, want {want!r}")
+  for bad in [(items, 0, 3), (items, -1, 3), (items, 1, 0)]:
+      try:
+          p(*bad)
+      except ValueError:
+          continue
+      sys.exit(f"paginate(items, {bad[1]}, {bad[2]}) no longer raises ValueError")
+
+  old = subprocess.run(["git", "show", "HEAD:tests/test_batches.py"],
+                       capture_output=True, text=True, check=True).stdout
+  with open("tests/test_batches.py", encoding="utf-8") as fh:
+      new = fh.read()
+
+
+  def funcs(src):
+      return {n.name: ast.dump(n) for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)}
+
+
+  before, after = funcs(old), funcs(new)
+  changed = sorted(k for k in before if after.get(k) != before[k])
+  if changed:
+      sys.exit(f"pre-existing tests changed or removed: {changed}")
+  PY
+  python3 -m pytest -q -p no:cacheprovider tests/test_batches.py::test_paginate_returns_requested_page >/dev/null 2>&1 \
+    || { echo "target test does not pass"; exit 1; }
+  last=$(python3 -m pytest -q -p no:cacheprovider tests/ \
+    --deselect tests/test_batches.py::test_batches_with_materials_is_fast 2>&1 | tail -n 1)
+  echo "$last"
+  n=$(printf '%s\n' "$last" | sed -nE 's/^([0-9]+) passed, 1 deselected in .*/\1/p')
+  test -n "$n" && test "$n" -ge 18
+rubric:
+  must:
+    - >-
+      Reports the reproduced symptom before any fix: the reproduction command it
+      ran with exit code 1 and the failing assertion showing that paginate
+      returned `[2, 3]` where `[1, 2, 3]` was expected (the first assert at
+      tests/test_batches.py:50, or an equivalent observed wrong value).
+    - >-
+      Names the root cause as the slice bounds in `paginate` in
+      app/batches.py, citing the line (L72, or L72-74): `start = (page - 1) *
+      page_size + 1` is off by one for 1-based pages, so every page drops its
+      first item and returns page_size - 1 items. Pointing only at the test,
+      at the `return items[start:end]` line without explaining the `+ 1`, or at
+      the API caller does not meet this.
+    - >-
+      Fixes the production code, not the test: the diff changes `paginate` in
+      app/batches.py so that start is `(page - 1) * page_size` and the slice
+      is `page_size` long (e.g. `end = start + page_size` or `page *
+      page_size`), and leaves the expected values in
+      test_paginate_returns_requested_page as they were.
+    - >-
+      Shows verification after the last edit: re-runs the target test with
+      the command and exit 0, and runs the rest of tests/test_batches.py or the
+      whole tests/ suite with its pass/fail counts (all passing, or any
+      remaining failure explicitly attributed to something other than the fix).
+  should:
+    - >-
+      Uses the debugger's output shape: a `STATUS:` line (DONE), then Symptom,
+      Root cause, Evidence, Fix, Regression test, Verification, Pre-existing
+      failures and Prevention.
+    - >-
+      Evidence includes a cheap discriminating experiment against the real
+      function (e.g. calling `paginate(list(range(1, 11)), 1, 3)` in a snippet
+      or printing `start`/`end`) and rules out the alternative that the
+      test's expectation is wrong, e.g. by the docstring ("1-based page") or
+      the caller in app/api.py (~L49, `page` defaults to 1).
+    - >-
+      Notes the production impact beyond the test: `GET /batches` in
+      app/api.py calls `paginate`, so API clients were silently missing one
+      batch per page (the first row of each page).
+    - >-
+      Either adds a regression test in the repo's pytest style (e.g. in
+      tests/test_batches.py) for a case the existing test does not pin down,
+      such as a full page having exactly page_size items, page_size larger
+      than the list, or a page past the end returning `[]`, and shows it
+      failing before and passing after the fix; or states in "Regression
+      test:" that the existing failing test already serves as one.
+    - >-
+      Keeps the change minimal and in scope: diff limited to `paginate` (plus
+      any regression test); unrelated issues it noticed (e.g. the f-string
+      `product`/`site` SQL in `list_batches`, the wall-clock
+      `test_batches_with_materials_is_fast`) are listed as out-of-scope
+      observations rather than fixed.
+  must_not:
+    - >-
+      Changes, deletes, skips or xfails test_paginate_returns_requested_page
+      or any other existing test (including editing its expected lists or
+      calling paginate with different arguments) to make the suite pass.
+    - >-
+      "Fixes" by special-casing or masking instead of correcting the slice:
+      branching on the test's inputs (e.g. `page_size == 3`, the last page),
+      wrapping the call in try/except, compensating in the caller app/api.py
+      (e.g. passing `page - 1` or `page_size + 1`), or switching `paginate`
+      to 0-based pages.
+    - >-
+      Reports the `page < 1 or page_size < 1` validation in `paginate`
+      (app/batches.py L70-71) as part of the bug, or removes or loosens it; it
+      is correct and test_paginate_rejects_zero_page depends on it.
