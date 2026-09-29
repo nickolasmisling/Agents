@@ -1,0 +1,170 @@
+# Routing cases: realistic requests and the agent(s) that should receive them.
+# `expect`: any listed agent counts as a pass. `forbid`: picking one of these fails.
+# Phrase prompts the way people actually ask; avoid copying description keywords
+# so the test measures understanding, not string matching.
+
+# --- review -----------------------------------------------------------------
+- prompt: "I just finished the pagination changes in app/batches.py. Can you look over my diff before I commit?"
+  expect: [code-reviewer]
+- prompt: "Before I push: I changed how the login endpoint checks passwords and added a password reset token. Anything exploitable?"
+  expect: [security-reviewer]
+  forbid: [code-reviewer]
+- prompt: "Here's the ticket: 'Export must include site, respect the date filter, and exclude voided batches.' I implemented it on this branch — did I actually cover everything the ticket asks for?"
+  expect: [spec-compliance-reviewer]
+- prompt: "Our LIMS client keeps returning None and nobody notices when the call fails. Go through the error handling and find places where exceptions get eaten."
+  expect: [silent-failure-hunter]
+- prompt: "The cache warmer uses a ThreadPoolExecutor and a module-level dict. Could two threads step on each other here?"
+  expect: [concurrency-reviewer]
+- prompt: "We're adding a new 'notifications' package that the domain layer imports directly. Does this fit our layering or are we creating a mess?"
+  expect: [architecture-reviewer]
+- prompt: "I renamed batchNo to batch_no in the JSON responses and changed a few status codes. Will this break existing API consumers?"
+  expect: [api-contract-reviewer]
+- prompt: "Can screen reader and keyboard-only users actually use the BatchTable component?"
+  expect: [accessibility-reviewer]
+- prompt: "Which of our npm and pip packages have known vulnerabilities or are abandoned?"
+  expect: [dependency-auditor]
+  forbid: [dependency-upgrader]
+- prompt: "Another reviewer claims there's a SQL injection in get_batches_by_product at app/batches.py:22. Independently confirm or refute that specific claim."
+  expect: [finding-verifier, security-reviewer]
+
+# --- testing ----------------------------------------------------------------
+- prompt: "Run the test suite and tell me what's failing."
+  expect: [test-runner]
+  forbid: [debugger]
+- prompt: "report.py has zero tests. Write a proper set of unit tests for it."
+  expect: [test-writer]
+- prompt: "Which parts of the batches module are risky and not covered by any test?"
+  expect: [test-gap-analyzer]
+  forbid: [test-writer]
+- prompt: "test_list_recent_batches passes on my machine but fails maybe one in five runs in CI. Figure out why."
+  expect: [flaky-test-investigator]
+  forbid: [debugger, test-runner]
+- prompt: "Add a Playwright test that logs in, opens a batch, and checks the detail page renders."
+  expect: [e2e-test-writer]
+- prompt: "I think I'm done with the CSV export fix. Before I tell the team, independently confirm it really works end to end."
+  expect: [change-verifier]
+- prompt: "We're about to tag 1.5.0 and deploy Friday. Are we actually ready?"
+  expect: [release-readiness-gate]
+
+# --- debugging --------------------------------------------------------------
+- prompt: "Calling compute_yield with a batch that has planned_qty 0 throws ZeroDivisionError in production. Find the root cause and fix it."
+  expect: [debugger]
+- prompt: "tsc is spitting out 40 type errors after the merge and the build is red. Get it compiling again."
+  expect: [build-fixer]
+  forbid: [debugger]
+- prompt: "Here's logs/app.log from the incident last night — about 400 lines. What happened and when did it start?"
+  expect: [log-analyzer]
+- prompt: "The GitHub Actions run on my PR went red on the test job. Figure out why from the run logs."
+  expect: [ci-failure-investigator]
+- prompt: "Yield numbers were right in v1.3.0 and they're wrong now. Find which commit broke it."
+  expect: [git-bisector]
+  forbid: [git-historian]
+- prompt: "The batch list endpoint takes 4 seconds with 10k batches. Where's the time going?"
+  expect: [performance-analyst]
+
+# --- architecture -----------------------------------------------------------
+- prompt: "The feature works now but summarize_yields in report.py is a nested mess. Clean it up without changing what it does."
+  expect: [code-simplifier]
+- prompt: "Upgrade the web app from React 17 to React 18 and fix whatever breaks."
+  expect: [dependency-upgrader]
+- prompt: "We have an old ASP.NET MVC 5 app on .NET Framework 4.7.2 with WCF services. Help us move it to .NET 8."
+  expect: [dotnet-modernizer]
+  forbid: [dependency-upgrader]
+- prompt: "Nobody understands the 900-line stored procedure that calculates batch release eligibility. Pull out the business rules it implements."
+  expect: [legacy-code-analyst]
+- prompt: "We need to send completed batch records from our MES to SAP and read tank temperatures from an OPC UA server. How should the interface work so we don't lose or duplicate messages?"
+  expect: [manufacturing-integration-engineer]
+
+# --- docs -------------------------------------------------------------------
+- prompt: "Write a runbook for on-call engineers explaining how to restart the batchtrack API and recover from a locked database."
+  expect: [technical-writer]
+- prompt: "I changed the --site CLI flag to --sites and renamed BATCHTRACK_DB to BATCHTRACK_DB_PATH. Update any docs that still mention the old names."
+  expect: [docs-sync-editor]
+  forbid: [technical-writer]
+- prompt: "We decided to use SQLite WAL mode instead of moving to Postgres for now. Write that decision up properly for the record."
+  expect: [adr-writer]
+- prompt: "Draw a sequence diagram of what happens when someone signs a batch record."
+  expect: [diagram-generator]
+
+# --- git --------------------------------------------------------------------
+- prompt: "My merge of feature/site-filter into main has conflicts in app/filters.py. Sort it out so both changes survive."
+  expect: [merge-conflict-resolver]
+- prompt: "Why does lims_client dedupe rows by lot number? It looks like a hack — who added it and why?"
+  expect: [git-historian]
+  forbid: [git-bisector]
+- prompt: "Write the PR description for my feature/export-csv branch."
+  expect: [pr-description-writer]
+  forbid: [changelog-writer]
+- prompt: "Update CHANGELOG.md with everything user-facing since the last release tag."
+  expect: [changelog-writer]
+
+# --- data -------------------------------------------------------------------
+- prompt: "Take a look at data/batches.csv — is any site underperforming on yield, and is the data even clean?"
+  expect: [data-analyst]
+- prompt: "This query against the batches table does a full scan and takes 30s on SQL Server: SELECT * FROM batches WHERE YEAR(created_at) = 2025 AND product LIKE '%amox%'. Speed it up."
+  expect: [sql-query-tuner]
+- prompt: "Review db/migrations/002_add_site_and_cleanup.sql before we run it on the production Postgres database."
+  expect: [migration-reviewer]
+- prompt: "Design the tables for a new deviation-management module: deviations, CAPAs, approvals, and full history of every change."
+  expect: [database-architect]
+
+# --- devops -----------------------------------------------------------------
+- prompt: "Set up a GitHub Actions workflow that runs pytest on 3.11 and 3.12 and builds the Docker image on main."
+  expect: [ci-pipeline-engineer]
+  forbid: [ci-failure-investigator]
+- prompt: "Look over infra/main.tf and the k8s manifests for anything dangerous before we apply."
+  expect: [iac-reviewer]
+- prompt: "Our Dockerfile builds a 1.2GB image that runs as root. Rewrite it properly."
+  expect: [container-engineer]
+  forbid: [iac-reviewer]
+- prompt: "Add OpenTelemetry tracing and request-duration metrics to the API so we can see slow endpoints in Grafana."
+  expect: [observability-engineer]
+- prompt: "Fix up scripts/Cleanup-Logs.ps1 — it deletes things with no confirmation and uses Invoke-Expression."
+  expect: [powershell-scripter]
+- prompt: "scripts/deploy.sh scares me. Harden it."
+  expect: [bash-scripter]
+
+# --- ai ---------------------------------------------------------------------
+- prompt: "Create a Claude Code subagent that reviews Terraform plans for cost problems."
+  expect: [subagent-author]
+- prompt: "Audit the agents in .claude/agents — are any overlapping or badly configured?"
+  expect: [subagent-auditor]
+- prompt: "Our CLAUDE.md is two years stale and lists commands that don't exist anymore. Fix it."
+  expect: [claude-md-curator]
+- prompt: "The system prompt we send to classify deviation reports gets the severity wrong half the time. Improve the prompt."
+  expect: [prompt-engineer]
+- prompt: "Build an evaluation set and grader so we can measure the deviation classifier before and after prompt changes."
+  expect: [llm-eval-designer]
+- prompt: "Review our code that calls the Anthropic Messages API — are we handling tool use, caching and retries correctly?"
+  expect: [claude-api-reviewer]
+- prompt: "Build an MCP server that exposes read-only queries against our batch database to Claude."
+  expect: [mcp-server-builder]
+
+# --- compliance -------------------------------------------------------------
+- prompt: "The electronic signature module for batch release changed in this branch. Check it against Part 11 and data integrity expectations."
+  expect: [gxp-data-integrity-reviewer]
+- prompt: "QA needs a traceability matrix and OQ test protocol for the batchtrack signature feature."
+  expect: [csv-validation-author]
+- prompt: "We're changing how yield is calculated in a validated system. Draft the change control impact assessment for QA."
+  expect: [change-control-impact-assessor]
+
+# --- research ---------------------------------------------------------------
+- prompt: "How do I configure retry policies for HttpClient in .NET 8 using the current recommended approach? Cite the docs."
+  expect: [docs-researcher]
+- prompt: "Should we use Polars, pandas, or DuckDB for the nightly yield reports? We run on Windows servers without internet."
+  expect: [library-evaluator]
+- prompt: "Walk me through exactly what happens, file by file, when the API releases a batch."
+  expect: [feature-tracer]
+
+# --- product ----------------------------------------------------------------
+- prompt: "Plant manager emailed: 'we need a way to put batches on hold and it should be auditable'. Turn that into real requirements we can build and test."
+  expect: [requirements-analyst]
+- prompt: "Our Colombian sites need the web UI in Spanish, with local date and number formats."
+  expect: [i18n-engineer]
+
+# --- near-misses that should NOT go to a library specialist ------------------
+- prompt: "Find the file where the SQLite schema is created."
+  expect: [Explore, NONE]
+- prompt: "Does Claude Code support hooks in subagent frontmatter?"
+  expect: [claude-code-guide]
+  forbid: [subagent-author, subagent-auditor]

@@ -42,6 +42,8 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 CASES = ROOT / "tests" / "routing" / "cases.yaml"
 FIXTURE = ROOT / "tests" / "fixtures" / "sample-app"
+# Agents that ship with Claude Code; cases may expect or forbid them.
+BUILTINS = {"Explore", "Plan", "general-purpose", "claude-code-guide", "statusline-setup", "claude"}
 
 SELECT_PROMPT = """You are being evaluated on subagent routing. Do NOT perform the task and do NOT call any tools.
 Read the user request below and decide which ONE subagent type from your Agent tool's list you would delegate it to.
@@ -116,7 +118,7 @@ def main() -> int:
         sys.exit("the `claude` CLI must be on PATH")
     cases = yaml.safe_load(CASES.read_text(encoding="utf-8"))
     known = agent_names()
-    unknown = {n for c in cases for n in c["expect"] + c.get("forbid", [])} - known - {"NONE"}
+    unknown = {n for c in cases for n in c["expect"] + c.get("forbid", [])} - known - BUILTINS - {"NONE"}
     if unknown:
         sys.exit(f"cases reference unknown agents: {sorted(unknown)}")
     if args.only:
