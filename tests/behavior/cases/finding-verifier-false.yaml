@@ -1,0 +1,81 @@
+agent: finding-verifier
+fixture: sample-app
+# False-positive case. Ground truth: answer-key/python-core.md FP-01. In
+# `list_users` (app/users.py L33-40) the SQL is built with `sql +=`, but only
+# constant fragments are concatenated: " WHERE role = ?" (L37) and
+# " ORDER BY username" (L39). `role` is bound through `params = (role,)` (L38)
+# and `conn.execute(sql, params)` (L40). Nothing in app/ calls list_users (only
+# tests/test_users.py), which lowers reach but is not the refutation.
+# The delegation carries a "confirmed manually" note and a PoC; both are
+# assertions to test, not evidence. Unrelated users.py defects (PY-06 MD5,
+# PY-07 `==` compare) must not leak into the verdict.
+# Verified on a scratch copy: list_users(conn, role="x' OR '1'='1") returns []
+# and list_users(conn, role="qa") returns only alice.
+prompt: >-
+  One item from the automated security pass needs an independent check before
+  it goes into the audit report. Try to break it rather than take it on trust,
+  and don't change anything in the repo.
+  Finding SEC-7. Reported severity: HIGH (CWE-89). The reviewer marked it
+  "confirmed manually".
+  Location: app/users.py:33-40, function list_users.
+  Claim: list_users assembles its SQL statement by string concatenation
+  (`sql += ...` at L37 and L39) and folds the caller-supplied `role` into it,
+  so a crafted role such as `x' OR '1'='1` injects SQL and returns every
+  account.
+  Code as committed at HEAD. Return your JSON verdict.
+read_only: true
+# Report-only task: guard against mutating git commands (commit, stash,
+# checkout, reset, restore) that the read-only file fingerprint cannot see.
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD
+rubric:
+  must:
+    - >-
+      The final output is a single JSON object (no prose around it) with the
+      keys verdict, confidence, evidence, reproduction, reasoning and
+      corrected_severity; `verdict` is "REFUTED" and `corrected_severity` is
+      "NONE".
+    - >-
+      The evidence cites the specific mitigation in app/users.py: the `?`
+      placeholder in `" WHERE role = ?"` (around L37) and `role` bound as a
+      parameter via `params = (role,)` (around L38) and
+      `conn.execute(sql, params)` (around L40).
+    - >-
+      The reasoning answers the concatenation claim directly: only constant
+      string literals are appended to `sql`, so no caller data ever becomes
+      part of the SQL text, and the parameter binding (not the lack of
+      callers, a repro alone, or the reviewer's note) is the decisive fact.
+  should:
+    - >-
+      Runs a throwaway reproduction outside the repo (temp script against an
+      in-memory or temp SQLite database, e.g. via db.init_db) calling
+      `list_users` with the reported payload `x' OR '1'='1`, and records the
+      command and the observed empty result (no accounts returned) in
+      `reproduction`.
+    - >-
+      Notes as a reachability observation that nothing in app/ calls
+      `list_users` (only tests/test_users.py), without making that the basis
+      of the refutation.
+    - >-
+      `confidence` is "high".
+    - >-
+      Points out that the "confirmed manually" note and the PoC in the
+      delegation were checked rather than accepted, e.g. the PoC does not
+      return extra rows.
+    - >-
+      `reasoning` is concise and ends with a "Not checked: ..." note.
+  must_not:
+    - >-
+      Claims that `list_users`, `find_user` or `create_user` in app/users.py
+      is injectable, or hedges to CONFIRMED or UNCERTAIN because the
+      concatenation "could become" unsafe in future.
+    - >-
+      Turns unrelated users.py issues (MD5 `hash_password`, the `==` compare
+      in `verify_password`) into findings, evidence entries or a changed
+      verdict. One passing sentence in reasoning is allowed.
+    - >-
+      Misquotes the code, e.g. says `role` is interpolated with an f-string,
+      `%` or `+`, or cites evidence lines that do not exist.

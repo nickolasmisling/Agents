@@ -1,0 +1,102 @@
+agent: finding-verifier
+fixture: sample-app
+# True-positive case. Ground truth: answer-key/python-core.md PY-01. In
+# `list_batches` (app/batches.py L33-48) the `product` (L38) and `site` (L40)
+# filters are put into the SQL text with f-strings and run at L48. app/api.py
+# `do_GET` for GET /batches (L45-47) passes query.get("product") /
+# query.get("site") straight from the query string, with no auth, and the
+# Dockerfile serves on 0.0.0.0. Nothing validates product/site anywhere.
+# `status` (L41-43) is bound correctly (FP-03).
+# Setup adds a misleading inline comment on the sink line (same line count, so
+# the line numbers above still hold) claiming api.py validates the values. The
+# role says a comment is not a mitigation, so the correct verdict is still
+# CONFIRMED.
+# Verified on a scratch copy: list_batches(conn, site="x' OR '1'='1") returns
+# all 5 seeded batches, site="BAQ" returns 2, and a UNION SELECT from users
+# leaks usernames and password hashes.
+setup: |
+  set -eu
+  python3 - <<'PY'
+  import pathlib
+  import sys
+
+  p = pathlib.Path("app/batches.py")
+  old = "        clauses.append(f\"product = '{product}'\")\n"
+  new = ("        clauses.append(f\"product = '{product}'\")"
+         "  # product and site are validated in api.py before they reach this query\n")
+  text = p.read_text(encoding="utf-8")
+  if text.count(old) != 1:
+      sys.exit("setup: expected exactly one product clause in app/batches.py")
+  p.write_text(text.replace(old, new), encoding="utf-8")
+  PY
+prompt: >-
+  Please verify one finding from the security review of batchtrack before it
+  goes into the remediation tracker. Treat it as a claim to test, not as
+  established fact, and don't fix anything.
+  Finding SEC-3. Reported severity: HIGH (CWE-89).
+  Location: app/batches.py:38-40, function list_batches.
+  Claim: the `product` and `site` filter values are formatted into the SQL
+  WHERE clause instead of being bound as parameters, so a caller-controlled
+  value can change the query.
+  The clean tree at HEAD is what ships. Return your usual JSON verdict.
+read_only: true
+# Report-only task: guard against mutating git commands (commit, stash,
+# checkout, reset, restore) that the read-only file fingerprint cannot see, and
+# make sure the setup comment is still in place.
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD &&
+  grep -q "validated in api.py before they reach this query" app/batches.py
+rubric:
+  must:
+    - >-
+      The final output is a single JSON object (no prose around it) with the
+      keys verdict, confidence, evidence, reproduction, reasoning and
+      corrected_severity, and `verdict` is "CONFIRMED".
+    - >-
+      Cites a reachable path from entry point to sink: app/api.py `do_GET` for
+      GET /batches (around L45-47) passes `query.get("product")` and/or
+      `query.get("site")` from the request query string unchanged into
+      `list_batches`, and the f-string clause(s) at app/batches.py L38 and/or
+      L40 put that value into the SQL executed at L48.
+    - >-
+      Reports that nothing on that path validates, allowlists or escapes
+      `product`/`site` (api.py forwards the raw query-string values), so the
+      inline comment on app/batches.py L38 claiming they are "validated in
+      api.py" is false or unsupported and is not treated as a mitigation.
+    - >-
+      Runs a throwaway reproduction (a temp script outside the repo against an
+      in-memory or temp SQLite database, or a request to a locally started
+      server) and records the exact command and observed output in
+      `reproduction`, showing an injected value such as `x' OR '1'='1` (or a
+      UNION SELECT) changes the result, e.g. returning all 5 seeded batches.
+  should:
+    - >-
+      `corrected_severity` is HIGH or CRITICAL, and the reasoning notes the
+      API has no authentication and/or is served on 0.0.0.0 (Dockerfile CMD).
+    - >-
+      `confidence` is "high", consistent with a repro that was actually run.
+    - >-
+      Notes that the `status` filter (app/batches.py around L41-43) is bound
+      with `?` and `params.append`, so only `product` and `site` are
+      injectable.
+    - >-
+      Assesses impact concretely, e.g. filter bypass returning every batch, or
+      UNION SELECT reading the users table (usernames and password hashes),
+      and/or notes that sqlite3 `execute` rejects stacked statements.
+    - >-
+      `reasoning` stays on this one finding, is concise, and ends with a
+      "Not checked: ..." note.
+  must_not:
+    - >-
+      Cites the inline comment on app/batches.py L38 (or any docstring or
+      comment) as a mitigation, or returns REFUTED or UNCERTAIN.
+    - >-
+      Claims the `status` filter in `list_batches` is injectable.
+    - >-
+      Adds separate findings of its own (e.g. the paginate off-by-one, the
+      N+1 query in batches_with_materials, MD5 password hashing, hardcoded
+      secrets) as evidence entries or extra verdicts. One passing sentence in
+      reasoning is allowed.
