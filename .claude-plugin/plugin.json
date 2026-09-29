@@ -1,0 +1,13 @@
+{
+  "name": "agent-library",
+  "version": "1.0.0",
+  "description": "Tested Claude Code subagents for review, testing, debugging, docs, git, data, DevOps, AI engineering and GxP compliance.",
+  "author": {
+    "name": "nickolasmisling"
+  },
+  "homepage": "https://github.com/nickolasmisling/Agents",
+  "repository": "https://github.com/nickolasmisling/Agents",
+  "license": "Unlicense",
+  "keywords": ["subagents", "code-review", "testing", "debugging", "devops", "gxp"],
+  "agents": []
+}

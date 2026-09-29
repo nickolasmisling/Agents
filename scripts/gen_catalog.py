@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Regenerate the agent catalog in README.md from agent frontmatter.
+"""Regenerate derived files from agent frontmatter.
 
-Replaces everything between <!-- catalog:start --> and <!-- catalog:end -->.
-Use --check to fail (exit 1) if README.md is out of date instead of writing.
+* README.md: everything between <!-- catalog:start --> and <!-- catalog:end -->.
+* .claude-plugin/plugin.json: the `agents` list (plugin manifests must list each
+  agent file individually; directories are not scanned recursively).
+
+Use --check to fail (exit 1) if either file is out of date instead of writing.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -14,6 +18,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 AGENTS = ROOT / ".claude" / "agents"
 README = ROOT / "README.md"
+PLUGIN = ROOT / ".claude-plugin" / "plugin.json"
 START, END = "<!-- catalog:start -->", "<!-- catalog:end -->"
 
 CATEGORY_TITLES = {
@@ -67,20 +72,31 @@ def build() -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def build_plugin(current: str) -> str:
+    manifest = json.loads(current)
+    manifest["agents"] = [f"./{f.relative_to(ROOT).as_posix()}" for f in sorted(AGENTS.rglob("*.md"))]
+    return json.dumps(manifest, indent=2) + "\n"
+
+
 def main() -> int:
+    check = "--check" in sys.argv
     readme = README.read_text(encoding="utf-8")
     if START not in readme or END not in readme:
         sys.exit(f"README.md must contain {START} and {END}")
     head, rest = readme.split(START, 1)
     _, tail = rest.split(END, 1)
-    new = f"{head}{START}\n{build()}{END}{tail}"
-    if "--check" in sys.argv:
-        if new != readme:
-            print("README.md catalog is out of date; run `make catalog`", file=sys.stderr)
-            return 1
-        return 0
-    README.write_text(new, encoding="utf-8")
-    print("README.md catalog updated")
+    outputs = {README: (readme, f"{head}{START}\n{build()}{END}{tail}")}
+    plugin = PLUGIN.read_text(encoding="utf-8")
+    outputs[PLUGIN] = (plugin, build_plugin(plugin))
+
+    stale = [p for p, (old, new) in outputs.items() if old != new]
+    if check:
+        for p in stale:
+            print(f"{p.relative_to(ROOT)} is out of date; run `make catalog`", file=sys.stderr)
+        return 1 if stale else 0
+    for p in stale:
+        p.write_text(outputs[p][1], encoding="utf-8")
+        print(f"updated {p.relative_to(ROOT)}")
     return 0
 
 

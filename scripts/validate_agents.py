@@ -78,8 +78,11 @@ TRIGGER_RE = re.compile(
     re.IGNORECASE,
 )
 OUTPUT_HEADING_RE = re.compile(r"^#{2,3} .*\b(output|report|deliverable|return)", re.I | re.M)
+ASK_USER_RE = re.compile(r"\b(ask (the )?user|ask for clarification|confirm with the user|wait for (the )?user)", re.I)
+DATED_MODEL_RE = re.compile(r"-\d{8}$")
 
-DESC_MIN, DESC_MAX = 80, 700
+DESC_MIN, DESC_MAX = 80, 500
+PROACTIVE_BUDGET = 10  # library-wide cap on "Use PROACTIVELY" descriptions
 BODY_MIN_WORDS = 250
 OVERLAP_WARN = 0.45  # Jaccard similarity of description keyword sets
 
@@ -192,6 +195,8 @@ def validate_file(path: Path, rep: Report) -> dict | None:
             rep.add("warning", path, f"`description` is short ({len(desc)} chars); say what it does AND when to use it")
         if len(desc) > DESC_MAX:
             rep.add("warning", path, f"`description` is long ({len(desc)} chars > {DESC_MAX}); move detail into the body")
+        if re.search(r"must be used", desc, re.I) or "<example>" in desc:
+            rep.add("warning", path, "`description` uses shouting or <example> transcripts; keep it a plain routing rule")
         if not TRIGGER_RE.search(desc):
             rep.add("warning", path, "`description` has no delegation trigger (e.g. 'Use when…', 'Use PROACTIVELY after…')")
 
@@ -210,6 +215,8 @@ def validate_file(path: Path, rep: Report) -> dict | None:
     if model is not None:
         if not isinstance(model, str) or not (model in MODEL_ALIASES or MODEL_ID_RE.match(model)):
             rep.add("error", path, f"`model` {model!r} is not a known alias or claude-* model id")
+        elif DATED_MODEL_RE.search(model):
+            rep.add("warning", path, f"`model` {model!r} is a dated id; prefer an alias (sonnet/opus/haiku/inherit)")
 
     for key, allowed in ENUMS.items():
         if key in fm and fm[key] not in allowed:
@@ -217,6 +224,10 @@ def validate_file(path: Path, rep: Report) -> dict | None:
     if fm.get("permissionMode") == "bypassPermissions":
         rep.add("warning", path, "`permissionMode: bypassPermissions` is dangerous in a shared library")
 
+    if "hooks" in fm:
+        rep.add("warning", path, "`hooks` in agent frontmatter did not fire in our tests; don't rely on them for enforcement")
+    if "Agent" in tools or any(AGENT_SCOPED_RE.match(t) for t in tools):
+        rep.add("warning", path, "agent can spawn subagents (`Agent` tool); library agents should be leaves")
     if "maxTurns" in fm and not (isinstance(fm["maxTurns"], int) and fm["maxTurns"] > 0):
         rep.add("error", path, "`maxTurns` must be a positive integer")
     if "skills" in fm and as_list(fm["skills"]) is None:
@@ -229,6 +240,8 @@ def validate_file(path: Path, rep: Report) -> dict | None:
         rep.add("error", path, "system prompt body is empty")
     elif words < BODY_MIN_WORDS:
         rep.add("warning", path, f"system prompt body is thin ({words} words < {BODY_MIN_WORDS})")
+    if ASK_USER_RE.search(body):
+        rep.add("warning", path, "body tells the agent to ask the user; subagents can't. Return NEEDS_CONTEXT or state an assumption")
     if words and not OUTPUT_HEADING_RE.search(body):
         rep.add("warning", path, "body has no '## Output…' section defining what to return to the parent")
 
@@ -253,6 +266,13 @@ def cross_checks(agents: list[dict], rep: Report) -> None:
     for name, paths in by_name.items():
         if len(paths) > 1:
             rep.add("error", paths[0], f"duplicate agent name {name!r} also in {[str(p) for p in paths[1:]]}")
+
+    proactive = [a["name"] for a in agents if re.search(r"\bproactively\b", a["description"], re.I)]
+    if len(proactive) > PROACTIVE_BUDGET:
+        rep.add("warning", "(library)", f"{len(proactive)} agents say 'PROACTIVELY' (budget {PROACTIVE_BUDGET}): {', '.join(sorted(proactive))}")
+    total_desc = sum(len(a["description"]) for a in agents)
+    if total_desc > 40000:
+        rep.add("warning", "(library)", f"descriptions total {total_desc} chars; they all load into the parent's context")
 
     kw = {a["name"]: keywords(a["description"]) for a in agents if a["name"]}
     for (n1, k1), (n2, k2) in itertools.combinations(kw.items(), 2):

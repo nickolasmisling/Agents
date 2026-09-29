@@ -25,7 +25,10 @@ Case format:
 
 Usage:
     python3 scripts/test_behavior.py [--only NAME ...] [--jobs N] [--keep]
-                                     [--permission-mode auto] [--budget 3]
+                                     [--permission-mode acceptEdits] [--budget 3]
+
+The agent under test runs with Bash pre-approved inside a throwaway copy of the
+fixture. Run this in a container or VM if you don't trust the agents.
 """
 from __future__ import annotations
 
@@ -122,8 +125,12 @@ def run_case(path: Path, opts: argparse.Namespace) -> dict:
     # Keep the agent definitions out of the diff we grade.
     sh("git update-index --assume-unchanged $(git ls-files .claude) 2>/dev/null; true", work)
 
+    # Headless runs can't answer permission prompts; pre-approve the tools an agent may
+    # legitimately need inside this throwaway copy. The agent's own `tools` list still
+    # limits what it can actually call.
     res = claude_json([prompt, "--agent", agent, "--permission-mode", opts.permission_mode,
-                       "--max-budget-usd", str(opts.budget)], work, opts.timeout)
+                       "--allowedTools", *opts.allow, "--max-budget-usd", str(opts.budget)],
+                      work, opts.timeout)
     report = res.get("result") or ""
     status = sh("git status --porcelain -- . ':!.claude'", work).stdout
     diff = sh("git diff -- . ':!.claude'", work).stdout
@@ -180,8 +187,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--only", nargs="*", help="agent or case names to run")
     ap.add_argument("--jobs", type=int, default=4)
-    ap.add_argument("--permission-mode", default="auto",
-                    help="permission mode for the agent under test (default: auto)")
+    ap.add_argument("--permission-mode", default="acceptEdits",
+                    help="permission mode for the agent under test (default: acceptEdits)")
+    ap.add_argument("--allow", nargs="*", default=["Bash", "WebFetch", "WebSearch"],
+                    help="tools pre-approved for the agent under test (default: Bash WebFetch WebSearch)")
     ap.add_argument("--budget", type=float, default=3.0, help="max USD per agent run")
     ap.add_argument("--judge-model", default="sonnet")
     ap.add_argument("--timeout", type=int, default=1200)

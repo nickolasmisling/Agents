@@ -1,0 +1,15 @@
+{
+  "name": "nickolasmisling-agents",
+  "owner": {
+    "name": "nickolasmisling"
+  },
+  "description": "A tested library of Claude Code subagents.",
+  "plugins": [
+    {
+      "name": "agent-library",
+      "source": "./",
+      "description": "Tested Claude Code subagents for review, testing, debugging, docs, git, data, DevOps, AI engineering and GxP compliance.",
+      "version": "1.0.0"
+    }
+  ]
+}
