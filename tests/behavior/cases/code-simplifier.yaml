@@ -182,8 +182,10 @@ read_only: false
 #    captured on pristine code (signatures, constants, results, errors, no input
 #    mutation, the collect_warnings default-list accumulation);
 #  - no function in app/report.py nests statements more than 3 levels deep
-#    (site_summary starts at 5; an `elif` counts as the same level as its `if`, a
-#    literal `else: if` as one level deeper);
+#    (a function body is level 0; site_summary starts at 5 in the per-row flag code
+#    and at 4 in the final avg/trend pass, so both must be flattened, e.g. by guard
+#    clauses and helpers; an `elif` counts as the same level as its `if`, a literal
+#    `else: if` as one level deeper); on failure it names the deepest line;
 #  - the Python suite passes, including any tests the agent added, with the known
 #    PY-02 failure deselected and the wall-clock test PY-30 deselected so the check
 #    itself cannot flake.
@@ -218,8 +220,8 @@ check: |
 
 
   def depth(stmts, d):
-      """Deepest nesting level of any statement in stmts (a function body is level 0)."""
-      best = d if stmts else 0
+      """(level, line) of the deepest statement in stmts (a function body is level 0)."""
+      best = (d, stmts[0].lineno) if stmts else (0, 0)
       for s in stmts:
           if isinstance(s, ast.If):
               best = max(best, depth(s.body, d + 1))
@@ -246,8 +248,8 @@ check: |
       sys.exit("site_summary is no longer a module-level def in app/report.py")
   funcs = {n.name: depth(n.body, 0) for n in ast.walk(tree)
            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-  print("max statement nesting per function:", funcs)
-  deep = {name: d for name, d in funcs.items() if d > 3}
+  print("max statement nesting per function:", {name: lvl for name, (lvl, _) in funcs.items()})
+  deep = {name: f"level {lvl} at app/report.py:{line}" for name, (lvl, line) in funcs.items() if lvl > 3}
   if deep:
       sys.exit(f"still nested more than 3 levels deep: {deep}")
   PY
@@ -261,27 +263,33 @@ rubric:
   must:
     - >-
       Records a baseline before editing: runs the Python test suite and reports
-      the command and pass/fail counts (1 failed, 18 passed, or the same run
-      scoped differently), names
-      tests/test_batches.py::test_paginate_returns_requested_page as a
-      pre-existing failure unrelated to app/report.py, and states that no
-      existing test covers app/report.py (nothing under tests/ imports it).
+      the command and pass/fail counts (1 failed, 18 passed for the full
+      suite, or the same run scoped differently), names
+      test_paginate_returns_requested_page (tests/test_batches.py) as a
+      pre-existing failure unrelated to app/report.py, and says that the
+      existing tests do not cover site_summary / app/report.py (any clear
+      wording counts, e.g. "no existing test covers site_summary" or "nothing
+      under tests/ imports app.report").
     - >-
       Adds characterization tests before refactoring, in the repo's pytest
       style under tests/ (e.g. tests/test_report.py), that pin site_summary's
       current output with concrete expected values, covering at least the
       low/high yield flags, include_open=True and a batch with no recorded
-      actual quantity; the report shows them passing on the unchanged code and
-      again, together with the rest of the suite, after the last edit
-      (commands and counts).
+      actual quantity; the report says they passed on the unchanged code
+      before the refactor, and gives the command and counts of a run after the
+      last edit in which they and the rest of the suite (apart from the
+      pre-existing paginate failure) pass.
     - >-
-      The diff actually restructures site_summary in app/report.py to cut its
-      nesting (5 levels originally): e.g. guard clauses (`continue` for skipped
+      The diff actually restructures site_summary in app/report.py so that
+      neither the per-row code (flag appends nested 5 levels deep originally)
+      nor the final avg/trend/release_rate pass (4 levels) stays deeply
+      nested, using techniques such as guard clauses (`continue` for skipped
       open batches or a missing actual_qty), private helpers in the same file
-      for new-entry creation / per-product stats / the yield flag / the final
-      avg-trend-release_rate pass, `setdefault` instead of `if key not in`
-      blocks, and one append per low/high list instead of the duplicated
-      `append({...})` branches.
+      (new-entry creation, per-product stats, the yield flag, the final pass /
+      trend), `setdefault` instead of `if key not in` blocks, and one append
+      per low/high list instead of the duplicated `append({...})` branches. A
+      cosmetic change (only renames, reformatting or merging `else: if` into
+      `elif`) does not count.
     - >-
       Keeps every public name and signature in app/report.py unchanged
       (yield_pct, collect_warnings, site_summary, format_report, build_report,
@@ -312,9 +320,10 @@ rubric:
       the named scope; other modules are untouched.
     - >-
       Uses the agent's output shape: a `STATUS:` line, Scope, Safety net,
-      Changes grouped by kind with path:line and function, Test evidence
-      Before/After with commands and exit codes, Diff summary, "Left alone
-      (deliberately)" with reasons, and "Bugs noticed (not fixed)".
+      changes grouped by kind with path:line and function, Test evidence
+      (Before, Characterization on unchanged code, After) with commands and
+      exit codes, "Your delta", "Left alone (deliberately)" with reasons, and
+      "Bugs noticed (not fixed)".
   must_not:
     - >-
       Changes observable behavior while "simplifying": e.g. adds a planned_qty
@@ -326,7 +335,9 @@ rubric:
       Changes the public API or the existing tests: renames, reorders or
       removes a public function, parameter, default or constant in
       app/report.py; edits, deletes, skips or xfails an existing test; edits
-      files other than app/report.py and new test files; or commits.
+      or adds source, config or doc files other than app/report.py and new
+      files under tests/ (tool caches such as .ruff_cache/ or .coverage do not
+      count); or commits.
     - >-
       Removes, or reports as dead code, a public function of app/report.py
       such as build_report, format_report or collect_warnings because nothing

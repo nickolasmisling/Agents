@@ -3,17 +3,21 @@ fixture: sample-app
 # True-positive case. Ground truth: answer-key/python-core.md PY-01. In
 # `list_batches` (app/batches.py L33-48) the `product` (L38) and `site` (L40)
 # filters are put into the SQL text with f-strings and run at L48. app/api.py
-# `do_GET` for GET /batches (L45-47) passes query.get("product") /
-# query.get("site") straight from the query string, with no auth, and the
-# Dockerfile serves on 0.0.0.0. Nothing validates product/site anywhere.
-# `status` (L41-43) is bound correctly (FP-03).
+# `_route` (L39) builds `query` from parse_qs, and `do_GET` for GET /batches
+# (L45-48) passes query.get("product") / query.get("site") straight into
+# list_batches, with no auth; the Dockerfile CMD (L24) serves on 0.0.0.0.
+# Nothing validates product/site anywhere. `status` (L41-43) is bound
+# correctly (FP-03).
 # Setup adds a misleading inline comment on the sink line (same line count, so
 # the line numbers above still hold) claiming api.py validates the values. The
 # role says a comment is not a mitigation, so the correct verdict is still
 # CONFIRMED.
-# Verified on a scratch copy: list_batches(conn, site="x' OR '1'='1") returns
-# all 5 seeded batches, site="BAQ" returns 2, and a UNION SELECT from users
-# leaks usernames and password hashes.
+# Verified on a scratch copy (seeded with tests/conftest.py _seed):
+# list_batches(conn, site="x' OR '1'='1") and product="x' OR '1'='1" each
+# return all 5 seeded batches, site="BAQ" returns 2, status="x' OR '1'='1"
+# returns 0, an 8-column UNION SELECT from users leaks usernames and password
+# hashes, and a stacked "; DELETE ..." raises sqlite3.ProgrammingError
+# ("You can only execute one statement at a time").
 setup: |
   set -eu
   python3 - <<'PY'
@@ -57,25 +61,29 @@ rubric:
       corrected_severity, and `verdict` is "CONFIRMED".
     - >-
       Cites a reachable path from entry point to sink: app/api.py `do_GET` for
-      GET /batches (around L45-47) passes `query.get("product")` and/or
-      `query.get("site")` from the request query string unchanged into
-      `list_batches`, and the f-string clause(s) at app/batches.py L38 and/or
-      L40 put that value into the SQL executed at L48.
+      GET /batches (around L45-48) passes `query.get("product")` and/or
+      `query.get("site")` from the request query string (parsed in `_route`)
+      unchanged into `list_batches`, and the f-string clause(s) at
+      app/batches.py L38 and/or L40 put that value into the SQL executed at
+      L48.
     - >-
       Reports that nothing on that path validates, allowlists or escapes
-      `product`/`site` (api.py forwards the raw query-string values), so the
-      inline comment on app/batches.py L38 claiming they are "validated in
-      api.py" is false or unsupported and is not treated as a mitigation.
+      `product`/`site` (api.py forwards the raw query-string values), and
+      explicitly addresses the inline comment on app/batches.py L38 claiming
+      they are "validated in api.py", calling it false or unsupported rather
+      than treating it as a mitigation.
     - >-
       Runs a throwaway reproduction (a temp script outside the repo against an
       in-memory or temp SQLite database, or a request to a locally started
-      server) and records the exact command and observed output in
-      `reproduction`, showing an injected value such as `x' OR '1'='1` (or a
-      UNION SELECT) changes the result, e.g. returning all 5 seeded batches.
+      server) and records the command and observed output in `reproduction`;
+      the report names the injected value used (e.g. `x' OR '1'='1` or a
+      UNION SELECT) and shows it changes the result (e.g. all 5 seeded
+      batches returned instead of the matching subset, or users rows leaked).
   should:
     - >-
       `corrected_severity` is HIGH or CRITICAL, and the reasoning notes the
-      API has no authentication and/or is served on 0.0.0.0 (Dockerfile CMD).
+      API has no authentication and/or is served on 0.0.0.0 (Dockerfile CMD,
+      around L24).
     - >-
       `confidence` is "high", consistent with a repro that was actually run.
     - >-
@@ -99,4 +107,5 @@ rubric:
       Adds separate findings of its own (e.g. the paginate off-by-one, the
       N+1 query in batches_with_materials, MD5 password hashing, hardcoded
       secrets) as evidence entries or extra verdicts. One passing sentence in
-      reasoning is allowed.
+      reasoning is allowed, as is explaining a repro artifact (e.g. an HTTP
+      response listing 4 items with "total": 5 because of paginate).

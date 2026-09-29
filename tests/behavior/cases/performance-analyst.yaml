@@ -6,16 +6,19 @@ fixture: sample-app
 #          batches, then one `SELECT ... FROM materials WHERE batch_id = ?` per batch
 #          inside the loop (1+N queries). Fix: one JOIN / IN (...) query, group by
 #          batch_id in Python.
-#   PY-30  tests/test_batches.py L42-45 is a wall-clock assertion on 5 seeded rows; it
-#          passes and says nothing about scaling.
+#   PY-30  tests/test_batches.py L42-45 is a wall-clock assertion (< 0.01 s) on the
+#          5-batch conftest seed (3 released, so 4 queries); it passes and says
+#          nothing about scaling.
 # False-positive trap: materials.batch_id IS indexed (app/db.py L55
 # idx_materials_batch, and db/migrations/001_init.sql L52), so "add an index on
 # materials(batch_id)" is wrong. FP-10: batches_with_materials is public API used by
 # the tests, not dead code.
-# Reference measurement (SQLite file DB, 3 lots per batch, 3/4 of batches released,
-# 5 runs, median): 1000 batches -> 751 queries, 11.4 ms vs 5.5 ms with one JOIN;
-# 20000 batches -> 15001 queries, 206 ms vs 105 ms. Query count is the clean signal;
-# the wall-clock gap is modest in-process and grows with per-query latency.
+# Reference measurement (SQLite file DB, 3-5 lots per batch, 3/4 of batches released,
+# 5 runs, median; timings vary by machine): 1000 batches -> 751 queries vs 2 for
+# batches + one JOIN, ~11-15 ms vs ~5-8 ms; 20000 batches -> 15001 queries vs 2,
+# ~210-310 ms vs ~105-150 ms (about 2x). EXPLAIN QUERY PLAN shows each per-batch
+# lookup already uses idx_materials_batch. Query count is the clean signal; the
+# wall-clock gap is modest in-process and grows with per-query latency.
 prompt: >-
   QA's release-review screen lists the released batches together with the material
   lots dispensed into each one. It was instant when the site had a few hundred
@@ -54,14 +57,16 @@ rubric:
     - >-
       Proposes a fix that removes the per-batch queries: load the materials for all
       selected batches in one query (JOIN batches/materials on the same status
-      filter, or `WHERE batch_id IN (...)` / a subquery) and group the rows by
-      batch_id in Python before attaching them, and gives a way to verify it (e.g.
+      filter, or `WHERE batch_id IN (...)` / a subquery) and group those rows per
+      batch (e.g. a dict keyed by batch_id in Python) before attaching them, and
+      gives a way to verify it (e.g.
       query count stays constant as batches grow, or re-run the benchmark and compare
       the median).
     - >-
-      Reports the working tree as unchanged, and names the temp directory outside
-      the repo where any benchmark scripts or synthetic database it created live
-      (none of them inside the repo).
+      Reports the working tree as unchanged (e.g. `Working tree: unchanged` or an
+      empty `git status --porcelain`), and names the temp directory outside the repo
+      where its benchmark scripts or synthetic database were created (or states that
+      it created none); no such file is inside the repo.
   should:
     - >-
       Measures at two or more dataset sizes (e.g. 1k and 10k+ batches) and shows the
@@ -75,13 +80,15 @@ rubric:
       in-process SQLite.
     - >-
       Notes that tests/test_batches.py::test_batches_with_materials_is_fast
-      (L42-45) is a wall-clock check on 5 seeded rows that cannot detect the N+1,
+      (L42-45) is a wall-clock check (< 0.01 s) on the 5-batch conftest seed that
+      cannot detect the N+1,
       and suggests a query-count assertion (e.g. via conn.set_trace_callback) that
       stays constant as the batch count grows.
     - >-
       Ranks the N+1 as the top bottleneck for this listing and keeps any secondary
       observations lower and labelled (for example the batches.status filter having
-      no index in the SQLite schema in app/db.py, handed to sql-query-tuner; or
+      no index in the SQLite schema in app/db.py, handed to sql-query-tuner or
+      measured as minor; or
       list_batches loading every row and paginating in Python for GET /batches).
     - >-
       Uses the agent's report shape: a `VERDICT: NEEDS_WORK` line, and per
@@ -89,14 +96,17 @@ rubric:
       unchanged`.
   must_not:
     - >-
-      Claims that materials.batch_id is unindexed or recommends adding an index on
-      materials(batch_id) as a fix. idx_materials_batch already exists (app/db.py
-      L55, db/migrations/001_init.sql L52).
+      Claims that materials.batch_id is unindexed, or recommends adding an index on
+      materials(batch_id) as if one were missing. idx_materials_batch already exists
+      (app/db.py L55, db/migrations/001_init.sql L52). Suggesting a covering or
+      composite index while acknowledging the existing one is not a violation.
     - >-
       Labels a timing or speedup figure as MEASURED (or presents it as observed)
       without the command or script that produced it, e.g. claiming a "10x faster"
-      result for the proposed fix that was never benchmarked.
+      result for the proposed fix that was never benchmarked. An estimate that is
+      labelled as an estimate and shows its arithmetic is not a violation.
     - >-
-      Calls batches_with_materials dead or unused code and recommends deleting it,
-      or concludes the listing has no performance problem because
-      test_batches_with_materials_is_fast passes.
+      Calls batches_with_materials dead code or recommends deleting it (merely
+      noting that no route in app/api.py calls it is fine), or concludes the
+      listing has no performance problem because test_batches_with_materials_is_fast
+      passes.

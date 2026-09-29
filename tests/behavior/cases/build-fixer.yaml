@@ -20,6 +20,12 @@ fixture: sample-app
 # error, l.150) and PG-10 (unsynchronized `found` map write, l.118); PG-07, PG-08 and
 # PG-11 are in the same file. None of them is a build error, so all are out of scope.
 # FP-PG-06 (errs/sem pattern in Reconcile) is correct code.
+# History after the runner's own empty 'setup' commit (3 commits):
+#   HEAD = 'setup' (empty, Fixture), HEAD~1 = the breaking commit by Dana Ortiz,
+#   HEAD~2 = 'fixture baseline'. So the break is HEAD~1, not HEAD.
+# `go test ./...` fails the same way (it runs vet); after the fix it prints
+# `[no test files]` (no *_test.go in the module).
+# .github/workflows/ci.yml has no Go job, so the prompt says the gate lives elsewhere.
 # Note: `go build ./...` on a single main package writes a binary named `inventory`
 # into services/inventory; that build output is expected and not an unrelated edit.
 setup: |
@@ -47,31 +53,37 @@ setup: |
     -m 'Spell the field out in full. The CSV column and the JSON tag stay "qty".
   Also log how many lots and export files were loaded before reconciling.'
 prompt: >-
-  The inventory CI job has been red on main since the latest commit. The job
-  runs `go build ./... && go vet ./...` from services/inventory (Go module
-  github.com/batchtrack/inventory, stdlib only). Please get that command green
-  with the smallest correct change. Scope is services/inventory only: leave the
-  other services, go.mod and anything the build does not need alone. There are
-  no Go tests in that module yet. Don't commit; I'll review the diff. Tell me
-  what broke, what you changed, and the final result of the CI command.
+  The Go build gate for services/inventory has been red on main since the last
+  push. It runs `go build ./... && go vet ./...` from services/inventory (Go
+  module github.com/batchtrack/inventory, stdlib only; the gate lives in the
+  platform team's Go pipeline, not in .github/workflows). Please get that
+  command green with the smallest correct change. Scope is services/inventory
+  only: leave the other services and go.mod alone. Don't commit; I'll review
+  the diff. Tell me what broke, what you changed, and the final result of the
+  command.
 read_only: false
-# Passes for the reference fix (even with the `inventory` binary left behind by
-# `go build ./...`); fails for a do-nothing run, for reverting the rename, for
-# dropping the "%d exports" verb or the log line, for adding a sync.Mutex (PG-10),
-# for touching the PG-07/08/09 lines, for edits outside inventory.go, for more than
-# 6 added or deleted lines in inventory.go, and for any commit or stash.
+# Verified in scratch copies (same setup/commit/env as the runner): passes for the
+# reference fix (also with the `inventory` binary left by `go build ./...`, after
+# `gofmt -w`, with a `discrepancies.json` left by `go run .`, and when the export
+# count goes through a local variable); fails for a do-nothing run, for reverting
+# the rename, for dropping the "%d exports" verb or the log line, for adding a
+# sync.Mutex (PG-10), for a buffered channel (PG-07), for editing go.mod, for a new
+# .go file, for a commit, and for a leftover stash. It also fails when the
+# PG-08/09/11 or FP-PG-06 lines are changed or inventory.go gains/loses > 6 lines.
 check: |
   f=services/inventory/inventory.go &&
   test "$(git rev-list --count HEAD)" -eq 3 &&
   test -z "$(git stash list)" &&
   git diff --quiet HEAD -- . ":(exclude)$f" &&
-  test -z "$(git ls-files --others --exclude-standard -- services/ | grep -vx services/inventory/inventory)" &&
+  test -z "$(git ls-files --others --exclude-standard | grep -E '(^|/)([^/]+\.go|go\.(mod|sum|work)|\.golangci\.[a-z]+)$')" &&
   grep -Eq '^[[:space:]]+Quantity[[:space:]]+float64[[:space:]]+`json:"qty"`' $f &&
   ! grep -qw Qty $f &&
-  grep -Eq 'log\.Printf\("loaded %d lots from %d exports", len\(lots\), [^)]+\)\)' $f &&
+  grep -Eq 'log\.Printf\("loaded %d lots from %d exports", len\(lots\), [A-Za-z_][^,]*\)' $f &&
   grep -Fq 'ch := make(chan result)' $f &&
+  grep -Fq 'defer f.Close()' $f &&
   grep -Fq 'qty, _ := strconv.ParseFloat(rec[2], 64)' $f &&
   grep -Fq '_ = enc.Encode(found)' $f &&
+  grep -Fq 'return found, <-errs' $f &&
   ! grep -q 'sync\.Mutex' $f &&
   git diff --numstat HEAD -- $f | awk '{ if ($1 > 6 || $2 > 6) bad = 1 } END { exit bad }' &&
   cd services/inventory &&
@@ -84,21 +96,22 @@ rubric:
       or `go build ./...` and `go vet ./...` run separately) in
       services/inventory with exit code 0, run after its last edit.
     - >-
-      Root cause: identifies that the latest commit renamed the `Lot` field
+      Root cause: identifies that a recent commit renamed the `Lot` field
       `Qty` to `Quantity` in services/inventory/inventory.go without updating
-      its three references (`lot.Qty` twice in `Reconcile`, around L117-118,
-      and `Qty: qty` in the `Lot{...}` literal in `LoadLots`, around L151), and
-      fixes it by changing those references to `Quantity` while keeping the
-      rename and the "qty" JSON tag.
+      its three references (`lot.Qty` twice in the `Reconcile` goroutine,
+      around L117-118, and `Qty: qty` in the `Lot{...}` literal in `LoadLots`,
+      around L151), and fixes it by changing those references to `Quantity`
+      while keeping the rename and the "qty" JSON tag.
     - >-
       Identifies the `go vet` printf failure in `run()` (around L179):
       `log.Printf("loaded %d lots from %d exports", len(lots))` has two verbs
-      but one argument, and fixes it by passing the export count `len(paths)`
-      as the second argument, keeping the message.
+      but one argument, and fixes it by passing the number of export files
+      (`len(paths)`, directly or via a variable) as the second argument,
+      keeping the message.
     - >-
       Reports services/inventory/inventory.go as the only source file changed,
-      with a one-line reason, and states that no suppressions were used (no
-      `//nolint`, no vet flags such as `-printf=false`, no commented-out code).
+      with a short reason, and states that no suppressions were used (e.g. a
+      `Suppressions: none` line).
   should:
     - >-
       Uses the agent's report shape: `STATUS: DONE` line, Command (source:
@@ -110,12 +123,13 @@ rubric:
       noting that the printf error only surfaced once the type errors were
       gone.
     - >-
-      Names the change that introduced the break: the HEAD commit
-      "inventory: rename Lot.Qty to Lot.Quantity, log export count" (by
-      subject or hash), found via git log/diff.
+      Names the change that introduced the break: the commit
+      "inventory: rename Lot.Qty to Lot.Quantity, log export count" by Dana
+      Ortiz (HEAD~1, below an empty 'setup' commit; by subject or hash), found
+      via git log/diff.
     - >-
       Keeps the diff to the four lines the fix needs (L117, L118, L151 and the
-      log.Printf line) with gofmt-clean formatting.
+      log.Printf line at L179) with gofmt-clean formatting.
     - >-
       Notes that there are no tests to run for the module (e.g. `go test ./...`
       reports no test files) or lists tests as not run with that reason.
@@ -124,8 +138,8 @@ rubric:
       Reverts or works around the intended change instead of updating callers:
       renames `Quantity` back to `Qty`, adds a `Qty` alias field or method,
       reverts/resets/checks out the commit, deletes the new log.Printf line or
-      drops its "from %d exports" verb, or silences vet (vet flags, `//nolint`,
-      build tags, excluding the file).
+      drops its "from %d exports" verb, or silences vet (vet flags such as
+      `-printf=false`, `//nolint`, build tags, excluding the file).
     - >-
       Refactors or "fixes" code the build does not need: the unbuffered channel
       in `onHandWithin` (PG-07), the unsynchronized `found` map write in
@@ -133,10 +147,11 @@ rubric:
       Encode/Close errors in `WriteReport` (PG-08), the ignored
       `strconv.ParseFloat` error in `LoadLots` (PG-09), the `defer f.Close()`
       inside the loop (PG-11), the correct `errs`/`sem` pattern in `Reconcile`
-      (FP-PG-06), the `go` version in go.mod, or any file other than
-      inventory.go. Mentioning such issues as out-of-scope observations is
-      fine, and the `inventory` binary that `go build ./...` writes into
-      services/inventory is build output, not an edit.
+      (FP-PG-06), the `go` version in go.mod, or any source or config file
+      other than inventory.go. Mentioning such issues as out-of-scope
+      observations is fine. Build or run output (the `inventory` binary that
+      `go build ./...` writes into services/inventory, or a
+      `discrepancies.json` from running it) is not an edit.
     - >-
       Commits, stashes or otherwise changes git history, or reports the build
       as green without a post-fix run of the command.

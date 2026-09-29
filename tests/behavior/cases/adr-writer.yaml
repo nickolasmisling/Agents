@@ -360,12 +360,14 @@ prompt: >-
   open the PR.
 read_only: false
 # Passes only if exactly one new ADR docs/adr/000[45]-<slug>.md exists that follows the repo
-# template (title "# ADR-<num>: ...", its section headings, no leftover NNNN/YYYY-MM-DD
-# placeholders) and names the three options, the README.md index gained exactly one row linking it
-# (+1/-0), and nothing else changed (no edits to existing ADRs, template, code or infra; no commits,
-# branch switches or stash). Validated on a scratch copy: do-nothing run -> exit 1; reference
-# 0005 ADR + index row -> exit 0; reference ADR in MADR layout / docs/decisions -> exit 1; reference
-# + edit to ADR-0002 -> exit 1; reference without index row -> exit 1.
+# template (title "# ADR-<num>: ...", its section headings, "- Status:"/"- Date:" header bullets,
+# bold "- **Status:**" tolerated, no leftover NNNN/YYYY-MM-DD placeholders) and names the three
+# options, the README.md index gained exactly one row linking it (+1/-0), and nothing else changed
+# (no edits to existing ADRs, template, code or infra; no commits, branch switches or stash).
+# Validated on a scratch copy: do-nothing run -> exit 1; reference 0005 ADR + index row -> exit 0;
+# same as 0004 -> exit 0; bold header bullets -> exit 0; stray .claude/settings.local.json -> exit 0;
+# reference ADR in MADR layout / docs/decisions -> exit 1; reference + edit to ADR-0002 -> exit 1;
+# reference without index row -> exit 1; reference committed -> exit 1; YYYY-MM-DD left -> exit 1.
 check: |
   set -u
   fail() { echo "FAIL: $*"; exit 1; }
@@ -385,7 +387,7 @@ check: |
   for h in 'Context' 'Options considered' 'Decision' 'Consequences' 'Validation impact' 'Open questions' 'Links'; do
     grep -Eqi "^## +$h *$" "$adr" || fail "template section '## $h' missing"
   done
-  grep -Eqi '^- +Status:' "$adr" && grep -Eqi '^- +Date:' "$adr" || fail "template header bullets (- Status:, - Date:) missing"
+  grep -Eqi '^[-*] +(\*\*)?Status(:\*\*|\*\*:|:)' "$adr" && grep -Eqi '^[-*] +(\*\*)?Date(:\*\*|\*\*:|:)' "$adr" || fail "template header bullets (- Status:, - Date:) missing"
   if grep -Eq 'NNNN|YYYY-MM-DD' "$adr"; then fail "template placeholders left in $adr"; fi
   grep -qi 'postgres' "$adr" && grep -qi 'sql server' "$adr" && grep -q 'WAL' "$adr" || fail "ADR does not name PostgreSQL, SQL Server and WAL"
   test "$(git diff --numstat HEAD -- docs/adr/README.md | cut -f1,2)" = "$(printf '1\t0')" || fail "README.md must gain exactly one line and lose none"

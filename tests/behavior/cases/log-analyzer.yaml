@@ -80,8 +80,9 @@ rubric:
       Classifies the recurring deprecation warnings as red herrings with before/after evidence:
       the `DeprecationWarning: datetime.datetime.utcnow()` from audit_export.py:41 and/or the LIMS
       `deprecated endpoint in use endpoint=/api/v2/samples`, shown to occur both before and after
-      the 13:12 deploy (counts per window, e.g. 5 before / 3 after, or an equivalent baseline
-      comparison).
+      the incident start with counts or rates per window (split at the 13:12 deploy: utcnow 5
+      before / 3 after, LIMS endpoint 5 / 2; split at 13:18:27: 6 / 2 and 6 / 1; any split point that
+      shows the pattern on both sides counts).
   should:
     - >-
       Quantifies the degradation from the per-minute `batchtrack.metrics` lines, not only from
@@ -101,7 +102,8 @@ rubric:
       usage 81-82 %, the audit_export job) also appears before the deploy.
     - >-
       Recommends a concrete mitigation (disable cache_warmer or roll back to 1.4.0) and routes the
-      code follow-up to another agent (e.g. debugger, or performance-analyst), naming
+      code follow-up to another agent (debugger, concurrency-reviewer, sql-query-tuner or
+      performance-analyst), naming
       contributors in app/cache.py such as 8 workers against a pool of 10, a new db.session per
       batch in `_load`, no guard against overlapping runs, or scope=all_batches.
     - >-
