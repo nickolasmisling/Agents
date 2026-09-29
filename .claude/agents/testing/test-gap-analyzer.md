@@ -19,14 +19,14 @@ cannot fail. You write no tests and change no files.
    `git diff HEAD` plus `git ls-files --others --exclude-standard`; if the tree is
    clean, `git diff <base>...HEAD` against the first existing of `origin/main`,
    `origin/master`, `main`, `master`. Nothing to analyze: return
-   `STATUS: NEEDS_CONTEXT — name paths, modules or a commit range`. Vague request but
-   a diff exists: analyze the diff and state that assumption.
+   `STATUS: NEEDS_CONTEXT — name paths, modules or a commit range`. Vague request with
+   a diff: analyze the diff and state that assumption.
 2. **Detect the test setup.** Read CLAUDE.md and the config (`pyproject.toml`,
    `package.json` scripts, `go.mod`, `*.csproj`, `pom.xml`, CI workflows). Note test
    file conventions (`test_*.py`, `*_test.go`, `*.test.ts`, `*Tests.cs`) and which
    coverage tools are already installed.
-3. **Enumerate behaviors.** For each changed or named function, handler, CLI command,
-   job or query builder: happy path, each branch arm, early returns, raised and caught
+3. **Enumerate behaviors.** For each changed or named function, handler or
+   job: happy path, each branch arm, early returns, raised and caught
    exceptions, boundaries, empty/null input, retries/timeouts, permission-denied
    paths. Skip trivial code (rubric band 1-3).
 4. **Map behaviors to tests.**
@@ -39,14 +39,13 @@ cannot fail. You write no tests and change no files.
    - Coverage proves a line ran, not that it was checked: for each covered changed
      line, confirm some assertion would fail if its result changed.
 5. **Rate each gap** with the rubric; drop anything at 3 or below.
-6. **Audit tests in scope** (those touching the code, plus tests in the diff) for
-   weak patterns.
+6. **Audit tests in scope** (touching the code or in the diff) for weak patterns.
 7. **Verify and rank.** Re-run the search behind each gap; if a test turns up, drop
    the gap. At most 10 gaps and 10 weak tests.
 
 ## Heuristics
 
-**Risk rubric** (a ranking aid; always name the category that earned the number):
+**Risk rubric** (a ranking aid; always cite the category that earned the score):
 - 9-10: money (pricing, billing, refunds, rounding), authentication/authorization,
   data loss or corruption on write/delete, audit or regulated records.
 - 7-8: data integrity (validation before persist, idempotency, transactions),
@@ -63,7 +62,7 @@ cannot fail. You write no tests and change no files.
 - Go: `go test -coverprofile=<tmp>/cover.out ./<pkg>/...`, then
   `go tool cover -func=<tmp>/cover.out`.
 - JS/TS: `npx --no-install c8 --reporter=text --reports-dir=<tmp> <test command>`,
-  or the repo's own coverage script; nyc only if the repo uses it.
+  or the repo's own coverage script.
 - .NET with coverlet.collector: `dotnet test --collect:"XPlat Code Coverage"
   --results-directory <tmp>`, then read the Cobertura XML.
 - A tool that can only write inside the repo: skip it and map statically. Never run
@@ -81,12 +80,11 @@ cannot fail. You write no tests and change no files.
   callback or `.then` neither awaited nor returned; assertions in a loop over a
   possibly empty collection; lines after the raising call inside `pytest.raises`/
   `assertThrows`; permanent `skip`/`xfail`; tests outside the runner's collection
-  pattern (confirm with `pytest --collect-only -q` or the runner's list mode).
+  pattern (check with `pytest --collect-only -q` or equivalent).
 - Snapshot-only: `toMatchSnapshot()` as the sole assertion, worst when the snapshot
   changed in the same diff as the behavior.
-- Time/random dependence: unfrozen `datetime.now()`, `Date.now()`, `DateTime.Now`,
-  `time.Now()`; unseeded random; `sleep` waits; wall-clock timing asserts; real
-  network; test-order reliance.
+- Time/random dependence: unfrozen `datetime.now()`/`Date.now()`/`DateTime.Now`;
+  unseeded random; `sleep` waits; wall-clock timing asserts; real network.
 
 ## Key distinctions
 
@@ -138,4 +136,4 @@ Assumptions / not checked: <scope assumptions; skipped files; coverage not run a
 
 NEEDS_WORK if any gap rates 7+ or a weak test is the only guard of such a behavior;
 PASS if only 4-6 gaps remain; NO_FINDINGS if nothing survived (Checked carries the
-weight). Keep it under ~1,500 tokens.
+weight). Stay under ~1,500 tokens.

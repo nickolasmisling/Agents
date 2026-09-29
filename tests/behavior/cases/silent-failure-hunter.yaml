@@ -1,0 +1,35 @@
+agent: silent-failure-hunter
+fixture: sample-app
+# No setup: the seeded defects are in the committed fixture (answer key python-core.md:
+# PY-15, PY-16, PY-17, PY-18, PY-25; traps FP-04, FP-09).
+prompt: >-
+  We're hardening batchtrack's LIMS integration and JSON API ahead of a GMP
+  data-integrity review. Audit the error handling in app/lims_client.py and
+  app/api.py, plus the app/ modules they call into, for places where a failure
+  could go unnoticed by the calling code, the API client or an operator. These are
+  named paths, not a diff: sweep the files whole. Report findings only; do not
+  modify any files.
+read_only: true
+# Fixture-drift guard (the agent is read-only, so this passes for any correct run):
+# fails if the seeded handlers the rubric depends on are no longer in the tree.
+check: >-
+  grep -q 'except Exception:' app/lims_client.py &&
+  grep -q 'urlopen(req)' app/lims_client.py &&
+  grep -q 'for _ in range(MAX_ATTEMPTS)' app/lims_client.py &&
+  grep -q 'def _send(self, payload, status=200)' app/api.py &&
+  git diff --quiet HEAD
+rubric:
+  must:
+    - "Flags get_sample_results in app/lims_client.py (~L37-41) where `except Exception: pass` swallows every failure (network/URLError, HTTP 401/5xx, bad JSON, unexpected payload) and the function falls through to an implicit None with nothing logged; fix is to narrow the catch and raise or surface a domain error (e.g. LimsUnavailable) instead of returning None"
+    - "Flags the retry loop in `_send` (app/lims_client.py ~L24-31) as unsafe for submit_sample's non-idempotent `POST /samples` (~L47): if LIMS created the sample but the response was lost, the retry registers a duplicate QC sample; fix is an idempotency key or not auto-retrying POST"
+    - "Flags that `urllib.request.urlopen(req)` in `_request` (app/lims_client.py ~L20) has no timeout, so a hung or slow LIMS blocks the calling thread (and the API request behind it) indefinitely; fix is an explicit timeout= value"
+    - "Flags that app/api.py returns error responses with HTTP 200 because `BatchHandler._send` defaults to status=200, naming at least one concrete case (`batch not found` in do_GET ~L54, `invalid batchNo` in do_POST ~L73, or `no route for` ~L64/L87), so clients and monitoring see success; fix is proper 4xx codes (404/400)"
+  should:
+    - "Traces the caller is_lot_approved (app/lims_client.py ~L51-53) and explains that a LIMS outage or auth failure becomes a plain 'not approved' (False) indistinguishable from a lot with no or failing results"
+    - "States that `_send` retries immediately with no backoff or jitter, and/or that it also retries HTTP 4xx client errors because urllib.error.HTTPError subclasses URLError"
+    - "Flags utils.to_float (app/utils.py ~L26-33), called by api.py do_POST for plannedQty, as a masking fallback: an unparsable quantity silently becomes None/NULL planned_qty while POST /batches still returns 201"
+    - "Lists db.session() (app/db.py ~L72-82) as an acceptable handler because it rolls back and re-raises"
+    - "Follows the agent's output shape: a VERDICT line (NEEDS_WORK), severity-tagged findings each citing path:line with Hidden/Observed/Fix, ordered most severe first"
+  must_not:
+    - "Reports the `except Exception:` in db.session() (app/db.py ~L78) as a swallowed or silent failure; it rolls back and re-raises (answer key FP-04)"
+    - "Claims that a LIMS failure makes is_lot_approved return True or approve a lot; the `bool(results) and all(...)` guard makes it return False (answer key FP-09)"
