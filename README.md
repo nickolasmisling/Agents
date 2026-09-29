@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**57 agents** in 12 categories.
+**61 agents** in 12 categories.
 
 ### Code review & auditing
 
@@ -160,7 +160,9 @@ To pin every agent to one model (for example, on a budget), set
 | --- | --- | --- | --- |
 | [`claude-api-reviewer`](.claude/agents/ai/claude-api-reviewer.md) | Reviews code calling the Claude API, Anthropic SDKs or Claude Agent SDK (incl. Bedrock/Vertex) against current docs: model ids, max_tokens, prompt caching, tool_use loops, streaming, stop_reason, retries on 429/529, timeouts, thinking, API keys, cost. | sonnet | read-only + web |
 | [`claude-md-curator`](.claude/agents/ai/claude-md-curator.md) | Creates or maintains CLAUDE.md files (root and nested) for Claude Code: runs every build/test/lint/format command it lists, records non-obvious conventions, architecture pointers and gotchas, prunes stale, generic or derivable lines, and proposes hooks for must-always rules. | sonnet | read/write |
+| [`llm-eval-designer`](.claude/agents/ai/llm-eval-designer.md) | Designs and builds evals for LLM features: error analysis of real outputs, failure-mode taxonomy, golden dataset (10-50 cases incl. edge and adversarial, expected properties), code assertions before binary LLM-as-judge rubrics calibrated on human labels, metrics and a CI regression gate. | opus | read/write |
 | [`mcp-server-builder`](.claude/agents/ai/mcp-server-builder.md) | Builds or extends Model Context Protocol (MCP) servers in TypeScript or Python (mcp/FastMCP): tools with precise names, descriptions and JSON schemas, resources, prompts, stdio or Streamable HTTP transport, auth; tests with MCP Inspector and registers via `claude mcp add`. | sonnet | read/write + web |
+| [`prompt-engineer`](.claude/agents/ai/prompt-engineer.md) | Writes and improves prompts for LLM features in application code: system prompts, tool descriptions, few-shot examples, JSON/structured-output schemas, RAG and classification/extraction prompts. | opus | read/write |
 | [`subagent-auditor`](.claude/agents/ai/subagent-auditor.md) | Audits Claude Code subagent definitions (.claude/agents, ~/.claude/agents) for broken frontmatter, name/filename or duplicate-name clashes, missing, over-broad or stale tools, dated model ids, and vague, bloated or overlapping descriptions that misroute delegation. | sonnet | read-only |
 | [`subagent-author`](.claude/agents/ai/subagent-author.md) | Creates or improves Claude Code subagents (.claude/agents/**/*.md, ~/.claude/agents): routing-rule description, least-privilege tools, model alias, procedural body with guardrails and output contract, plus trigger and near-miss test prompts. | opus | read/write + web |
 
@@ -168,6 +170,7 @@ To pin every agent to one model (for example, on a budget), set
 
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
+| [`change-control-impact-assessor`](.claude/agents/compliance/change-control-impact-assessor.md) | Drafts a change-control impact assessment for a code change (PR, branch, release range) to a validated/GxP system: plain summary, proposed minor/major class, GxP impact, affected URS and functions, regression and revalidation scope, data migration, rollback, training/SOP, evidence. | opus | read-only |
 | [`csv-validation-author`](.claude/agents/compliance/csv-validation-author.md) | Drafts GxP validation deliverables (CSV/CSA, GAMP 5) from code and docs: system description and category, intended use and GxP impact, risk assessment, DRAFT URS, traceability matrix, IQ/OQ/PQ or CSA test protocols, never executed. | opus | read/write |
 | [`gxp-data-integrity-reviewer`](.claude/agents/compliance/gxp-data-integrity-reviewer.md) | Reviews code in GxP-regulated systems (pharma, biotech, medical device, labs, QA) touching regulated records, audit trails, e-signatures, timestamps, user identity/roles or record edits/deletes; maps findings to ALCOA+ and 21 CFR Part 11 / EU Annex 11. | opus | read-only |
 
@@ -176,12 +179,13 @@ To pin every agent to one model (for example, on a budget), set
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
 | [`i18n-engineer`](.claude/agents/product/i18n-engineer.md) | Internationalizes apps: extracts hardcoded UI strings into the repo's i18n framework (i18next, react-intl/FormatJS, gettext/Babel, .resx/IStringLocalizer, Angular i18n), fixes locale formatting of dates, time zones, numbers and currency, ICU plurals, RTL and text expansion, and drafts es/pt-BR translations for review. | sonnet | read/write |
-| [`requirements-analyst`](.claude/agents/product/requirements-analyst.md) | Turns a vague request, ticket, email or meeting note into testable requirements grounded in the code: problem, actors, user stories or URS "shall" items with IDs, Given/When/Then acceptance criteria, NFRs, edge cases, out-of-scope, assumptions, dependencies, open questions. | sonnet | read/write |
+| [`requirements-analyst`](.claude/agents/product/requirements-analyst.md) | Turns a vague request, ticket, email or meeting note into testable requirements grounded in code: problem, actors, user stories or URS "shall" items with IDs, Given/When/Then acceptance criteria, NFRs, edge cases, out-of-scope, assumptions, dependencies, open questions. | sonnet | read/write |
 
 ### Research
 
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
+| [`docs-researcher`](.claude/agents/research/docs-researcher.md) | Answers how-to, API, config and deprecation questions about a known library, framework, SDK, CLI or cloud service from current official docs for the pinned version, with cited URLs and a version-matched example. | sonnet | read-only + web |
 | [`feature-tracer`](.claude/agents/research/feature-tracer.md) | Explains how an existing feature works end to end: entry point (route, CLI command, UI event, job, message handler) through validation, services and domain logic to data stores, side effects and response at path:line, with config flags, error paths and tests. | sonnet | read-only |
 | [`library-evaluator`](.claude/agents/research/library-evaluator.md) | Compares candidate libraries, frameworks or services for a need and recommends one: stack fit, ergonomics, maintenance health, adoption, license, security history, size, transitive deps, platform (Windows, air-gapped), exit cost, cited from registries, GitHub and docs. | sonnet | read-only + web |
 <!-- catalog:end -->

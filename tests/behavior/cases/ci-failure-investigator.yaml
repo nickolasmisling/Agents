@@ -1,0 +1,456 @@
+agent: ci-failure-investigator
+fixture: sample-app
+# Scenario: PR #87 (branch feat/lims-async-polling) is red in GitHub Actions run 4521.
+# Setup builds this history on top of the fixture baseline (all commits at the
+# baseline timestamp, as in change-verifier.yaml):
+#   main:  "fix(batches): paginate dropped the first row of every page" (PY-02 fixed,
+#          so main's pytest suite is green and "the previous push was green" holds)
+#   feat/lims-async-polling:
+#     A "feat(lims): add async polling helper for sample results"
+#       - app/lims_client.py: async wait_for_results()
+#       - tests/test_lims_async.py: two @pytest.mark.asyncio tests
+#       - requirements.txt line 4 + pyproject dev extra: pytest-asyncio==0.24.0
+#       (this is run 4507, the previous, green push)
+#     B "build: pin pytest to 7.4.4 to match the validated toolchain"   <- run 4521 SHA
+#       - requirements.txt line 3 and pyproject dev extra: pytest>=7.4 -> pytest==7.4.4
+#   then the runner's empty 'setup' commit.
+# ci-logs/run-4521.log is `gh run view 4521 --log` output (job<TAB>step<TAB>ts line)
+# for jobs pr-title (green), web (green) and python (red); it is git-ignored via
+# .git/info/exclude so the tree at HEAD equals the run's SHA. SHAs and timestamps in
+# the log are filled in from the scratch repo; the line numbers are fixed:
+#   L1-L28     pr-title: the step's script text contains `echo "::error::PR title ..."`
+#              (never executed; title passes). Early noise.
+#   L29-L168   web: npm deprecation warnings + "7 vulnerabilities (... 2 critical)". Noise.
+#   L169-L343  python job. Token permissions in Set up job: Contents/Metadata/Packages read.
+#   L276       pip `WARNING: Retrying ... ReadTimeoutError ... pypi.org` during the pip
+#              self-upgrade, which then succeeds (L277-L286). Red herring (not an outage).
+#   L296       FIRST REAL ERROR: `ERROR: Cannot install -r requirements.txt (line 4) and
+#              pytest==7.4.4 because these package versions have conflicting dependencies.`
+#   L298-L300  "The conflict is caused by: The user requested pytest==7.4.4 /
+#              pytest-asyncio 0.24.0 depends on pytest<9 and >=8.2"
+#   L309       `ERROR: ResolutionImpossible: ...`
+#   L310       `##[error]Process completed with exit code 1.` (end marker)
+#   L311-L341  cascade: "Run tests" never ran (skipped); "Publish test report" ran only
+#              because of `if: always()`: `##[warning]No file matches path
+#              reports/junit.xml` (L331), "No test results found!", then a non-fatal
+#              `##[error]... Resource not accessible by integration` (L335, token has no
+#              Checks permission; latent INF-13, not why the run is red).
+# The pip text is real pip 26.2.1 output for this requirements.txt (checked with
+# `pip install --dry-run`). pytest-asyncio 0.24.0 requires pytest>=8.2,<9; 0.23.8
+# requires pytest>=7.0.0,<9. Verified in scratch venvs: at commit A with pytest 8.4.x +
+# pytest-asyncio 0.24.0 the suite passes (21 passed); with pytest==7.4.4 +
+# pytest-asyncio==0.23.8 it also passes, so both fixes are valid.
+# Expected: classification = code/dependency change in the PR (restore failure),
+# hand-off build-fixer. Not: registry outage, flaky, drift, permissions, YAML.
+setup: |
+  set -euo pipefail
+  ts=$(git log -1 --format=%ct)
+  commit_as() {  # commit_as "<name>" "<email>" "<subject>" "<body>"
+    GIT_AUTHOR_NAME="$1" GIT_AUTHOR_EMAIL="$2" GIT_COMMITTER_NAME="$1" GIT_COMMITTER_EMAIL="$2" \
+    GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
+      git -c commit.gpgsign=false commit -q -m "$3" -m "$4"
+  }
+  edit() {  # edit <file> <old> <new>  (old must occur exactly once)
+    python3 - "$1" "$2" "$3" <<'PY'
+  import pathlib
+  import sys
+
+  path, old, new = sys.argv[1:4]
+  p = pathlib.Path(path)
+  text = p.read_text(encoding="utf-8")
+  if text.count(old) != 1:
+      sys.exit(f"setup: expected exactly one match in {path} for {old[:50]!r}")
+  p.write_text(text.replace(old, new, 1), encoding="utf-8")
+  PY
+  }
+
+  # main: fix PY-02 so the suite (and therefore the previous push) is green.
+  edit app/batches.py $'    start = (page - 1) * page_size + 1\n    end = page * page_size\n' \
+                      $'    start = (page - 1) * page_size\n    end = start + page_size\n'
+  git add app/batches.py
+  commit_as "Laura Gomez" "laura.gomez@batchtrack.example" \
+    "fix(batches): paginate dropped the first row of every page" \
+    "start was off by one for 1-based pages, so GET /batches lost one row per page."
+
+  git checkout -q -b feat/lims-async-polling
+
+  # Commit A (run 4507, green): async helper, tests, pytest-asyncio.
+  edit app/lims_client.py $'import json\n' $'import asyncio\nimport json\n'
+  cat >> app/lims_client.py <<'EOF'
+
+
+  async def wait_for_results(lot_no, timeout=300.0, interval=10.0):
+      """Poll LIMS until a lot has QC results; raise TimeoutError after ``timeout`` seconds."""
+      loop = asyncio.get_running_loop()
+      deadline = loop.time() + timeout
+      while True:
+          results = await asyncio.to_thread(get_sample_results, lot_no)
+          if results:
+              return results
+          if loop.time() + interval > deadline:
+              raise TimeoutError(f"no LIMS results for lot {lot_no} after {timeout:.0f}s")
+          await asyncio.sleep(interval)
+  EOF
+  cat > tests/test_lims_async.py <<'EOF'
+  import pytest
+
+  from app import lims_client
+
+
+  @pytest.mark.asyncio
+  async def test_wait_for_results_returns_first_non_empty(monkeypatch):
+      responses = iter([[], [], [{"test": "assay", "status": "pass"}]])
+      monkeypatch.setattr(lims_client, "get_sample_results", lambda lot_no: next(responses))
+      results = await lims_client.wait_for_results("API-PCM-2601", timeout=1.0, interval=0.01)
+      assert results == [{"test": "assay", "status": "pass"}]
+
+
+  @pytest.mark.asyncio
+  async def test_wait_for_results_times_out(monkeypatch):
+      monkeypatch.setattr(lims_client, "get_sample_results", lambda lot_no: [])
+      with pytest.raises(TimeoutError):
+          await lims_client.wait_for_results("API-PCM-2601", timeout=0.05, interval=0.01)
+  EOF
+  edit requirements.txt $'pytest>=7.4\n' $'pytest>=7.4\npytest-asyncio==0.24.0\n'
+  edit pyproject.toml 'dev = ["pytest>=7.4"]' 'dev = ["pytest>=7.4", "pytest-asyncio==0.24.0"]'
+  git add app/lims_client.py tests/test_lims_async.py requirements.txt pyproject.toml
+  commit_as "Andres Pardo" "andres.pardo@batchtrack.example" \
+    "feat(lims): add async polling helper for sample results" \
+    "wait_for_results() polls LIMS without blocking the event loop. Tests use pytest-asyncio."
+
+  # Commit B (run 4521, red): pin pytest.
+  edit requirements.txt $'pytest>=7.4\n' $'pytest==7.4.4\n'
+  edit pyproject.toml '"pytest>=7.4"' '"pytest==7.4.4"'
+  git add requirements.txt pyproject.toml
+  commit_as "Andres Pardo" "andres.pardo@batchtrack.example" \
+    "build: pin pytest to 7.4.4 to match the validated toolchain" \
+    "QA validated the test toolchain with pytest 7.4.4 (VAL-TS-014); pin it so CI runs the same version."
+
+  # The downloaded run log: git-ignored so the tree at HEAD is the run's tree.
+  mkdir -p ci-logs
+  echo 'ci-logs/' >> .git/info/exclude
+  SHA=$(git rev-parse HEAD) SHORT=$(git rev-parse --short=7 HEAD) TS="$ts" python3 - > ci-logs/run-4521.log <<'PY'
+  import datetime as dt
+  import os
+
+  SHA, SHORT = os.environ["SHA"], os.environ["SHORT"]
+  T0 = dt.datetime.fromtimestamp(int(os.environ["TS"]), dt.timezone.utc) + dt.timedelta(minutes=41)
+  REPO = "bogplant/batchtrack"
+  WORK = "/home/runner/work/batchtrack/batchtrack"
+  PYLOC = "/opt/hostedtoolcache/Python/3.12.11/x64"
+  out = []
+
+
+  def job(name, start, steps):
+      t = T0 + dt.timedelta(seconds=start)
+      for step, secs, lines in steps:
+          for i, line in enumerate(lines):
+              ts = t + dt.timedelta(seconds=secs * i / max(len(lines), 1))
+              out.append(f"{name}\t{step}\t{ts.strftime('%Y-%m-%dT%H:%M:%S.%f')}1Z {line}".rstrip())
+          t += dt.timedelta(seconds=secs)
+
+
+  def set_up(name, runner, actions):
+      lines = [
+          "Current runner version: '2.334.0'",
+          f"Runner name: 'GitHub Actions {runner}'",
+          "Runner group name: 'GitHub Actions'",
+          f"Machine name: 'runnervm{runner % 97:02d}x7k'",
+          "##[group]Operating System", "Ubuntu", "24.04.3", "LTS", "##[endgroup]",
+          "##[group]Runner Image", "Image: ubuntu-24.04", "Version: 20260921.1.0",
+          "Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260921.1/images/ubuntu/Ubuntu2404-Readme.md",
+          "Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260921.1",
+          "##[endgroup]",
+          "##[group]GITHUB_TOKEN Permissions", "Contents: read", "Metadata: read", "Packages: read", "##[endgroup]",
+          "Secret source: Actions",
+          "Prepare workflow directory",
+          "Prepare all required actions",
+      ]
+      if actions:
+          lines.append("Getting action download info")
+          lines += [f"Download action repository '{a}' (SHA:{s})" for a, s in actions]
+      lines.append(f"Complete job name: {name}")
+      return ("Set up job", 3, lines)
+
+
+  CHECKOUT = ("Run actions/checkout@v4", 2, [
+      "##[group]Run actions/checkout@v4", "with:", f"  ref: {SHA}", f"  repository: {REPO}",
+      "  token: ***", "  ssh-strict: true", "  ssh-user: git", "  persist-credentials: true",
+      "  clean: true", "  sparse-checkout-cone-mode: true", "  fetch-depth: 1", "  fetch-tags: false",
+      "  show-progress: true", "  lfs: false", "  submodules: false", "  set-safe-directory: true",
+      "##[endgroup]",
+      f"Syncing repository: {REPO}",
+      "##[group]Getting Git version info", f"Working directory is '{WORK}'",
+      "[command]/usr/bin/git version", "git version 2.51.0", "##[endgroup]",
+      f"[command]/usr/bin/git config --global --add safe.directory {WORK}",
+      f"Deleting the contents of '{WORK}'",
+      "##[group]Initializing the repository", f"[command]/usr/bin/git init {WORK}",
+      f"Initialized empty Git repository in {WORK}/.git/",
+      f"[command]/usr/bin/git remote add origin https://github.com/{REPO}", "##[endgroup]",
+      "##[group]Fetching the repository",
+      f"[command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin {SHA}",
+      f"From https://github.com/{REPO}", f" * branch            {SHA} -> FETCH_HEAD", "##[endgroup]",
+      "##[group]Checking out the ref", f"[command]/usr/bin/git checkout --progress --force {SHA}",
+      f"Note: switching to '{SHA}'.", "",
+      "You are in 'detached HEAD' state. You can look around, make experimental",
+      "changes and commit them, and you can discard any commits you make in this",
+      "state without impacting any branches by switching back to a branch.", "",
+      f"HEAD is now at {SHORT} build: pin pytest to 7.4.4 to match the validated toolchain",
+      "##[endgroup]", "[command]/usr/bin/git log -1 --format=%H", SHA,
+  ])
+  POST_CHECKOUT = ("Post Run actions/checkout@v4", 1, [
+      "Post job cleanup.", "[command]/usr/bin/git version", "git version 2.51.0",
+      f"[command]/usr/bin/git config --global --add safe.directory {WORK}",
+      "[command]/usr/bin/git config --local --name-only --get-regexp http\\.https\\:\\/\\/github\\.com\\/\\.extraheader",
+      "http.https://github.com/.extraheader",
+      "[command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader",
+  ])
+  COMPLETE = ("Complete job", 1, ["Cleaning up orphan processes"])
+  PYENV = ["env:", f"  pythonLocation: {PYLOC}", f"  PKG_CONFIG_PATH: {PYLOC}/lib/pkgconfig",
+           f"  Python_ROOT_DIR: {PYLOC}", f"  Python2_ROOT_DIR: {PYLOC}", f"  Python3_ROOT_DIR: {PYLOC}",
+           f"  LD_LIBRARY_PATH: {PYLOC}/lib"]
+  TITLE = "feat(lims): async polling for LIMS sample results"
+
+  job("pr-title", 0, [
+      set_up("pr-title", 1000481207, []),
+      ("Check PR title follows Conventional Commits", 1, [
+          f'##[group]Run title="{TITLE}"',
+          f'title="{TITLE}"',
+          'echo "PR title: $title"',
+          "if ! echo \"$title\" | grep -Eq '^(feat|fix|chore|docs|refactor|test|ci)(\\([a-z0-9-]+\\))?!?: .+'; then",
+          "  echo \"::error::PR title must look like 'fix(api): handle empty site filter'\"",
+          "  exit 1",
+          "fi",
+          "shell: /usr/bin/bash -e {0}",
+          "##[endgroup]",
+          f"PR title: {TITLE}",
+      ]),
+      COMPLETE,
+  ])
+
+  job("web", 2, [
+      set_up("web", 1000481209, [
+          ("actions/checkout@v4", "08eba0b27e820071cde6df949e0beb9ba4906955"),
+          ("actions/setup-node@v4", "49933ea5288caeca8642d1e84afbd3f7d6820020"),
+      ]),
+      CHECKOUT,
+      ("Run actions/setup-node@v4", 2, [
+          "##[group]Run actions/setup-node@v4", "with:", "  node-version: 20", "  always-auth: false",
+          "  check-latest: false", "  token: ***", "##[endgroup]",
+          "Found in cache @ /opt/hostedtoolcache/node/20.19.5/x64",
+          "##[group]Environment details", "node: v20.19.5", "npm: 10.8.2", "yarn: 1.22.22", "##[endgroup]",
+      ]),
+      ("Install dependencies", 13, [
+          "##[group]Run npm install", "npm install", "shell: /usr/bin/bash -e {0}", "##[endgroup]",
+          "npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.",
+          "npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported",
+          "npm warn deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported",
+          "", "added 187 packages, and audited 188 packages in 12s", "",
+          "31 packages are looking for funding", "  run `npm fund` for details", "",
+          "7 vulnerabilities (1 low, 2 moderate, 2 high, 2 critical)", "",
+          "To address issues that do not require attention, run:", "  npm audit fix", "",
+          "To address all issues (including breaking changes), run:", "  npm audit fix --force", "",
+          "Run `npm audit` for details.",
+      ]),
+      ("Type check", 5, [
+          "##[group]Run npm run typecheck", "npm run typecheck", "shell: /usr/bin/bash -e {0}", "##[endgroup]",
+          "", "> batchtrack-web@0.4.2 typecheck", "> tsc --noEmit", "",
+      ]),
+      ("Unit tests", 3, [
+          "##[group]Run npm test", "npm test", "shell: /usr/bin/bash -e {0}", "##[endgroup]",
+          "", "> batchtrack-web@0.4.2 test", "> vitest run --passWithNoTests", "", "",
+          f" RUN  v0.34.6 {WORK}/web", "",
+          "include: **/*.{test,spec}.?(c|m)[jt]s?(x)",
+          "exclude:  **/node_modules/**, **/dist/**, **/cypress/**, **/.{idea,git,cache,output,temp}/**, **/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*",
+          "watch exclude:  **/node_modules/**, **/dist/**", "",
+          "No test files found, exiting with code 0",
+      ]),
+      POST_CHECKOUT,
+      COMPLETE,
+  ])
+
+  job("python", 2, [
+      set_up("python", 1000481208, [
+          ("actions/checkout@v4", "08eba0b27e820071cde6df949e0beb9ba4906955"),
+          ("actions/setup-python@v5", "a26af69be951a213d495a4c3e4e4022e16d87065"),
+          ("mikepenz/action-junit-report@master", "3585e9575db828022551b4231f165eb59a0e74e3"),
+      ]),
+      CHECKOUT,
+      ("Run actions/setup-python@v5", 2, [
+          "##[group]Run actions/setup-python@v5", "with:", "  python-version: 3.12", "  check-latest: false",
+          "  token: ***", "  update-environment: true", "  allow-prereleases: false", "  freethreaded: false",
+          "##[endgroup]", "##[group]Installed versions", "Successfully set up CPython (3.12.11)", "##[endgroup]",
+      ]),
+      ("Install dependencies", 24, [
+          "##[group]Run python -m pip install --upgrade pip",
+          "python -m pip install --upgrade pip",
+          "pip install -r requirements.txt",
+          "shell: /usr/bin/bash -e {0}",
+      ] + PYENV + [
+          "##[endgroup]",
+          f"Requirement already satisfied: pip in {PYLOC}/lib/python3.12/site-packages (25.1.1)",
+          "WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError(\"HTTPSConnectionPool(host='pypi.org', port=443): Read timed out. (read timeout=15)\")': /simple/pip/",
+          "Collecting pip",
+          "  Downloading pip-26.2.1-py3-none-any.whl.metadata (4.6 kB)",
+          "Downloading pip-26.2.1-py3-none-any.whl (1.8 MB)",
+          "   " + "━" * 40 + " 1.8/1.8 MB 61.3 MB/s  0:00:00",
+          "Installing collected packages: pip",
+          "  Attempting uninstall: pip",
+          "    Found existing installation: pip 25.1.1",
+          "    Uninstalling pip-25.1.1:",
+          "      Successfully uninstalled pip-25.1.1",
+          "Successfully installed pip-26.2.1",
+          "Collecting pytest==7.4.4 (from -r requirements.txt (line 3))",
+          "  Downloading pytest-7.4.4-py3-none-any.whl.metadata (7.9 kB)",
+          "Collecting pytest-asyncio==0.24.0 (from -r requirements.txt (line 4))",
+          "  Downloading pytest_asyncio-0.24.0-py3-none-any.whl.metadata (3.9 kB)",
+          "Collecting iniconfig (from pytest==7.4.4->-r requirements.txt (line 3))",
+          "  Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)",
+          "Collecting packaging (from pytest==7.4.4->-r requirements.txt (line 3))",
+          "  Downloading packaging-26.3-py3-none-any.whl.metadata (3.5 kB)",
+          "Collecting pluggy<2.0,>=0.12 (from pytest==7.4.4->-r requirements.txt (line 3))",
+          "  Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)",
+          "INFO: pip is looking at multiple versions of pytest-asyncio to determine which version is compatible with other requirements. This could take a while.",
+          "ERROR: Cannot install -r requirements.txt (line 4) and pytest==7.4.4 because these package versions have conflicting dependencies.",
+          "",
+          "The conflict is caused by:",
+          "    The user requested pytest==7.4.4",
+          "    pytest-asyncio 0.24.0 depends on pytest<9 and >=8.2",
+          "",
+          "Additionally, some packages in these conflicts have no matching distributions available for your environment:",
+          "    pytest",
+          "",
+          "To fix this you could try to:",
+          "1. loosen the range of package versions you've specified",
+          "2. remove package versions to allow pip to attempt to solve the dependency conflict",
+          "",
+          "ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/#dealing-with-dependency-conflicts",
+          "##[error]Process completed with exit code 1.",
+      ]),
+      ("Publish test report", 2, [
+          "##[group]Run mikepenz/action-junit-report@master", "with:", "  report_paths: reports/junit.xml",
+          "  check_name: pytest", "  token: ***", "  annotate_only: false", "  update_check: false",
+          "  check_annotations: true", "  fail_on_failure: false", "  fail_on_parse_error: false",
+          "  require_tests: false", "  require_passed_tests: false", "  include_passed: false",
+          "  detailed_summary: false", "  job_summary: true",
+      ] + PYENV + [
+          "##[endgroup]",
+          "##[group]\U0001F4E6 Process test results",
+          "ℹ️ Preparing 1 report as configured.",
+          "\U0001F50E Searching for reports/junit.xml",
+          "##[warning]No file matches path reports/junit.xml",
+          "##[endgroup]",
+          "##[group]\U0001F680 Publish results",
+          "ℹ️ - pytest - No test results found!",
+          "ℹ️ Creating check (Annotations: 0)",
+          "##[error]❌ Failed to create checks using the provided token. (HttpError: Resource not accessible by integration - https://docs.github.com/rest/checks/runs#create-a-check-run)",
+          "##[warning]⚠️ This usually indicates insufficient permissions. More details: https://github.com/mikepenz/action-junit-report/issues/23",
+          "##[endgroup]",
+      ]),
+      POST_CHECKOUT,
+      COMPLETE,
+  ])
+
+  print("\n".join(out))
+  PY
+keep_setup_uncommitted: false
+prompt: >-
+  CI went red on my PR #87 (branch feat/lims-async-polling, "feat(lims): async
+  polling for LIMS sample results"). There is no gh access from this
+  environment, so I saved the full output of `gh run view 4521 --log` to
+  ci-logs/run-4521.log in the repo. The previous push to this PR (run 4507) was
+  green. Work out why run 4521 failed: the failing job and step, the actual
+  first error with its line in that log, what kind of failure it is, what
+  should change, and which agent should pick up the fix. This is diagnosis
+  only: don't modify anything in the repo or its git state, and don't re-run
+  anything.
+read_only: true
+# Report-only task: guard against mutating git commands (commit, stash, checkout,
+# reset) that the file fingerprint cannot see, and make sure the conflicting pins
+# are still what the run saw.
+check: >-
+  test "$(git rev-parse --abbrev-ref HEAD)" = feat/lims-async-polling &&
+  test "$(git rev-list --count HEAD)" -eq 5 &&
+  test "$(git rev-list --count main)" -eq 2 &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD &&
+  grep -qx 'pytest==7.4.4' requirements.txt &&
+  grep -qx 'pytest-asyncio==0.24.0' requirements.txt &&
+  test -s ci-logs/run-4521.log
+rubric:
+  must:
+    - >-
+      Identifies the failing step as job `python` > `Install dependencies` (the
+      `pip install -r requirements.txt` command) and gives pip's dependency
+      conflict as the first real error, quoting `ERROR: Cannot install -r
+      requirements.txt (line 4) and pytest==7.4.4 because these package versions
+      have conflicting dependencies.` (ci-logs/run-4521.log line 296) and/or the
+      lines under it (`pytest-asyncio 0.24.0 depends on pytest<9 and >=8.2`,
+      L298-300, or `ERROR: ResolutionImpossible`, L309), with a log line number
+      in the L296-L309 range or the line quoted verbatim. Naming only the
+      `##[error]Process completed with exit code 1.` marker (L310) does not meet
+      this.
+    - >-
+      Explains the cause concretely: requirements.txt pins `pytest==7.4.4` (line
+      3) while `pytest-asyncio==0.24.0` (line 4) needs pytest >=8.2,<9, so the
+      requirement set cannot be resolved.
+    - >-
+      Classifies the failure as a dependency change made in the PR (a
+      code/dependency restore failure), not as a registry/network outage, a
+      flaky test, runner/toolchain drift, a secrets/permissions problem or a
+      YAML/config error, and hands the fix off to build-fixer.
+    - >-
+      Recommends a concrete compatible combination for requirements.txt: either
+      relax the pytest pin to a version pytest-asyncio 0.24.0 accepts (e.g.
+      `pytest>=8.2,<9` or a specific 8.x), or keep `pytest==7.4.4` and pin
+      pytest-asyncio to a release that still supports pytest 7 (e.g.
+      `pytest-asyncio<0.24` / `==0.23.8`).
+  should:
+    - >-
+      Ties the conflict to the head commit "build: pin pytest to 7.4.4 to match
+      the validated toolchain" (pytest>=7.4 -> pytest==7.4.4 in requirements.txt
+      and pyproject.toml) as the only change since the previous push's commit
+      "feat(lims): add async polling helper for sample results" (run 4507), using
+      git log/diff or show, and notes that .github/workflows/ci.yml did not change.
+    - >-
+      Lists the later errors and the noise as not the cause: the `##[error]Process
+      completed with exit code 1.` end marker; `Publish test report` ran only
+      because of `if: always()`, so its `No file matches path reports/junit.xml`
+      warning is a consequence of the tests never running; its `Resource not
+      accessible by integration` check-creation error is non-fatal and a separate
+      token-permission matter; and the earlier pip `Retrying ... ReadTimeoutError`
+      warning was transient (the pip self-upgrade succeeded right after).
+    - >-
+      Confirms the conflict independently of the log without installing into the
+      environment (e.g. `pip install --dry-run -r requirements.txt` in a temp
+      venv, or pytest-asyncio's published `Requires-Dist: pytest<9,>=8.2`) and
+      reports the command and its outcome.
+    - >-
+      Weighs the intent of the pin: the commit message says pytest 7.4.4 is the
+      QA-validated toolchain, so pinning pytest-asyncio to 0.23.x keeps it (or
+      relaxing pytest needs QA sign-off), and the pyproject.toml dev extra should
+      be changed the same way as requirements.txt.
+    - >-
+      Uses the agent's report shape: a `STATUS: DIAGNOSED` line with the
+      classification, then Run, Failing step, First error (log file:line),
+      Cascade ignored, Classification with confidence, Likely cause, Evidence,
+      Last green, Local reproduction, Recommended fix and Hand off to.
+  must_not:
+    - >-
+      Treats the pip `WARNING: Retrying ... ReadTimeoutError ... pypi.org` line
+      (L276) or pip's "no matching distributions available for your environment:
+      pytest" note as the cause, classifies the failure as a registry/network
+      outage or a flake, or recommends re-running the job as the fix.
+    - >-
+      Names a later or unrelated line as the root cause (the Publish test report
+      step's missing reports/junit.xml or `Resource not accessible by
+      integration` error, the `::error::PR title ...` text in the pr-title job's
+      script, or the web job's npm audit/deprecation output), or proposes a
+      ci.yml change (e.g. adding `permissions: checks: write`,
+      `continue-on-error`, a different python-version, removing `if: always()`)
+      as the fix for this run's failure. Mentioning the permissions error as a
+      separate, secondary observation is fine.
+    - >-
+      Claims that pytest ran in run 4521 or that any test failed in it (e.g. the
+      tests in tests/test_lims_async.py, or failures seen only in a local pytest
+      run without pytest-asyncio installed); the Run tests step never ran.
