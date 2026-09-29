@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**31 agents** in 6 categories.
+**32 agents** in 6 categories.
 
 ### Code review & auditing
 
@@ -128,6 +128,7 @@ To pin every agent to one model (for example, on a budget), set
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
 | [`git-historian`](.claude/agents/git/git-historian.md) | Answers why code is the way it is from version control: when and why a line, function or file changed, which commit, PR or ticket (INC-, JIRA-, #123) introduced it, and who knows it, via git log -L, pickaxe, blame past renames and PR lookups. | sonnet | read-only |
+| [`pr-description-writer`](.claude/agents/git/pr-description-writer.md) | Drafts a pull request (or merge request) title and description from the branch diff (base...HEAD), mirroring the repo's PR template if present: summary, grouped changes, risk and rollout, testing evidence, linked issues. | haiku | read-only |
 <!-- catalog:end -->
 
 ## What's deliberately not here

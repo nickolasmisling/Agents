@@ -31,6 +31,7 @@
     "./.claude/agents/docs/docs-sync-editor.md",
     "./.claude/agents/docs/technical-writer.md",
     "./.claude/agents/git/git-historian.md",
+    "./.claude/agents/git/pr-description-writer.md",
     "./.claude/agents/review/accessibility-reviewer.md",
     "./.claude/agents/review/api-contract-reviewer.md",
     "./.claude/agents/review/architecture-reviewer.md",
