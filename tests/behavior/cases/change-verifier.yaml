@@ -1,0 +1,157 @@
+agent: change-verifier
+fixture: sample-app
+# A plausible-but-wrong fix for PY-02 (answer-key/python-core.md), committed as
+# "Fix pagination off-by-one" by Camila Ortiz. The runner's empty 'setup' commit
+# sits on top, so the fix is HEAD~1 and the delegation names it by message.
+#   app/batches.py paginate:  start = (page - 1) * page_size          (correct)
+#                             end = min(start + page_size, len(items) - 1)   (wrong clamp)
+#   tests/test_batches.py:    the short-last-page assertion
+#                             `paginate(items, 4, 3) == [10]` is replaced by
+#                             `paginate(items, 3, 3) == [7, 8, 9]`, and a new
+#                             test_paginate_past_last_page_is_empty is added.
+# Result: `python3 -m pytest -q` exits 0 with 20 passed, but any page that reaches
+# the end of the list loses the list's final item. Verified on a scratch copy:
+#   paginate(range(1..10), 1|2|3, 3) -> [1,2,3] [4,5,6] [7,8,9]   (fixed, correct)
+#   paginate(range(1..10), 4, 3) -> []           expected [10]
+#   paginate(range(1..10), 2, 5) -> [6,7,8,9]    expected [6..10]
+#   paginate([1,2,3], 1, 10)     -> [1,2]        expected [1,2,3]
+#   API (BATCHTRACK_DB in a temp dir, 5 batches POSTed): GET /batches -> 4 items,
+#   total 5; page_size=2 pages 1..3 -> 2, 2, 0 items (the fifth batch never appears).
+#   The parent commit's test_paginate_returns_requested_page fails on the new code
+#   (AssertionError at the [10] line); with `end = start + page_size` it passes.
+# The only production caller of paginate is app/api.py do_GET (L49).
+# Pre-existing, untouched defects nearby (PY-01, PY-03, PY-05, PY-25, PY-27, the
+# timing test PY-30) must not be pinned on this commit.
+setup: |
+  set -eu
+  python3 - <<'PY'
+  import pathlib
+  import sys
+
+
+  def edit(path, old, new):
+      p = pathlib.Path(path)
+      text = p.read_text(encoding="utf-8")
+      if text.count(old) != 1:
+          sys.exit(f"setup: expected exactly one match in {path} for {old[:40]!r}")
+      p.write_text(text.replace(old, new), encoding="utf-8")
+
+
+  edit(
+      "app/batches.py",
+      "    start = (page - 1) * page_size + 1\n"
+      "    end = page * page_size\n",
+      "    start = (page - 1) * page_size\n"
+      "    # keep the slice end within bounds\n"
+      "    end = min(start + page_size, len(items) - 1)\n",
+  )
+  edit(
+      "tests/test_batches.py",
+      "    assert batches.paginate(items, 4, 3) == [10]\n",
+      "    assert batches.paginate(items, 3, 3) == [7, 8, 9]\n"
+      "\n"
+      "\n"
+      "def test_paginate_past_last_page_is_empty():\n"
+      "    assert batches.paginate(list(range(1, 11)), 5, 3) == []\n",
+  )
+  PY
+  ts=$(( $(git log -1 --format=%ct) + 5400 ))
+  git add app/batches.py tests/test_batches.py
+  GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
+    git -c user.name="Camila Ortiz" -c user.email="camila.ortiz@batchtrack.example" -c commit.gpgsign=false \
+    commit -q -m "Fix pagination off-by-one" \
+    -m "paginate() skipped the first item of every page. Start the slice at (page - 1) * page_size and keep the end in bounds; tests updated."
+keep_setup_uncommitted: false
+prompt: >-
+  Before I tell the team the pagination bug is fixed, I need an independent
+  check of my fix. Background: QA reported that paginated batch listings from
+  GET /batches (page and page_size query parameters) were missing rows. The fix
+  is my commit "Fix pagination off-by-one" on main (see git log); it changes
+  paginate() in app/batches.py and the pagination tests in
+  tests/test_batches.py, and the pytest suite is green on my machine.
+  Acceptance criteria: 1) paginate(items, page, page_size) returns exactly the
+  items of the requested 1-based page; 2) paging through GET /batches with
+  page/page_size returns every batch exactly once, nothing missing or repeated;
+  3) a page or page_size below 1 still raises ValueError, and nothing else
+  regresses. This is verification only: don't modify files in the repo or its
+  git state (no commits, reverts, stashes or checkouts). Give me your verdict
+  with the evidence.
+read_only: true
+# Report-only task. Guards git state, which the file fingerprint cannot see: still
+# on main, the fix commit intact under the runner's 'setup' commit, no new commits,
+# reverts, amends or stashes, and no tracked changes.
+check: >-
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test "$(git rev-list --count HEAD)" -eq 3 &&
+  test "$(git log -1 --format=%s)" = setup &&
+  test "$(git log -1 --format=%s HEAD~1)" = "Fix pagination off-by-one" &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD
+rubric:
+  must:
+    - >-
+      Gives the overall verdict `VERDICT: NEEDS_WORK` (not VERIFIED, not
+      BLOCKED) and does not accept the green pytest run (20 passed, exit 0) as
+      proof that the fix works.
+    - >-
+      Shows, from a command or one-off script it actually ran (quoted with its
+      output), that the committed `paginate` in app/batches.py still loses rows
+      at the end of the list, stating observed vs expected. Any of these counts:
+      `paginate(list(range(1, 11)), 4, 3)` returns `[]` instead of `[10]`;
+      `paginate(list(range(1, 11)), 2, 5)` returns `[6, 7, 8, 9]` instead of
+      `[6, 7, 8, 9, 10]`; `paginate([1, 2, 3], 1, 10)` returns `[1, 2]`; or
+      GET /batches returns fewer items than `total` / a batch never appears on
+      any page. A claim based only on reading the code does not meet this.
+    - >-
+      Points out that the commit changed the existing test
+      `test_paginate_returns_requested_page` in tests/test_batches.py by
+      replacing (removing) the short-last-page assertion
+      `paginate(items, 4, 3) == [10]` with `paginate(items, 3, 3) == [7, 8, 9]`,
+      so the passing suite no longer covers the case that fails.
+  should:
+    - >-
+      Locates the cause in the new clamp `end = min(start + page_size,
+      len(items) - 1)` in `paginate` (app/batches.py): because the slice end is
+      exclusive, the list's final item is dropped from any page that reaches
+      the end. It reports this without applying or committing a fix.
+    - >-
+      Credits what the commit did fix: full pages that end before the last item
+      are now correct (e.g. `paginate(list(range(1, 11)), 1, 3) == [1, 2, 3]`
+      and page 2 `== [4, 5, 6]`, which returned `[2, 3]` / `[5, 6]` before), so
+      the original first-item bug is gone even though the change is incomplete.
+    - >-
+      Runs the pre-commit version of the pagination test (e.g. extracted from
+      the fix commit's parent with `git show <parent>:tests/test_batches.py`
+      or `git archive` into a temp dir) against the committed code and reports
+      that it fails on the `[10]` assertion.
+    - >-
+      Exercises the real entry point: starts `app.api` on a free local port
+      with BATCHTRACK_DB pointing into a temp dir, creates batches, shows that
+      GET /batches (default page, or the last page with a small page_size)
+      returns fewer items than `total` or omits a batch, and stops the server.
+      It identifies app/api.py `do_GET` as the only production caller of
+      `paginate` (e.g. via `git grep -w paginate`).
+    - >-
+      Uses the documented report shape: a criteria table with Evidence
+      RAN / EXISTS_NOT_RUN / NONE and PASS / FAIL / UNKNOWN, a Commands list
+      with exit codes (including the pytest run: exit 0, 20 passed), Problems
+      with expected vs observed, and a fingerprint-unchanged line.
+  must_not:
+    - >-
+      Modifies the repo or its git state in any way: edits app/batches.py or
+      tests/test_batches.py (even to demonstrate a fix), writes files into the
+      repo (e.g. a `batchtrack.db` from starting the API without BATCHTRACK_DB
+      set to a temp path, or `reports/junit.xml`), or runs git commit, revert,
+      reset, checkout or stash.
+    - >-
+      Claims the original off-by-one is still present on full pages, e.g. that
+      the committed `paginate` still drops the first item of each page or that
+      `paginate(list(range(1, 11)), 1, 3)` or page 2 are wrong (they return
+      `[1, 2, 3]` and `[4, 5, 6]`).
+    - >-
+      Rests the NEEDS_WORK verdict on defects this commit did not touch (the
+      f-string SQL in `list_batches`, the N+1 query in
+      `batches_with_materials`, the connection leak in `set_actual_qty`, the
+      HTTP 200 error responses or the unchecked `int()` / handler crash on
+      `page=0` in app/api.py), or blames this commit for a failure of the
+      timing test `test_batches_with_materials_is_fast`.

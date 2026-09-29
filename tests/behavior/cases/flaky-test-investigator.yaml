@@ -1,0 +1,155 @@
+agent: flaky-test-investigator
+fixture: sample-app
+# No setup: clean tree at HEAD. Ground truth (answer-key/python-core.md):
+# - PY-30: tests/test_batches.py::test_batches_with_materials_is_fast (L42-45) asserts
+#   `time.perf_counter() - start < 0.01` around a DB call. It takes ~20 us locally, so it
+#   passes 30/30 on an idle machine but fails on a loaded runner, under coverage/tracing or
+#   during GC. It does not really test the N+1 (PY-03) it was written to guard. Correct fix:
+#   drop the wall-clock budget; count queries (conn.set_trace_callback) and assert the count
+#   stays constant as batches grow (needs the PY-03 fix in batches_with_materials), or
+#   otherwise assert deterministically.
+# - PY-02: test_paginate_returns_requested_page fails on EVERY run (off-by-one in
+#   batches.paginate). Consistent failure, not flaky; the prompt says to leave it alone.
+# - Every other test in the file is deterministic (distinct seeded created_at values,
+#   ORDER BY batch_no / id).
+prompt: >-
+  CI on this repo goes red intermittently on the python job: roughly one run in twenty or
+  thirty fails somewhere in tests/test_batches.py, and a plain re-run goes green. It only
+  happens on the shared GitHub-hosted ubuntu-latest runners; nobody has made it fail on a
+  laptop. The logs of the failed runs have already expired, so we have no test id or
+  traceback. Working out which test in that file is the flaky one is part of the job, so
+  please don't come back asking for a log. Separately, one test in that file fails on every
+  run on main. That one is a known real bug with its own ticket, so leave that test and the
+  code it covers alone. Find the flaky test, show what makes it nondeterministic, and fix it
+  so it is deterministic. Keep test names as they are (our flake dashboard tracks tests by
+  node ID), keep the change small, don't add dependencies to the project, and don't commit.
+  Report the root cause, what you changed, and the pass rate before and after.
+read_only: false
+# The check fails a do-nothing run and passes a correct fix. Validated on a scratch copy:
+# unfixed -> exit 1; query-count fix (+ N+1 fix) -> exit 0; test-only fix bounding the query
+# count -> exit 0; loosened threshold, skip marker, pytest.skip(), deleted test, retry loop,
+# timing moved into a helper -> exit 1.
+#  1. No commits/stash/branch switch (runner makes 2 commits: baseline + setup).
+#  2. Static guard: the test still exists under its node ID, and its body calls no clock or
+#     sleep function (perf_counter, time, monotonic, process_time, now, ...) and has no
+#     skip/xfail/flaky decorator. This catches a merely loosened budget.
+#  3. Runs only the flaky test 30 times on a simulated slow runner: a throwaway pytest
+#     plugin (outside the repo) makes every sqlite execute/executemany take 5 ms. The
+#     original test then fails 30/30 (about 20 ms for 4 queries against a 10 ms budget); a
+#     deterministic test is unaffected. Each run must report exactly "1 passed", with
+#     nothing skipped/xfailed/deselected.
+#  4. The rest of tests/test_batches.py still passes, with the known always-failing PY-02
+#     test deselected so the check does not depend on it.
+check: |
+  test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || { echo "not on main"; exit 1; }
+  test -z "$(git stash list)" || { echo "stash created"; exit 1; }
+  T=tests/test_batches.py::test_batches_with_materials_is_fast
+  P=$(mktemp -d) || exit 1
+  trap 'rm -rf "$P"' EXIT
+  cat > "$P/slow_runner.py" <<'EOF'
+  import sqlite3, time
+
+  _real_connect = sqlite3.connect
+
+  class _SlowConnection(sqlite3.Connection):
+      def execute(self, *args, **kwargs):
+          time.sleep(0.005)
+          return super().execute(*args, **kwargs)
+
+      def executemany(self, *args, **kwargs):
+          time.sleep(0.005)
+          return super().executemany(*args, **kwargs)
+
+  def _connect(*args, **kwargs):
+      kwargs.setdefault("factory", _SlowConnection)
+      return _real_connect(*args, **kwargs)
+
+  def pytest_configure(config):
+      sqlite3.connect = _connect
+  EOF
+  python3 - <<'EOF' || exit 1
+  import ast, sys
+  tree = ast.parse(open("tests/test_batches.py").read())
+  fns = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "test_batches_with_materials_is_fast"]
+  if not fns:
+      sys.exit("test_batches_with_materials_is_fast is missing")
+  banned = {"perf_counter", "perf_counter_ns", "monotonic", "monotonic_ns", "time", "time_ns",
+            "process_time", "thread_time", "sleep", "default_timer", "timeit", "now"}
+  calls = {getattr(c.func, "attr", getattr(c.func, "id", None)) for c in ast.walk(fns[0]) if isinstance(c, ast.Call)}
+  decos = " ".join(ast.unparse(d) for d in fns[0].decorator_list)
+  bad = sorted(calls & banned) + [w for w in ("skip", "xfail", "flaky") if w in decos]
+  sys.exit(f"clock/sleep/skip construct left in the test: {bad}" if bad else 0)
+  EOF
+  i=0
+  while [ "$i" -lt 30 ]; do
+    i=$((i+1))
+    out=$(PYTHONPATH="$P" python3 -m pytest -q -p no:cacheprovider -p slow_runner "$T" 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ] || ! echo "$out" | grep -Eq '(^|[^0-9])1 passed' || echo "$out" | grep -Eq 'skipped|xfail|xpass|deselected'; then
+      echo "slow-runner run $i/30 did not pass (exit $rc):"; echo "$out" | tail -15; exit 1
+    fi
+  done
+  echo "slow-runner loop: 30/30 passed"
+  python3 -m pytest -q -p no:cacheprovider tests/test_batches.py --deselect tests/test_batches.py::test_paginate_returns_requested_page
+rubric:
+  must:
+    - >-
+      Identifies tests/test_batches.py::test_batches_with_materials_is_fast as the flaky
+      test and gives the root cause as its wall-clock assertion
+      (`time.perf_counter() - start < 0.01`, a 10 ms budget around
+      `batches_with_materials(conn)`), which passes or fails with runner speed and load
+      (timing class), not with the behaviour of the code.
+    - >-
+      The diff removes the wall-clock budget from test_batches_with_materials_is_fast: no
+      perf_counter/time/elapsed-time comparison (tightened, loosened or moved to another
+      clock) is left in it. The test keeps its name and still runs: it is not deleted,
+      skipped, xfailed or marked flaky.
+    - >-
+      The rewritten test asserts something deterministic about batches_with_materials, for
+      example the number of SQL statements counted with conn.set_trace_callback (or an
+      execute wrapper), or the returned batches and material lots. A test left with no
+      assertion does not meet this.
+    - >-
+      Reports pass rates from loops it actually ran, with the command and run count: a
+      before measurement (including any slowed/loaded condition it used) and an after-fix
+      loop of at least 20 runs, all passing (e.g. "30/30 passed").
+  should:
+    - >-
+      Makes the original test fail on demand before fixing it (e.g. under CPU load or
+      `taskset -c 0` with a busy process, under tracing/coverage, or by temporarily slowing
+      the DB calls), quotes the failing `assert ... < 0.01` line, and reverts any
+      instrumentation.
+    - >-
+      Recognises that the timing assertion was meant to guard the N+1 in
+      batches_with_materials (app/batches.py, one materials SELECT per batch). It either
+      asserts the query count stays constant as released batches are added (and fixes the
+      N+1 with one JOIN / IN query so that holds), or flags the N+1 as a follow-up.
+    - >-
+      Classifies test_paginate_returns_requested_page as a consistent failure (fails on
+      every run, so not flaky; a debugger task) and leaves it and batches.paginate
+      untouched.
+    - >-
+      Keeps the diff to tests/test_batches.py (plus batches_with_materials in
+      app/batches.py only if it fixes the N+1). It shows that the rest of
+      tests/test_batches.py still passes, apart from the known paginate failure.
+    - >-
+      Uses the agent's report shape: a STATUS line with before/after counts, then Trigger,
+      Root cause with path:line, Files changed, and Verification.
+  must_not:
+    - >-
+      Fixes the flake with retries or reruns (pytest-rerunfailures, @pytest.mark.flaky, a
+      retry loop in the test, CI re-runs), added sleeps, a raised or loosened time budget,
+      or a switch to another clock (process_time, thread_time, time.time).
+    - >-
+      Deletes, skips, xfails, quarantines or renames test_batches_with_materials_is_fast, or
+      edits, skips or deletes test_paginate_returns_requested_page, or changes
+      batches.paginate (the delegation said to leave the always-failing test alone).
+    - >-
+      Presents a different test in tests/test_batches.py as the CI flake or its root cause,
+      and changes that test as the fix. Examples: ordering in
+      test_list_batches_filters_by_product_and_status or
+      test_batches_with_materials_attaches_lots (their seeded created_at values are
+      distinct and the queries have ORDER BY), utc_now in test_create_and_get_batch, or the
+      always-failing test_paginate_returns_requested_page. Listing such code only as an
+      unconfirmed "other suspect" is fine.

@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**34 agents** in 7 categories.
+**44 agents** in 9 categories.
 
 ### Code review & auditing
 
@@ -112,6 +112,7 @@ To pin every agent to one model (for example, on a budget), set
 | --- | --- | --- | --- |
 | [`code-simplifier`](.claude/agents/architecture/code-simplifier.md) | Behavior-preserving cleanup of recently changed or named code: guard clauses for deep nesting, splitting long functions, removing duplication, dead code and needless abstraction, clearer names, simpler conditionals; tests run before and after. | inherit | read/write |
 | [`dependency-upgrader`](.claude/agents/architecture/dependency-upgrader.md) | Upgrades a library, framework, runtime or SDK across major versions (React 17->18, Django 3->5, Spring Boot 2->3, Node 16->22, Python 3.8->3.12, Angular, EF Core) from official migration guides, with codemods, lockfile, CI and docs updated and tests green per step. | sonnet | read/write + web |
+| [`dotnet-modernizer`](.claude/agents/architecture/dotnet-modernizer.md) | Ports .NET Framework apps to modern .NET one project at a time with the build kept green: SDK-style csproj, PackageReference, multi-targeting, ASP.NET MVC/Web API to ASP.NET Core (YARP, System.Web adapters), WCF to CoreWCF/gRPC, Web.config to appsettings, BinaryFormatter, Windows services, EF6. | sonnet | read/write + web |
 | [`legacy-code-analyst`](.claude/agents/architecture/legacy-code-analyst.md) | Extracts business rules from legacy or undocumented code (stored procedures, VB6/VBA, WebForms, classic ASP, COBOL, Excel macros, batch/cron jobs, old Java/.NET): rules catalog with path:line, data flows, hidden dependencies, side effects, error behavior, dead paths, fact vs inference. | sonnet | read-only |
 | [`manufacturing-integration-engineer`](.claude/agents/architecture/manufacturing-integration-engineer.md) | Designs and reviews ISA-95 Level 2-4 integrations: MES<->ERP/SAP (B2MML), OPC UA, MQTT/Sparkplug B, historians (PI), ISA-88 batch, LIMS, label printing, serialization; checks buffering, idempotency, ordering, timestamps, reconciliation. | opus | read/write |
 
@@ -120,6 +121,7 @@ To pin every agent to one model (for example, on a budget), set
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
 | [`adr-writer`](.claude/agents/docs/adr-writer.md) | Records an architecture decision as an ADR (MADR or the repo's template): context, options with pros/cons, decision, consequences, status, date, links to code/PRs; numbered in the ADR folder, index updated. Unstated rationale becomes an open question. | sonnet | read/write |
+| [`diagram-generator`](.claude/agents/docs/diagram-generator.md) | Generates Mermaid diagrams from the actual code: architecture, sequence (request/feature flow), ER (migrations/ORM models), state (status enums), class and CI pipeline diagrams, each node and edge traced to path:line and syntax-checked. | sonnet | read/write |
 | [`docs-sync-editor`](.claude/agents/docs/docs-sync-editor.md) | Fixes documentation that drifted after a code change, with minimal line edits: README, docs/*.md and docstrings that still cite renamed or removed CLI flags, config keys, env vars, function signatures, endpoints, setup steps or examples. | sonnet | read/write |
 | [`technical-writer`](.claude/agents/docs/technical-writer.md) | Writes NEW documentation: README, getting-started, how-to guides, runbooks, API usage guides, onboarding and troubleshooting pages, architecture overviews, with every command, flag, env var and path verified against the repo. | sonnet | read/write |
 
@@ -128,6 +130,16 @@ To pin every agent to one model (for example, on a budget), set
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
 | [`data-analyst`](.claude/agents/data/data-analyst.md) | Answers questions from data files (CSV, TSV, Excel, JSON, Parquet) and databases via read-only SQL: profiles first (rows, types, nulls, duplicates, ranges, dates), flags data quality issues, then computes the answer with reproducible pandas/DuckDB/SQL code, group comparisons and statistical caveats. | sonnet | read/write |
+| [`database-architect`](.claude/agents/data/database-architect.md) | Designs new database schemas or major restructurings from access patterns and invariants: entities, keys, normalization, constraints, temporal/audit history, soft delete, multi-tenancy, partitioning/retention, indexes, expand/contract migration. Returns DDL (not run), Mermaid ER diagram, rationale. | opus | read-only |
+
+### DevOps, cloud & operations
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`bash-scripter`](.claude/agents/devops/bash-scripter.md) | Writes, reviews and hardens shell scripts (bash, sh/POSIX, zsh): strict mode and its pitfalls, quoting, safe rm and temp-file cleanup, argument parsing, exit codes, idempotency, GNU vs macOS/BSD portability; runs shellcheck, shfmt and bash -n. | sonnet | read/write |
+| [`ci-pipeline-engineer`](.claude/agents/devops/ci-pipeline-engineer.md) | Writes and fixes CI/CD pipeline YAML for GitHub Actions, Azure Pipelines and GitLab CI: build/test/deploy stages, reusable workflows and templates, caching, matrix builds, environments with approvals, OIDC instead of stored cloud secrets, SHA-pinned actions, least-privilege tokens. | sonnet | read/write |
+| [`container-engineer`](.claude/agents/devops/container-engineer.md) | Writes and optimizes Dockerfiles, .dockerignore and docker-compose files: multi-stage builds, pinned slim/distroless base images, layer caching, non-root USER, BuildKit secrets, HEALTHCHECK, PID 1 signals, measured size reduction. | sonnet | read/write |
+| [`iac-reviewer`](.claude/agents/devops/iac-reviewer.md) | Reviews infrastructure-as-code and deployment config (Terraform/OpenTofu, Bicep/ARM, CloudFormation/CDK, Pulumi, Kubernetes/Helm/Kustomize, Dockerfiles, compose) for public exposure, broad IAM/RBAC, secrets, encryption, pinning, securityContext, limits and probes. | sonnet | read-only |
 
 ### Git & pull-request workflow
 
@@ -135,7 +147,15 @@ To pin every agent to one model (for example, on a budget), set
 | --- | --- | --- | --- |
 | [`changelog-writer`](.claude/agents/git/changelog-writer.md) | Updates CHANGELOG.md's Unreleased section from commits and PRs since the last tag: end-user entries under Added/Changed/Deprecated/Removed/Fixed/Security, refactor/test/chore/CI noise dropped, BREAKING changes flagged with migration notes, PR numbers/SHAs cited. | haiku | read/write |
 | [`git-historian`](.claude/agents/git/git-historian.md) | Answers why code is the way it is from version control: when and why a line, function or file changed, which commit, PR or ticket (INC-, JIRA-, #123) introduced it, and who knows it, via git log -L, pickaxe, blame past renames and PR lookups. | sonnet | read-only |
+| [`merge-conflict-resolver`](.claude/agents/git/merge-conflict-resolver.md) | Resolves git merge, rebase, cherry-pick and stash-pop conflicts by combining the intent of both sides instead of picking one: reads base/ours/theirs and each side's commits, fixes semantic conflicts outside the markers, then builds, tests and stages. | opus | read/write |
 | [`pr-description-writer`](.claude/agents/git/pr-description-writer.md) | Drafts a pull request (or merge request) title and description from the branch diff (base...HEAD), mirroring the repo's PR template if present: summary, grouped changes, risk and rollout, testing evidence, linked issues. | haiku | read-only |
+
+### AI engineering & Claude Code
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`subagent-auditor`](.claude/agents/ai/subagent-auditor.md) | Audits Claude Code subagent definitions (.claude/agents, ~/.claude/agents) for broken frontmatter, name/filename or duplicate-name clashes, missing, over-broad or stale tools, dated model ids, and vague, bloated or overlapping descriptions that misroute delegation. | sonnet | read-only |
+| [`subagent-author`](.claude/agents/ai/subagent-author.md) | Creates or improves Claude Code subagents (.claude/agents/**/*.md, ~/.claude/agents): routing-rule description, least-privilege tools, model alias, procedural body with guardrails and output contract, plus trigger and near-miss test prompts. | opus | read/write + web |
 <!-- catalog:end -->
 
 ## What's deliberately not here

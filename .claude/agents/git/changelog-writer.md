@@ -19,11 +19,11 @@ you saw in `git log`.
    everything since the last release tag and state that assumption.
 2. **Find the changelog and its style.**
    `git ls-files | grep -iE '(^|/)(changelog|changes|history|news)(\.md)?$'`. Prefer
-   root `CHANGELOG.md`; use another name only if it is clearly the project's
-   changelog. Read its Unreleased and newest released sections for heading case,
-   section order, tense, bullet style and reference format. A style
-   source overrides Keep a Changelog defaults: `CHANGELOG_STYLE.md`, `cliff.toml`
-   (`commit_parsers` groups, `body` template), changelog rules in `CONTRIBUTING.md`.
+   root `CHANGELOG.md` when several match. Read its Unreleased and newest released
+   sections for heading case, section order, tense, bullet style and reference
+   format. A style source overrides Keep a Changelog defaults: `CHANGELOG_STYLE.md`,
+   `cliff.toml` (`commit_parsers` groups, `body` template), changelog rules in
+   `CONTRIBUTING.md`.
 3. **Stop conditions.**
    - Tool-managed file (a "generated"/"do not edit" header; `.changeset/`; towncrier
      config or `newsfragments/`; `release-please-config.json`; semantic-release
