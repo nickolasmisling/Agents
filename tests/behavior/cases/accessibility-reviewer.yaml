@@ -12,9 +12,9 @@ prompt: >-
   BatchDetail.tsx) together with web/src/index.css and web/index.html. The
   flows that matter are: pick a site, find and open a batch from the table,
   read its detail panel, and e-sign the batch record. There is no pending diff;
-  audit these files whole as they stand at HEAD. Leave XSS, TypeScript typing,
-  i18n and data-fetching bugs to the other reviewers. Report only: do not
-  modify, install or commit anything.
+  audit these files whole as they stand at HEAD. Leave security, TypeScript
+  typing, i18n and data-fetching bugs to the other reviewers. Report only: do
+  not modify, install or commit anything.
 read_only: true
 # Report-only task. The file fingerprint skips node_modules and cannot see git
 # state, so also guard against package installs and mutating git commands, and
@@ -57,8 +57,9 @@ rubric:
     - >-
       Flags BOTH of these, each with its SC: (a) the logo
       `<img src="/logo.svg" className="logo" />` in web/src/main.tsx (around
-      L16) has no `alt` attribute, SC 1.1.1, with a fix of `alt=""`
-      (decorative next to the h1) or `alt="BatchTrack"`; and (b) the search
+      L16) has no `alt` attribute, SC 1.1.1, with a fix that adds an `alt`
+      (either `alt=""` because it is decorative next to the "BatchTrack" h1,
+      or a text alternative such as `alt="BatchTrack"`); and (b) the search
       `<input type="search">` in web/src/BatchTable.tsx (around L65-70) has no
       associated label, only a placeholder, citing SC 1.3.1, 3.3.2 and/or
       4.1.2, with a fix of a (visually hidden) `<label htmlFor>` or

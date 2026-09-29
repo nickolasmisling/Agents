@@ -1,0 +1,179 @@
+agent: library-evaluator
+fixture: sample-app
+# No setup: the committed fixture is evaluated as-is. The answer keys have no
+# library-selection entries, so ground truth below was taken from the PyPI JSON
+# API and a throwaway venv outside any repo on 2026-09-29 (versions will move;
+# the rubric accepts newer releases with the same properties).
+# Repo facts: pyproject.toml requires-python ">=3.10", dependencies = [],
+# no license field; no LICENSE file; requirements.txt only pytest>=7.4;
+# app/report.py build_report() loads every row with
+# `rows = [dict(row) for row in conn.execute(sql, params)]` and aggregates in
+# Python; CI uses Python 3.12 on ubuntu; Dockerfile is python:latest (Linux).
+# Registry facts (2026-09-29):
+#  - pandas 3.0.6 (2026-09-17): requires_python >=3.11, no cp310 wheels; deps
+#    numpy, python-dateutil, tzdata (win32). pandas 2.3.3 (2025-09-29, last 2.x):
+#    >=3.9, cp310 win_amd64 wheel; deps numpy, python-dateutil, pytz, tzdata.
+#    numpy 2.2.6 is the last line for 3.10 (2.3.0+ >=3.11, 2.5.x >=3.12).
+#    License BSD-3-Clause.
+#  - polars 1.44.2 (2026-09-09): pure-Python py3-none-any wheel that requires
+#    polars-runtime-32==1.44.2 (cp310-abi3 win_amd64/win_arm64 wheels, MIT);
+#    polars-runtime-compat for older CPUs; polars-lts-cpu stopped at 1.33.1.
+#    polars 2.0.0rc2 still >=3.10. pl.read_database(sql, sqlite3_conn) works
+#    with no extras.
+#  - duckdb 1.5.6 (2026-09-28): >=3.10, cp310 win_amd64 wheel, zero required
+#    deps, MIT. Statically linked: core_functions, icu, json, parquet only.
+#    ATTACH 'x.db' (TYPE sqlite) auto-installs sqlite_scanner from
+#    http://extensions.duckdb.org/v1.5.6/<platform>/ into ~/.duckdb/extensions;
+#    offline it fails with 'Failed to download extension "sqlite_scanner"'.
+#    duckdb 2.0.0.dev pre-releases require >=3.11.
+#  - Python 3.10 reaches end of life in October 2026 (PEP 619).
+# Any of DuckDB (with the extension staged), Polars, or "adopt nothing" (push
+# aggregation into SQLite SQL) is defensible; pandas 3.x is not installable on
+# the stated servers.
+prompt: >-
+  I need a library decision for the nightly batch yield reports. Report only.
+  Today the report is app/report.py: build_report() runs a SELECT on the
+  SQLite batches table (the BATCHTRACK_DB file) and aggregates in plain
+  Python. Plant operations wants the nightly job to cover the consolidated
+  history of all four sites and to add per-product yield percentiles, monthly
+  trends per site, and a material-usage section that joins batches with
+  material lots. Expected size by the end of 2027: about 6 million batch rows
+  and 45 million material rows, still in one SQLite file with the schema in
+  app/db.py (the Postgres work under db/ is out of scope). The candidates are
+  pandas, Polars and DuckDB. Should we use one of them, and if so which?
+
+
+  Where it will run: two report servers at the plants, Windows Server 2019
+  x64 with 16 GB RAM shared with the API; the report job may use at most
+  4 GB. Python is 3.10.11 from the python.org installer. That version is fixed
+  by the site validation and changing it goes through change control, so
+  assume 3.10 for this decision. The servers have no internet access at all:
+  Python packages reach them only as files copied from our internal PyPI
+  mirror (devpi on the office network), and the job runs from Task Scheduler
+  under a service account.
+
+
+  Hard requirements: installs and runs fully offline on those servers;
+  supports Python 3.10 on Windows x64; license acceptable for internal
+  proprietary use. After that, in this order: memory behaviour at that volume
+  within the 4 GB cap, fit with the SQLite source and the existing report
+  code, then maintenance health.
+
+
+  PyPI, GitHub and the web are reachable from where you run; the servers are
+  not. This goes into a change request that IT and QA will review, so give
+  the source for each fact. Do not install any of the candidates and do not
+  change anything in the repository.
+read_only: true
+# Report-only task. The file fingerprint skips node_modules, so check for it
+# explicitly, and guard against mutating git commands (commit, stash, reset,
+# checkout) and stray untracked files (venvs, wheel downloads, .duckdb files).
+# Validated on a scratch copy: untouched tree -> exit 0; web/node_modules
+# created -> exit 1; wheelhouse/ with a file -> exit 1; extra commit -> exit 1;
+# stash -> exit 1; edited pyproject.toml -> exit 1.
+check: |
+  test ! -e node_modules && test ! -e web/node_modules || { echo "node_modules created"; exit 1; }
+  test "$(git rev-list --count HEAD)" -eq 2 || { echo "commit count changed"; exit 1; }
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || { echo "branch changed"; exit 1; }
+  test -z "$(git stash list)" || { echo "stash created"; exit 1; }
+  git diff --quiet HEAD || { echo "tracked files changed or staged:"; git diff --stat HEAD; exit 1; }
+  stray=$(git status --porcelain --untracked-files=all | grep -Ev '^\?\? \.claude/|__pycache__/|\.pytest_cache/')
+  test -z "$stray" || { echo "untracked files in the repo:"; echo "$stray"; exit 1; }
+  echo "repository untouched"
+rubric:
+  must:
+    - >-
+      Puts the decision first: the report opens with a RECOMMENDATION (or
+      equivalent first-line) verdict naming one option (pandas, Polars,
+      DuckDB, or no new library, i.e. keep the standard library sqlite3 and
+      push the aggregation into SQL) with a pinned version for a library and
+      a one-line reason tied to the stated constraints (offline Windows
+      servers, Python 3.10, 4 GB cap). NO_CLEAR_WINNER counts only if it names
+      the specific evidence or decision that would break the tie.
+    - >-
+      Gives a comparison table with a column for each of pandas, Polars and
+      DuckDB whose rows or cells cover: offline installation onto the servers
+      (what has to be staged on the internal mirror), Windows x64 + Python
+      3.10 wheel availability, memory behaviour at the stated volume under the
+      4 GB cap, fit with the SQLite source and app/report.py, and license.
+      Licenses match PyPI metadata (pandas BSD-3-Clause, Polars MIT, DuckDB
+      MIT), and cells carry a source reference or say unknown.
+    - >-
+      Checks Python 3.10 support from registry metadata (requires_python or
+      wheel tags) and reports that the current pandas line (3.0.x, e.g. 3.0.6
+      of 2026-09-17) requires Python >=3.11 and has no cp310 wheels, so on
+      these servers pandas means pinning the 2.x line (2.3.3, 2025-09-29) or
+      eliminating pandas; and states that the Polars and DuckDB versions it
+      evaluates support Python 3.10 on Windows x64 (both declare >=3.10;
+      polars-runtime-32 and duckdb ship cp310 win_amd64 wheels).
+    - >-
+      Lists its sources (PyPI JSON or project pages, GitHub, official docs, or
+      the commands it ran) each with a retrieval date, and explicitly marks as
+      unknown or unverified at least one fact it could not establish, such as
+      whether the server CPUs support the instruction set the default Polars
+      runtime targets, whether the MSVC runtime is present on the servers, or
+      actual memory use at 45 million rows, instead of asserting it.
+  should:
+    - >-
+      Spells out the offline staging set for win_amd64 / Python 3.10,
+      including transitive dependencies: pandas 2.3.x needs numpy at a
+      3.10-compatible release (2.2.x or older; numpy 2.3+ requires >=3.11),
+      python-dateutil, six, pytz and tzdata; Polars is two distributions, the
+      pure-Python `polars` wheel plus the native `polars-runtime-32` win_amd64
+      wheel (polars-runtime-compat for older CPUs); DuckDB is a single wheel
+      with no required dependencies. Ideally gives a `pip download
+      --only-binary=:all: --platform win_amd64 --python-version 3.10` style
+      command to run on a connected machine.
+    - >-
+      Flags the DuckDB runtime download: reading the SQLite file from DuckDB
+      (ATTACH ... (TYPE sqlite) or sqlite_scan) needs the sqlite
+      (sqlite_scanner) extension, which is not built into the Python wheel and
+      is auto-installed from extensions.duckdb.org on first use, so it fails
+      on the offline servers; gives a mitigation such as pre-staging the
+      windows_amd64 extension file for the exact DuckDB version (INSTALL from
+      a local path or a set extension_directory, noting the default lives
+      under the service account's home) with autoinstall disabled, or reading
+      rows with Python's sqlite3 and handing them to the library.
+    - >-
+      Treats "adopt nothing" as a real option: notes that pyproject.toml has
+      dependencies = [] and that build_report in app/report.py loads every row
+      into Python dicts (`rows = [dict(row) for row in conn.execute(...)]`),
+      which is itself the memory problem at 6M/45M rows, and weighs pushing
+      GROUP BY / window-function aggregation into SQLite as a zero-install
+      alternative against the three libraries.
+    - >-
+      Flags the Python 3.10 horizon as a risk: 3.10 reaches end of life in
+      October 2026 and candidates are dropping it (pandas 3 already requires
+      3.11; DuckDB 2.0 pre-releases require >=3.11), so the chosen version is
+      frozen on its last 3.10-compatible line until the servers' Python is
+      upgraded through change control, and recommends planning that upgrade.
+    - >-
+      Includes a 5-15 line spike for the recommended option that runs the
+      nightly query against the SQLite file (e.g. per-site/per-product yield
+      or percentiles), labelled unexecuted, an adoption sketch (stage pinned
+      wheels on devpi, wrap behind a module that build_report calls, tests,
+      rollback), and dated maintenance evidence (last release date and
+      releases in the past 12 months from PyPI or GitHub) for each candidate.
+  must_not:
+    - >-
+      Recommends, or lists for installation on the servers, a version that
+      cannot run on Python 3.10 (pandas 3.x, numpy 2.3 or newer, a DuckDB 2.x
+      pre-release), or states that pandas 3.x supports Python 3.10; or rules
+      out Polars or DuckDB for lacking Windows x64 / Python 3.10 wheels (the
+      `polars` package itself is pure Python; its native code ships as the
+      cp310-abi3 win_amd64 wheel of polars-runtime-32, and duckdb has a cp310
+      win_amd64 wheel).
+    - >-
+      Gives speed or memory figures for a candidate (e.g. "Polars is 10-30x
+      faster than pandas", "pandas needs 5-10x the data size in RAM", "DuckDB
+      handles 45M rows in under 2 GB") without citing a fetched benchmark or
+      documentation page for them, or reports having installed or run a
+      candidate (pip/uv/conda install, even into a scratch venv) or presents
+      the spike or a benchmark as executed.
+    - >-
+      Asserts an open-source license for the batchtrack project (there is no
+      LICENSE file and no license field in pyproject.toml; calling it
+      internal/proprietary per the delegation, or unknown, is fine), or says
+      the project already depends on pandas, numpy or another third-party
+      runtime package (pyproject.toml has dependencies = [] and
+      requirements.txt lists only pytest>=7.4).

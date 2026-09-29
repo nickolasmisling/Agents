@@ -9,8 +9,12 @@ fixture: sample-app
 #  - Deploy 1.4.0 -> 1.4.1: SIGTERM L174 13:11:58, 1.4.1 starts L176 13:12:09 (commit 8e1d2c7), config L177,
 #    NEW `scheduled job=cache_warmer every=120s workers=8 scope=all_batches` L179 (absent before),
 #    `deploy finished release=1.4.1 previous=1.4.0 change=CHG-20931` L181 13:12:14.
-#  - cw-0001 L183-184 takes 41.3 s; later runs 63.8 s, 97.2 s, 131.5 s, 158.9 s ...; active_runs=2 from
-#    L224 (13:21:10), active_runs=3 from L334 (13:33:10); 7 runs finish, 15 fail.
+#  - cw-0001 L183-184 takes 41.3 s; cw-0002..0004 finish in 63.8 s, 97.2 s, 131.5 s, cw-0005 fails after
+#    158.9 s, later finished runs take 237-285 s; active_runs=2 from L224 (13:21:10), active_runs=3 from
+#    L334 (13:33:10); of 24 runs started, 7 finish, 15 fail, 2 still running at the end.
+#  - 99 ERROR lines: 47 `PoolTimeout` 503 (36 GET /batches/N, 11 POST /batches/N), 24 `database is
+#    locked` on POST /batches/N/signatures, 13 on POST /batches, 15 cache_warmer run failures; plus
+#    18 WARN `connection pool exhausted` and 40 `suppressed N similar messages` lines.
 #  - First ERROR/first failure L202 13:18:27.531 `database is locked` on POST /batches/1791/signatures
 #    (traceback L203-209 ends in app/signatures.py:26 conn.commit(): the victim, not the cause).
 #  - First `connection pool exhausted ... oldest_holder=ThreadPoolExecutor-5_7` L216 13:19:35 (all 18 such
@@ -62,13 +66,16 @@ rubric:
       Gives the first failure as L202 at 13:18:27 (`sqlite3.OperationalError: database is locked` on
       `POST /batches/1791/signatures`, about 6 minutes after the deploy), and reports the connection
       pool exhaustion that follows (`connection pool exhausted` from L216 13:19:35 and/or `503 ...
-      PoolTimeout` from L219 13:20:14) as a separate error cluster with a count.
+      PoolTimeout` from L219 13:20:14) as a separate cluster with a line count (the log has 18
+      `connection pool exhausted` WARN lines and 47 `PoolTimeout` 503 ERROR lines; a correct count
+      for either one is enough).
     - >-
       Names the `cache_warmer` job that 1.4.1 introduced (scheduled at L179 with `every=120s
       workers=8 scope=all_batches`, not present before the deploy) as the most likely root cause,
-      and cites the cache_warmer failure stack trace (L244-273, run cw-0005 at 13:23:49) that runs
-      through app/cache.py `warm_cache` (line 45) into `get_batch`/`_load` and ends in `database is
-      locked`.
+      and cites the cache_warmer failure with its stack trace (ERROR at L244, run cw-0005 at
+      13:23:49; traceback L245-273; citing L244 or any range inside L244-273 counts) that runs
+      through app/cache.py `warm_cache` (line 45) into `get_batch` (line 32) and/or `_load` (line 18)
+      and ends in `sqlite3.OperationalError: database is locked`.
     - >-
       Classifies the recurring deprecation warnings as red herrings with before/after evidence:
       the `DeprecationWarning: datetime.datetime.utcnow()` from audit_export.py:41 and/or the LIMS
