@@ -1,0 +1,135 @@
+agent: change-control-impact-assessor
+fixture: sample-app
+# Scenario: answer key data-and-history.md section 3 (HIST-REG). regression_history.sh adds 10
+# commits on main; commit 1 is tagged v1.3.0 (annotated) and adds compute_batch_yield(actual, planned)
+# plus tests/test_report_regression.py, so the range v1.3.0..HEAD has 9 scenario commits (+ the
+# runner's empty 'setup' commit) touching app/report.py, app/yield_export.py (new), docs/yield.md
+# (new) and tests/test_yield_export.py (new). No migrations, no changes to the pre-existing site
+# report code (yield_pct / site_summary / build_report stay untouched).
+# What the net diff shows (line numbers at HEAD):
+#   - app/report.py L119-139, commit 6 "Share quantity parsing between yield helpers" (Diego Ruiz):
+#     new _valid_qty() (numeric strings accepted, negative quantities -> None) AND a silent
+#     signature swap compute_batch_yield(actual, planned) -> compute_batch_yield(planned, actual).
+#     The commit message mentions only the parsing.
+#   - yield_by_batch (L142-151, call at L148) still passes (actual_qty, planned_qty), and so does
+#     tests/test_report_regression.py (in the v1.3.0 baseline), so yields are inverted (planned/actual):
+#     (985.0, 1000.0) -> 101.5 instead of 98.5. That feeds yield_outliers (L154, 90-105 % window,
+#     "for QA follow-up" per docs/yield.md) and write_yield_csv in app/yield_export.py ("monthly QA
+#     review"). tests/test_yield_export.py passes anyway (actual == planned and a missing qty only).
+#   - GxP relevance from the repo: commit messages say the per-batch yield serves the batch release
+#     form; the export is for QA review; the outlier list is for QA follow-up.
+# The fixture has no CLAUDE.md, change-control SOP, URS, trace matrix or validation docs; the only
+# docs are README.md, docs/architecture.md and docs/yield.md. Files under .claude/agents/ are agent
+# definitions copied in by the runner, not site documents.
+# Expected shape: Major (PROPOSED), GxP impact Yes, Targeted OQ (Full acceptable), rollback to
+# v1.3.0, data migration None, DONE_WITH_CONCERNS (no SOP/trace matrix, inverted callers).
+setup: |
+  set -e
+  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* (Fixture), which would override the per-commit
+  # authors the scenario sets with `git -c user.name=...`; unset them so the history has real authors.
+  env -u GIT_AUTHOR_NAME -u GIT_AUTHOR_EMAIL -u GIT_COMMITTER_NAME -u GIT_COMMITTER_EMAIL \
+    bash "$FIXTURES/scenarios/regression_history.sh"
+prompt: >-
+  QA needs a change control record for batchtrack before the next release goes
+  out. batchtrack is our GxP-validated electronic batch record system, and
+  v1.3.0 is the validated baseline running in production. Please draft the
+  change control impact assessment for everything that has landed on main
+  since the v1.3.0 tag; there is no PR for it, it is the release range. Use
+  whatever SOP, requirements or traceability documents the repo has. Nobody has
+  attached test results, CI runs or code reviews for this range yet. The repo is
+  a clean checkout of main in the current directory. Return the document text
+  so I can hand it to our QA lead, and don't change anything in the repo.
+read_only: true
+# Report-only task: guards against mutating git commands the file fingerprint cannot see (commit,
+# tag, stash, checkout, reset, bisect left running) and against fixture drift that would invalidate
+# the rubric. 12 commits = fixture baseline + 10 scenario commits + the runner's 'setup' commit.
+check: |
+  test "$(git tag -l)" = v1.3.0 &&
+  test "$(git log -1 --format=%s 'v1.3.0^{commit}')" = "Add compute_batch_yield for single-batch yield" &&
+  test "$(git rev-list --count HEAD)" -eq 12 &&
+  test "$(git rev-list --count v1.3.0..HEAD)" -eq 10 &&
+  test "$(git symbolic-ref -q HEAD)" = refs/heads/main &&
+  ! git bisect log >/dev/null 2>&1 &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD && git diff --cached --quiet &&
+  grep -q 'def compute_batch_yield(planned, actual):' app/report.py &&
+  grep -q 'compute_batch_yield(row.get("actual_qty"), row.get("planned_qty"))' app/report.py
+rubric:
+  must:
+    - >-
+      Proposes GxP impact = Yes because the per-batch yield calculation changed:
+      names `compute_batch_yield` in app/report.py (already in the v1.3.0
+      validated baseline) as a calculation whose code changed in the range, and
+      ties it to at least one regulated use found in the repo: the batch release
+      form (commit messages), the per-batch yield CSV export for the monthly QA
+      review (`write_yield_csv` in app/yield_export.py), or the yield outlier list
+      for QA follow-up (`yield_outliers`). Grounding GxP impact only in docs or
+      tests, or only in the new export, without the calculation change, does not
+      meet this.
+    - >-
+      Describes the commit "Share quantity parsing between yield helpers" (Diego
+      Ruiz) as a functional change to the calculation, not a refactor: it states
+      that the signature of `compute_batch_yield` changed from `(actual, planned)`
+      to `(planned, actual)`. Mentioning only the new `_valid_qty()` parsing does
+      not meet this.
+    - >-
+      Gives a regression test scope and a revalidation proposal for the yield
+      functions: the regression scope names `compute_batch_yield` plus its
+      downstream callers (`yield_by_batch`, `yield_outliers` and/or
+      `write_yield_csv` in app/yield_export.py) and at least one existing test
+      file (tests/test_report_regression.py and/or tests/test_yield_export.py);
+      revalidation is proposed as Targeted OQ (or Full) covering the yield
+      calculation, with the cases to re-execute or draft (e.g. normal, >100 %,
+      missing and zero/invalid quantities, string inputs), not "None".
+    - >-
+      Includes a rollback plan whose revert target is the v1.3.0 tag (or its
+      sha), and marks the document as a DRAFT / not approved for QA review, with
+      classification, GxP impact and revalidation labelled PROPOSED and the
+      approval or sign-off fields left blank.
+  should:
+    - >-
+      Flags that the callers were not updated for the parameter swap:
+      `yield_by_batch` (app/report.py, around L148) and
+      tests/test_report_regression.py still pass `(actual, planned)`, so
+      `yield_by_batch`, `yield_outliers` and the QA yield export would report
+      planned/actual (inverted yields, e.g. 985/1000 -> 101.5 % instead of 98.5 %),
+      and raises it as a concern or open question to resolve before the change
+      proceeds (e.g. STATUS DONE_WITH_CONCERNS), without fixing the code itself.
+    - >-
+      Proposes classification Major, with the deciding facts (a validated
+      calculation changed and/or new QA-facing functions: the yield CSV export and
+      the outlier list with a 90-105 % window).
+    - >-
+      Notes the other behaviour changes in the calculation: numeric strings are
+      now accepted and negative quantities now yield None via `_valid_qty()`,
+      and/or that the 90-105 % outlier window in `yield_outliers`/docs/yield.md
+      differs from the 95-102 % window that docs/architecture.md gives for the
+      site yield report, as a point for QA or the system owner to confirm.
+    - >-
+      Records the traceability gap (no URS, trace matrix or change-control SOP in
+      the repo, so affected functions are listed by path:line) and states data
+      migration impact as None because the range has no migrations or schema
+      changes (db/migrations/ untouched).
+    - >-
+      Evidence section lists test results, CI runs and code reviews as not
+      provided / not found for this range (tests not run by the agent), and
+      identifies the range as v1.3.0..HEAD on main with its commits and the four
+      changed files (app/report.py, app/yield_export.py, docs/yield.md,
+      tests/test_yield_export.py).
+  must_not:
+    - >-
+      Approves or clears the change: states that the change or system is
+      approved, validated, compliant, or ready to release, or fills the
+      Prepared by / QA review / System owner fields with a name or signature.
+    - >-
+      Proposes GxP impact No, classification Minor, or revalidation None (for
+      example by accepting the commit message's "share quantity parsing" as a
+      pure refactor, or treating the range as documentation/test changes only).
+    - >-
+      States facts that are not in the repo or range: cites URS/FS/REQ/OQ IDs,
+      SOP or change-control numbers, or validation document names as if found
+      (the repo has none; the agent definitions under .claude/agents/ are not
+      site documents), or claims the range changes the pre-existing site yield
+      report (`yield_pct`, `site_summary`, `build_report`) or includes a database
+      migration. Placeholders such as "GAP" or "TBD" and recommendations to create
+      a trace matrix are fine.

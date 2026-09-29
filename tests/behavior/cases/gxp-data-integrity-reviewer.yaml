@@ -1,0 +1,121 @@
+agent: gxp-data-integrity-reviewer
+fixture: sample-app
+# No setup: the seeded defects are in the committed fixture, and the tree is clean, so the agent
+# reviews the named paths as they stand at HEAD. Ground truth: answer-key/python-core.md
+# PY-08 (client-supplied signed_at), PY-09 (update_signature, no audit), PY-10 (delete_signature,
+# hard delete, no audit), PY-11 (meaning optional/unchecked), PY-12 (no re-authentication at
+# signing); trap FP-02 (the f-string UPDATE in update_signature is not injectable). Extra traps
+# derived from the code: sign_batch DOES write an audit_log "insert" row (signatures.py L17-25),
+# and db.write_audit stamps `at` with utils.utc_now_iso() = datetime.now(timezone.utc) (server UTC).
+# Related, not seeded, credited as "should": nullable meaning/signed_at columns (app/db.py L33-34,
+# db/migrations/001_init.sql L36-37), no signature/record-version binding (11.70), client-supplied
+# user_id with no role check, release_batch not checking for an approved signature.
+# The prompt names the scope and the regulatory context but none of the defects.
+prompt: >-
+  batchtrack (this repo) holds the electronic batch records for our solid-dose and softgel
+  sites, and QA treats it as a 21 CFR Part 11 / EU Annex 11 system. Before we tag the next
+  release, QA wants a data-integrity review of the electronic signature feature: app/signatures.py
+  plus the code it depends on or that reaches it, meaning the signature routes in app/api.py, the
+  schema and audit helper in app/db.py, and app/users.py and app/utils.py. db/migrations/ has the
+  production PostgreSQL schema; check it where it bears on signatures. There is no pending diff,
+  so review these files as they stand at HEAD. The web UI, services/ and infra are reviewed
+  separately. Your report goes to our QA/CSV lead as input, so use your usual format and only
+  list what you can back up from the code. Do not change anything in the repo.
+read_only: true
+# Report-only task. Guards against mutating git commands the file fingerprint cannot see (commit,
+# stash, checkout, reset) and against fixture drift that would invalidate the rubric. Validated on
+# a scratch copy built like the runner's: untouched -> exit 0; extra commit, edited tracked file,
+# stash, or branch switch -> exit 1 each.
+check: |
+  grep -q 'def sign_batch(conn, batch_id, user_id, signed_at, meaning=None):' app/signatures.py &&
+  grep -q 'UPDATE signatures SET' app/signatures.py &&
+  grep -q 'DELETE FROM signatures WHERE id = ?' app/signatures.py &&
+  grep -q 'data\["signed_at"\]' app/api.py &&
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD
+rubric:
+  must:
+    - >-
+      Reports that the signature time is supplied by the caller rather than the server:
+      `sign_batch` in app/signatures.py (L8, stored at L15) takes `signed_at` as a parameter and
+      stores it as given, and the `POST /batches/<id>/signatures` handler in app/api.py (around
+      L82-84) passes `data["signed_at"]` straight from the request body, so a signature can be
+      backdated or future-dated. Maps it to ALCOA+ Contemporaneous (and/or Accurate) and the fix
+      sets the time on the server or database (e.g. `utils.utc_now_iso()` inside `sign_batch`)
+      and ignores or removes the client value.
+    - >-
+      Reports BOTH `update_signature` (app/signatures.py L30-45, which overwrites `meaning` and/or
+      `signed_at` of an executed signature in place with `UPDATE signatures SET ...`) AND
+      `delete_signature` (L48-50, which hard-deletes the signature row) as writing no audit_log
+      entry: no old value, no acting user (neither function even takes one), no time and no
+      reason, so the original signature is altered or lost without trace. Cites the audit-trail
+      requirement (21 CFR 11.10(e) and/or Annex 11 §9) and/or ALCOA+ Original/Complete/
+      Attributable, and the fix blocks edits or voids/supersedes the signature with user, reason
+      and an audit_log row (old and new values) in the same transaction instead of UPDATE/DELETE.
+    - >-
+      Reports both signature-control gaps in the signing path: (a) the signature meaning is
+      optional (`meaning=None` default in `sign_batch`, `data.get("meaning")` in api.py), may be
+      stored as NULL and is never checked against a controlled list of meanings (e.g. reviewed/
+      approved/released), citing 11.50(a)(3) or 11.50 signature manifestation; and (b) signing
+      requires no re-entry of credentials: `sign_batch` takes only a `user_id` (sent in the JSON
+      body) and no password is checked (`users.authenticate` exists but the signing path never
+      calls it), citing 11.200(a) and/or Attributable, with the fix to authenticate the signer at
+      signing and sign as the authenticated user, not a client-supplied id.
+    - >-
+      The report carries the line "DRAFT — for review by qualified QA/CSV personnel" (an ASCII
+      hyphen instead of the em dash is fine) and maps every numbered finding to at least one
+      ALCOA+ principle (Attributable, Legible, Contemporaneous, Original, Accurate, Complete,
+      Consistent, Enduring, Available).
+  should:
+    - >-
+      Reports that a signature is not bound to the record content or version (21 CFR 11.70 /
+      Annex 11 §14): the `signatures` row holds only `batch_id`, with no hash or version of the
+      signed batch record, and the batch can still change after signing (e.g. `set_actual_qty` in
+      app/batches.py only refuses changes once the batch is released), so a signature can end up
+      attached to content the signer never saw.
+    - >-
+      Points at the schema: `meaning` and `signed_at` are nullable in the `signatures` table in
+      app/db.py (L33-34) and in db/migrations/001_init.sql (L36-37), and recommends NOT NULL
+      (and/or a CHECK or reference table for meaning, a server default for signed_at); and/or
+      notes that `signed_at` is free TEXT in SQLite accepted with no format or time-zone check,
+      so a naive local time string from a client is stored ambiguously.
+    - >-
+      Flags attribution/authority beyond re-authentication: the acting `user_id` comes from the
+      request (JSON body for signing at api.py L83, query string for `GET /batches/<id>/release`
+      at L59) instead of an authenticated session, and/or no role check ensures the signer is
+      authorized for that meaning (11.10(g); e.g. an operator can sign "approved"), and/or
+      `delete_signature` records no actor at all.
+    - >-
+      Notes that `release_batch` (app/batches.py L77-86) sets a batch to released without
+      checking for an approving signature (sequencing / authority check, 11.10(f) or 11.10(g)),
+      or that release is done through a GET request that takes the user id from the query string.
+    - >-
+      Follows the agent's output structure: `VERDICT: NEEDS_WORK`; findings ranked with the
+      audit-trail loss and backdatable signature time at CRITICAL or HIGH; a "Controls present"
+      line that credits `sign_batch`'s audit_log insert and/or `db.write_audit` stamping server
+      UTC time via `utils.utc_now_iso()`; and procedural or infrastructure items (NTP, database
+      grants on audit_log, SOPs, backups) listed under "Not verifiable from code" rather than as
+      findings.
+  must_not:
+    - >-
+      Declares any part of the reviewed code compliant, validated, Part 11 compliant or
+      inspection-ready, including conditional claims such as "will be compliant once fixed" or
+      "the audit helper is validated". Saying a control is present, or "no data-integrity defects
+      found" for a specific function, is not a violation.
+    - >-
+      Reports correct code as a defect: (a) claims `sign_batch` creates a signature without
+      writing any audit_log entry (it calls `db.write_audit(..., "insert", ...)` at
+      app/signatures.py L17-25); (b) claims `db.write_audit` or `utils.utc_now_iso` uses
+      client-supplied, naive or local time (it uses `datetime.now(timezone.utc)`); or (c) claims
+      the f-string `UPDATE signatures SET {', '.join(fields)} WHERE id = ?` in `update_signature`
+      (L43) is SQL injection (it joins only fixed fragments and binds every value). Saying that the
+      audit entry's `user_id` or `signed_at` VALUES come from the client is correct and allowed.
+    - >-
+      Cites a 21 CFR Part 11 section that does not exist (e.g. 11.10(m), 11.50(c), 11.400) or
+      invents clause text, or maps a finding to a clearly unrelated clause: the missing audit
+      trail on update/delete cited only as 11.300 or 11.200, or the missing re-authentication
+      cited only as 11.10(e). Citing 11.10(e) for the client-supplied time, 11.50(a)(2) for the
+      date/time of signing, 11.70 for signature/record linking, 11.10(d)/(g) or 11.100 for the
+      client-supplied user id, or "no clause cited", is acceptable.

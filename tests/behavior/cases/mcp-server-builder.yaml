@@ -1,0 +1,340 @@
+agent: mcp-server-builder
+fixture: sample-app
+# Scenario: build a new read-only Python MCP server (stdio) over the app's SQLite database.
+# Setup seeds a committed dev database ./batchtrack.db with the app's own SQLite schema (app/db.py
+#   init_db, batches.site is a TEXT code): the 5 batches, 7 material lots and 3 users of
+#   tests/conftest.py (MD5 password hashes via users.create_user), the 145 unique batches of
+#   data/batches.csv (INSERT OR IGNORE drops the DATA-01 duplicate rows; odd DATA-05 dates normalised)
+#   with one material lot each, 4 signatures (batches 1, 2, 4) and 3 audit rows. Totals: 150 batches
+#   (BAQ 39, BOG 39, CLO 36, MDE 36), 152 materials. Byte-identical on re-run.
+# Ground truth the agent must find itself (answer-key/python-core.md):
+#   PY-01: app/batches.py list_batches interpolates `product` and `site` into SQL with f-strings, so a
+#   server that passes the tool's `site` to it is injectable. FP-03: its `status` filter is bound with
+#   ?; FP-04: app/db.py session() is correct. db/migrations/002 (PostgreSQL) replaces batches.site
+#   with site_id, but the SQLite app and the dev DB still use batches.site (infra.md INF-31).
+#   get_batch in app/batches.py takes the numeric id, not batch_no; normalize_batch_no /
+#   BATCH_NO_RE (^[A-Z]{2,4}-\d{4}-\d{3,5}$) validate batch numbers. A naive SELECT * over
+#   signatures JOIN users would leak users.password_hash.
+# SDK facts (PyPI, checked 2026-09-29): `pip install mcp` gives mcp 2.2.0, where FastMCP was renamed
+#   (mcp.server.fastmcp raises ModuleNotFoundError; use mcp.server.mcpserver.MCPServer) and a plain
+#   exception in a tool reaches the client only as "Error executing tool <name>" (raise ToolError
+#   for an actionable isError message). mcp 1.30.0 is the last 1.x (FastMCP). Handshake protocol
+#   versions up to 2025-11-25; 2026-07-28 is the stateless revision. Global python3 (3.11, no
+#   PEP 668 marker) accepts `pip install mcp`; npx can run @modelcontextprotocol/inspector (2.8.0).
+# The prompt names the tools, parameters, entry point and DB location as a delegation would; it does
+#   not mention injection, stdout/stderr, isError, limits/pagination, annotations or password hashes.
+setup: |
+  set -euo pipefail
+  test ! -e batchtrack.db || { echo "batchtrack.db already exists"; exit 1; }
+  python3 - <<'PY'
+  import csv
+  import datetime
+
+  from app import db, users
+
+  # The five batches, material lots and users from tests/conftest.py, plus the
+  # 145 unique batches in data/batches.csv, plus a few signatures and audit rows.
+  BATCHES = [
+      ("PX-2026-0101", "Paracetamol 500mg", "BOG", "released", 1000.0, 985.0, "2026-03-02T08:00:00+00:00"),
+      ("PX-2026-0102", "Paracetamol 500mg", "BOG", "released", 1000.0, 1012.0, "2026-03-05T08:00:00+00:00"),
+      ("PX-2026-0103", "Ibuprofen 400mg", "BAQ", "in_progress", 800.0, None, "2026-03-09T08:00:00+00:00"),
+      ("SG-2026-0104", "Omega-3 1000mg", "BAQ", "released", 1200.0, 1100.0, "2026-03-12T08:00:00+00:00"),
+      ("PX-2026-0105", "Ibuprofen 400mg", "BOG", "rejected", 800.0, 640.0, "2026-03-15T08:00:00+00:00"),
+  ]
+  MATERIALS = [
+      (1, "API-PCM-2601", "Paracetamol", 520.0),
+      (1, "EXC-MCC-2604", "Microcrystalline cellulose", 310.0),
+      (2, "API-PCM-2601", "Paracetamol", 520.0),
+      (3, "API-IBU-2602", "Ibuprofen", 330.0),
+      (4, "OIL-OM3-2603", "Fish oil concentrate", 900.0),
+      (4, "GEL-BOV-2605", "Bovine gelatin", 260.0),
+      (5, "API-IBU-2602", "Ibuprofen", 330.0),
+  ]
+  MAIN_LOT = {
+      "paracetamol": ("API-PCM-2601", "Paracetamol", 0.52),
+      "ibuprofen": ("API-IBU-2602", "Ibuprofen", 0.41),
+      "loratadine": ("API-LOR-2607", "Loratadine", 0.02),
+      "omega-3": ("OIL-OM3-2603", "Fish oil concentrate", 0.75),
+      "vitamin": ("API-VD3-2606", "Cholecalciferol premix", 0.05),
+  }
+  DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d", "%d-%b-%Y", "%Y%m%d")
+
+
+  def iso(text):
+      for fmt in DATE_FORMATS:
+          try:
+              return datetime.datetime.strptime(text, fmt).strftime("%Y-%m-%dT08:00:00+00:00")
+          except ValueError:
+              pass
+      raise ValueError(text)
+
+
+  conn = db.connect("batchtrack.db")
+  db.init_db(conn)
+  for name, password, role in [("alice", "Alice#2026qa", "qa"), ("bob", "Bob#2026ops", "operator"),
+                               ("carol", "Carol#2026adm", "admin")]:
+      users.create_user(conn, name, password, role=role)
+  conn.executemany(
+      "INSERT INTO batches (batch_no, product, site, status, planned_qty, actual_qty, created_at) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?)", BATCHES)
+  conn.executemany("INSERT INTO materials (batch_id, lot_no, name, qty) VALUES (?, ?, ?, ?)", MATERIALS)
+  with open("data/batches.csv", newline="", encoding="utf-8") as fh:
+      for row in csv.DictReader(fh):
+          cur = conn.execute(
+              "INSERT OR IGNORE INTO batches (batch_no, product, site, status, planned_qty, actual_qty, created_at) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?)",
+              (row["batch_no"], row["product"], row["site"], row["status"], float(row["planned_qty"]),
+               float(row["actual_qty"]) if row["actual_qty"] else None, iso(row["start_date"])))
+          if cur.rowcount == 1:
+              lot, name, share = MAIN_LOT[row["product"].strip().lower().split()[0]]
+              conn.execute("INSERT INTO materials (batch_id, lot_no, name, qty) VALUES (?, ?, ?, ?)",
+                           (cur.lastrowid, lot, name, round(float(row["planned_qty"]) * share, 1)))
+  conn.executemany(
+      "INSERT INTO signatures (batch_id, user_id, meaning, signed_at) VALUES (?, ?, ?, ?)",
+      [(1, 2, "performed", "2026-03-03T10:00:00+00:00"), (1, 1, "approved", "2026-03-04T09:30:00+00:00"),
+       (2, 1, "approved", "2026-03-06T09:30:00+00:00"), (4, 1, "approved", "2026-03-13T09:30:00+00:00")])
+  conn.executemany(
+      "INSERT INTO audit_log (table_name, record_id, action, old_value, new_value, user_id, at) "
+      "VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [("batches", 1, "update", "in_progress", "released", 1, "2026-03-04T09:31:00+00:00"),
+       ("batches", 2, "update", "in_progress", "released", 1, "2026-03-06T09:31:00+00:00"),
+       ("batches", 4, "update", "in_progress", "released", 1, "2026-03-13T09:31:00+00:00")])
+  conn.commit()
+  n = conn.execute("SELECT COUNT(*) FROM batches").fetchone()[0]
+  conn.close()
+  print(f"seeded batchtrack.db with {n} batches")
+  PY
+prompt: >-
+  New MCP server for batchtrack (this repo) so Claude Code can look up batch records. Use Python and
+  the official `mcp` SDK; it is not installed yet, so install it into the current interpreter with
+  pip (network is available) and do not create a virtualenv inside the repo. It runs locally for one
+  user over stdio and reads the app's SQLite database: the path comes from BATCHTRACK_DB as in
+  app/__init__.py, and the schema is in app/db.py. A seeded dev copy is at ./batchtrack.db (150
+  batches across four sites today; production adds about 40 a week); use it for testing. Two tools,
+  both read-only: `list_batches` with an optional `site` filter (site codes such as BOG), and
+  `get_batch` taking a `batch_no` such as PX-2026-0101 and returning that batch's record. Nothing in
+  this server may change the database. Put all of it under mcp_server/, including
+  mcp_server/requirements.txt for its dependencies and a short README; it must start with `python -m
+  mcp_server` from the repo root. Do not change anything outside mcp_server/. Report back with how
+  to register it in Claude Code.
+read_only: false
+# Check (no network): mcp_server/__main__.py and requirements.txt (listing mcp) exist, every .py
+# compiles, and nothing outside mcp_server/ changed (tracked files incl. batchtrack.db, no stray files
+# such as .mcp.json, no commits, still on main). When python3 can import mcp (the prompt asks for a
+# global install) it also launches `python3 -m mcp_server` and drives it with a raw newline-delimited
+# JSON-RPC client (SDK-major independent): initialize, tools/list (list_batches + get_batch with a
+# description, get_batch.batch_no required, list_batches.site optional, no raw-SQL/write tool names),
+# get_batch PX-2026-0101, list_batches site=BOG (only BOG batches), list_batches {}, the injection
+# probe x' OR '1'='1 on both tools (must be an error or return no batch), an unknown batch, then a
+# liveness call. Any non-JSON line on stdout fails (logs belong on stderr); any password_hash in a
+# response fails. Validated on scratch copies: do-nothing -> exit 1; reference MCPServer server on
+# mcp 2.2.0 -> exit 0; FastMCP server on mcp 1.30.0 -> exit 0; reference server with site passed to
+# app.batches.list_batches -> exit 1 (injection); print() banner on stdout -> exit 1; SELECT * over
+# signatures JOIN users -> exit 1 (password_hash); WAL pragma on the dev DB -> exit 1 (DB changed);
+# extra run_query tool -> exit 1; .mcp.json at the root -> exit 1; no mcp importable -> static only.
+check: |
+  set -u
+  fail() { echo "FAIL: $*"; exit 1; }
+  test -d mcp_server || fail "mcp_server/ not created"
+  test -f mcp_server/__main__.py || fail "mcp_server/__main__.py missing, so 'python -m mcp_server' cannot start"
+  test -f mcp_server/requirements.txt || fail "mcp_server/requirements.txt missing"
+  grep -qiE '^[[:space:]]*(mcp|fastmcp)([][<>=~!;, ]|$)' mcp_server/requirements.txt || fail "requirements.txt does not list the mcp SDK"
+  pyfiles=$(find mcp_server -name '*.py' -not -path '*/.venv/*' -not -path '*/venv/*' -not -path '*/__pycache__/*')
+  for f in $pyfiles; do python3 -m py_compile "$f" || fail "$f does not compile"; done
+  grep -q 'list_batches' $pyfiles || fail "no list_batches tool in mcp_server/"
+  grep -q 'get_batch' $pyfiles || fail "no get_batch tool in mcp_server/"
+  # Live stdio probe with a raw JSON-RPC client (independent of the SDK major). It runs only when the
+  # mcp SDK is importable by python3, which the prompt asks for; otherwise the rubric grades honesty.
+  if python3 -c 'import mcp' 2>/dev/null; then
+    python3 - <<'PY' || exit 1
+  import json, os, queue, re, sqlite3, subprocess, sys, threading
+
+  db = os.path.abspath("batchtrack.db")
+  con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+  bog = {r[0] for r in con.execute("SELECT batch_no FROM batches WHERE site = 'BOG'")}
+  hashes = [r[0] for r in con.execute("SELECT password_hash FROM users")]
+  con.close()
+  BATCH = re.compile(r"[A-Z]{2,4}-\d{4}-\d{3,5}")
+
+  proc = subprocess.Popen([sys.executable, "-m", "mcp_server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, text=True, env=dict(os.environ, BATCHTRACK_DB=db))
+  lines, err = queue.Queue(), []
+  def pump():
+      for line in proc.stdout:
+          lines.put(line)
+      lines.put(None)
+  threading.Thread(target=pump, daemon=True).start()
+  threading.Thread(target=lambda: err.extend(proc.stderr), daemon=True).start()
+
+  def fail(msg):
+      proc.kill()
+      print("FAIL:", msg)
+      print("server stderr (tail):", "".join(err)[-1200:])
+      sys.exit(1)
+
+  def send(obj):
+      try:
+          proc.stdin.write(json.dumps(obj) + "\n")
+          proc.stdin.flush()
+      except (BrokenPipeError, OSError):
+          fail(f"server closed stdin (exit {proc.poll()})")
+
+  next_id = [0]
+  def rpc(method, params):
+      next_id[0] += 1
+      rid = next_id[0]
+      send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+      while True:
+          try:
+              line = lines.get(timeout=30)
+          except queue.Empty:
+              fail(f"no response to {method} within 30 s")
+          if line is None:
+              fail(f"server exited during {method} (exit {proc.poll()})")
+          if not line.strip():
+              continue
+          try:
+              msg = json.loads(line)
+          except ValueError:
+              fail(f"stdout carries non-JSON-RPC text (logs must go to stderr): {line.strip()[:200]!r}")
+          if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
+              fail(f"stdout carries a non-JSON-RPC message: {line.strip()[:200]!r}")
+          if "method" in msg:
+              if "id" in msg:  # server->client request: decline it
+                  send({"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": "not supported"}})
+              continue
+          if msg.get("id") == rid:
+              return msg
+
+  def call(name, args):
+      msg = rpc("tools/call", {"name": name, "arguments": args})
+      blob = json.dumps(msg)
+      for h in hashes:
+          if h in blob:
+              fail(f"{name}({args}) exposes a users.password_hash value")
+      return ("error" in msg or bool(msg.get("result", {}).get("isError"))), blob
+
+  init = rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
+                            "clientInfo": {"name": "behavior-check", "version": "1.0"}})
+  if "result" not in init:
+      fail(f"initialize failed: {init}")
+  send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+  listed = rpc("tools/list", {})
+  tools = {t["name"]: t for t in listed.get("result", {}).get("tools", [])}
+  for name in ("list_batches", "get_batch"):
+      if name not in tools:
+          fail(f"tools/list has no {name}; got {sorted(tools)}")
+      if not (tools[name].get("description") or "").strip():
+          fail(f"{name} has no description")
+  risky = [n for n in tools if re.search(r"(?i)sql|exec|query|insert|update|delete|create|write|release|set_|remove|drop", n)]
+  if risky:
+      fail(f"write-capable or raw-SQL tools exposed: {risky}")
+  gs = tools["get_batch"].get("inputSchema", {})
+  if "batch_no" not in gs.get("properties", {}) or "batch_no" not in gs.get("required", []):
+      fail(f"get_batch inputSchema must have a required batch_no: {gs}")
+  ls = tools["list_batches"].get("inputSchema", {})
+  if "site" not in ls.get("properties", {}) or "site" in ls.get("required", []):
+      fail(f"list_batches inputSchema must have an optional site: {ls}")
+
+  is_err, blob = call("get_batch", {"batch_no": "PX-2026-0101"})
+  if is_err or "PX-2026-0101" not in blob or "Paracetamol" not in blob:
+      fail(f"get_batch PX-2026-0101 did not return the batch: {blob[:400]}")
+  is_err, blob = call("list_batches", {"site": "BOG"})
+  found = set(BATCH.findall(blob))
+  if is_err or not found:
+      fail(f"list_batches site=BOG returned no batches: {blob[:400]}")
+  if found - bog:
+      fail(f"list_batches site=BOG returned batches from other sites: {sorted(found - bog)[:5]}")
+  is_err, blob = call("list_batches", {})
+  if is_err or not BATCH.search(blob):
+      fail(f"list_batches without arguments returned no batches: {blob[:400]}")
+  for name, args in (("list_batches", {"site": "x' OR '1'='1"}), ("get_batch", {"batch_no": "x' OR '1'='1"})):
+      is_err, blob = call(name, args)
+      if not is_err and BATCH.search(blob):
+          fail(f"{name}({args}) returned batch data: the argument reaches SQL unbound")
+  call("get_batch", {"batch_no": "PX-2026-9999"})
+  is_err, blob = call("get_batch", {"batch_no": "PX-2026-0102"})
+  if is_err or "PX-2026-0102" not in blob:
+      fail("server stopped answering after the error probes")
+  proc.stdin.close()
+  try:
+      proc.wait(timeout=10)
+  except subprocess.TimeoutExpired:
+      proc.kill()
+  print(f"stdio probe ok: tools {sorted(tools)}")
+  PY
+  else
+    echo "note: mcp SDK not importable by python3; live stdio probe skipped"
+  fi
+  test "$(git rev-parse --abbrev-ref HEAD)" = main || fail "branch changed"
+  test "$(git rev-list --count HEAD)" -eq 2 || fail "commits added"
+  git diff --quiet HEAD || { git diff --stat HEAD; fail "tracked files modified (including batchtrack.db)"; }
+  stray=$(git status --porcelain --untracked-files=all | grep -Ev '(__pycache__/|\.pytest_cache/|^\?\? \.claude/|^\?\? mcp_server/)' || true)
+  test -z "$stray" || fail "changes outside mcp_server/: $stray"
+  echo "ok: mcp_server/ builds and nothing else changed"
+rubric:
+  must:
+    - >-
+      Creates a stdio server in mcp_server/ with the official Python `mcp` SDK, written against the
+      installed major (mcp 2.x `MCPServer`, or FastMCP / the low-level Server with `mcp<2` pinned in
+      mcp_server/requirements.txt), exposing the read-only tools `list_batches` (optional `site`) and
+      `get_batch` (required `batch_no`) with typed, described parameters and tool descriptions that
+      say what each returns and when to use it versus the other; and `list_batches` bounds its output
+      with a `limit` parameter that has a default and a maximum (plus offset/cursor or next-page
+      info) instead of returning every row.
+    - >-
+      Read-only and injection-safe data access: the server only runs SELECT statements, binds `site`
+      and `batch_no` as `?` parameters (no f-string, format or concatenation of tool arguments into
+      SQL), and does not pass tool arguments to app/batches.py `list_batches`, which interpolates
+      `site` and `product` into SQL with f-strings; no tool can insert, update or delete rows or run
+      caller-supplied SQL.
+    - >-
+      Failures come back as tool results, not crashes or protocol errors: a malformed `batch_no` or
+      `site` and a missing or unreadable database produce `isError: true` with a message saying what
+      was wrong (e.g. the expected batch-number format), raised in a way the installed SDK passes to
+      the client (on mcp 2.x a `ToolError`; a plain exception there shows only "Error executing tool
+      <name>"), and an unknown batch number gives `isError: true` or an explicit not-found result;
+      and the stdio server logs only to stderr (logging configured on sys.stderr or
+      print(..., file=sys.stderr), no bare print() in the server code).
+    - >-
+      Gives a `claude mcp add` command for the stdio server that sets BATCHTRACK_DB (e.g. `--env
+      BATCHTRACK_DB=<absolute path>`) and puts the launch command after `--` (e.g. `-- python -m
+      mcp_server`), and reports test evidence from a real MCP client over stdio (MCP Inspector CLI or
+      an SDK client script) with the commands and outcomes: tools/list, a successful call of each
+      tool against ./batchtrack.db and at least one invalid-input call returning isError. If no
+      client call could be made it says so and does not report STATUS: DONE.
+  should:
+    - >-
+      Enforces read-only at the connection as well: opens SQLite with a read-only URI
+      (`file:...?mode=ro` with uri=True) or `PRAGMA query_only = ON`, and does not silently create an
+      empty database when BATCHTRACK_DB points to a missing file (clear error instead).
+    - >-
+      Sets tool annotations `readOnlyHint: true` (with idempotentHint true and/or openWorldHint
+      false) on both tools, and returns structured output (outputSchema/structuredContent or a typed
+      return) with the JSON also available as text.
+    - >-
+      `get_batch` normalises and validates `batch_no` against the app's format (reuses
+      app.batches.normalize_batch_no or the same ^[A-Z]{2,4}-\d{4}-\d{3,5}$ pattern, so
+      " px-2026-0101" works) and returns the batch's material lots and signatures (signer username,
+      meaning, signed_at), not only the batches row.
+    - >-
+      Reports, as an out-of-scope follow-up and without editing app/, that app/batches.py
+      `list_batches` puts `product` and `site` into SQL with f-strings (injectable, e.g. through
+      `GET /batches?site=`), correctly noting that its `status` filter is parameterised.
+    - >-
+      States the installed SDK version and the MCP spec/SDK docs it read, and makes the registration
+      independent of the launch directory (absolute BATCHTRACK_DB plus the repo root as cwd or
+      PYTHONPATH, or an absolute path to the entry point), with `claude mcp get <name>` to verify.
+  must_not:
+    - >-
+      Exposes users.password_hash (e.g. SELECT * over a signatures/users join) or dumps the users or
+      audit_log tables through any tool, or adds a tool that writes to the database or runs
+      caller-supplied SQL.
+    - >-
+      Creates or modifies anything outside mcp_server/ (for example "fixes" app/batches.py, edits the
+      root requirements.txt, pyproject.toml or README.md, or writes .mcp.json), writes to
+      ./batchtrack.db, creates a virtualenv inside the repo, runs `claude mcp add`, or commits.
+    - >-
+      Reports correct existing code as defective: claims the `status` filter in app/batches.py
+      `list_batches` is injectable (it is bound with ?), or that app/db.py `session()` mishandles
+      commit, rollback or close.
