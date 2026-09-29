@@ -1,0 +1,141 @@
+agent: test-gap-analyzer
+fixture: sample-app
+# No setup: clean tree at HEAD (baseline + empty setup commit), so the scope is the
+# named paths (app/ against tests/), not a diff.
+# Ground truth: answer-key/python-core.md
+#   PY-23  app/report.py has no tests at all (nothing in tests/ imports app.report);
+#          it holds yield_pct (div-by-zero, PY-22), collect_warnings (mutable
+#          default, PY-20), site_summary flags, format_report, build_report.
+#   PY-08..PY-12  app/signatures.py (e-signatures + audit trail) is untested too:
+#          tests/ never mentions signatures, sign_batch, update_signature,
+#          delete_signature or signatures_for_batch.
+#   PY-31  tests/test_batches.py:60-62 test_release_batch asserts nothing.
+#   PY-32  tests/test_users.py:30-46 patch the function under test
+#          (app.users.authenticate, users.verify_password, users.hash_password).
+#   PY-30  tests/test_batches.py:42-45 wall-clock timing assertion.
+# Also untested (legit gaps): api.py handler, lims_client, cache, set_actual_qty's
+# LookupError/ValueError branches and its audit_log write, release_batch's
+# already-released/unknown-id branches, get_batch returning None.
+# Really covered (traps): release_batch audit entry (test_batches.py:65-70),
+# list_batches filters (:25-32), normalize_batch_no (:8-14), create_user
+# validation (test_users.py:8-22), list_users role filter (:25-27).
+# test_paginate_returns_requested_page fails because of the PY-02 production bug;
+# the test itself is correct.
+# pytest-cov / coverage are NOT installed, so a correct run maps statically (or
+# uses stdlib tracing into a scratch dir) and says so; it must not pip install.
+# Verified on a scratch copy: pytest -q gives 1 failed, 18 passed; `grep -rnE
+# 'report|signatures|lims|cache|api' tests/` has no hits.
+prompt: >-
+  We're planning the next round of test work for batchtrack (batch-record
+  tracking for a pharma manufacturing site; a GMP audit is coming up). I need a
+  test-adequacy assessment of the Python package: every module under app/
+  against the pytest suite in tests/. Leave web/ and services/ out. The tree is
+  clean, so this is not a diff review; analyze the named paths whole. Tell me
+  which important behaviors in app/ could break without any test failing,
+  ranked by risk, and whether the existing tests in tests/ actually protect
+  what they appear to protect. Your output goes to test-writer next, so be
+  specific about scenarios and test names. Read-only: don't write tests, don't
+  install anything and don't modify the repo.
+read_only: true
+# Report-only task. Guards against git-only mutations the file fingerprint cannot
+# see (commit, stash, branch switch, staged edits), and against fixture drift that
+# would invalidate the rubric (report/signatures tests appearing, the no-assert and
+# over-mocked tests disappearing).
+check: >-
+  test "$(git rev-list --count HEAD)" -eq 2 &&
+  test "$(git rev-parse --abbrev-ref HEAD)" = main &&
+  test -z "$(git stash list)" &&
+  git diff --quiet HEAD &&
+  ! grep -rqE 'report|signatures' tests/ &&
+  ! sed -n '/^def test_release_batch(conn):/,/^$/p' tests/test_batches.py | grep -q assert &&
+  grep -q 'mock.patch("app.users.authenticate"' tests/test_users.py
+rubric:
+  must:
+    - >-
+      Reports that app/report.py has no tests at all (no file in tests/
+      imports or calls app.report or any of its functions) as a ranked gap,
+      rated 7 or higher on its 1-10 scale (or, if it gives no numeric scores,
+      placed in the upper half of its ranked gap list), and names at least one
+      concrete scenario for a function in report.py, e.g. yield_pct with
+      planned_qty 0 (ZeroDivisionError that crashes build_report),
+      collect_warnings called twice accumulating warnings through its mutable
+      default list, site_summary low/high-yield flags at the 95.0/102.0
+      thresholds or averages/release_rate, or build_report on the conn fixture.
+    - >-
+      Reports that app/signatures.py (electronic signatures and their audit
+      trail) has no tests: nothing in tests/ exercises sign_batch,
+      update_signature, delete_signature or signatures_for_batch. It rates this
+      gap 8 or higher as audit / regulated-record (or authorization) risk, and
+      names at least one concrete scenario, e.g. sign_batch writes an
+      audit_log row with the signer, sign_batch raises LookupError for an
+      unknown batch, or update_signature / delete_signature change or remove a
+      signature without (or with) an audit_log entry.
+    - >-
+      Flags tests/test_batches.py `test_release_batch` (around L60-62) as a
+      weak test with no assertion: it calls create_batch and release_batch but
+      asserts nothing, so it passes whatever release_batch does short of
+      raising. Suggests asserting the return value, the resulting "released"
+      status, and/or that a second call returns False.
+    - >-
+      Flags over-mocking in tests/test_users.py: names
+      `test_authenticate_returns_user_for_valid_credentials` (around L30-34)
+      as patching `app.users.authenticate`, the function under test, so the
+      assertion reads back the mock's canned value and the real credential
+      check never runs, and flags at least one of the other two tests that
+      patch their own unit under test
+      (`test_verify_password_rejects_wrong_password` patching verify_password,
+      around L37-41, or `test_hash_password_differs_per_password` patching
+      hash_password, around L44-46).
+  should:
+    - >-
+      Flags all three over-mocked tests in tests/test_users.py and, as a
+      consequence, lists the real users.authenticate / verify_password
+      behavior (valid credentials return the user dict; wrong password or
+      unknown user returns None) as an authentication gap rated 9-10.
+    - >-
+      Flags `test_batches_with_materials_is_fast` (tests/test_batches.py
+      around L42-45) as time-dependent: a wall-clock `< 0.01` s assertion that
+      can fail on a loaded CI runner and does not really test the N+1 query
+      pattern; suggests counting queries or removing the timing assert.
+    - >-
+      Lists set_actual_qty (app/batches.py around L89-104) as partly untested:
+      test_set_actual_qty_updates_batch only asserts actual_qty, so the
+      LookupError for an unknown batch, the ValueError for an already released
+      batch and/or its audit_log write have no test.
+    - >-
+      Reports at least one further untested module with a concrete scenario:
+      the BatchHandler routes/error responses in app/api.py, the retry and
+      failure paths of app/lims_client.py (e.g. get_sample_results on a LIMS
+      error, is_lot_approved with no results), or the cache in app/cache.py
+      (TTL expiry, invalidate, concurrent warm_cache).
+    - >-
+      Follows the agent's output shape: `VERDICT: NEEDS_WORK`; a Scope line
+      that states how mapping was done (static only because pytest-cov /
+      coverage is not installed, or the exact trace/coverage command with its
+      exit code, never invented coverage percentages); gaps with suggested
+      test names; and a "Hand-off for test-writer" block that proposes new
+      files such as tests/test_report.py / tests/test_signatures.py and reuses
+      the conn fixture from tests/conftest.py.
+  must_not:
+    - >-
+      Counts the over-mocked tests in tests/test_users.py as real coverage,
+      e.g. lists users.authenticate, verify_password or hash_password as
+      tested / covered (in Checked or elsewhere) on the strength of
+      tests/test_users.py L30-46.
+    - >-
+      Reports as untested a behavior that an existing test really exercises
+      with a meaningful assertion: release_batch writing the audit_log entry
+      (test_release_batch_writes_audit_entry, tests/test_batches.py around
+      L65-70), the list_batches site filter or product+status filter
+      (around L25-32), normalize_batch_no upper-casing/rejection (around
+      L8-14), create_user username normalisation or rejection of an unknown
+      role / short password (tests/test_users.py around L8-22), or the
+      list_users role filter (around L25-27). Untested branches of those
+      functions (e.g. release_batch on an already released or unknown batch)
+      are legitimate gaps, not violations.
+    - >-
+      Calls `test_paginate_returns_requested_page` (tests/test_batches.py
+      around L48-52) a weak or wrong test, or suggests changing its expected
+      values. It is a correct test that fails because paginate in
+      app/batches.py has an off-by-one; a one-line mention of that production
+      bug is fine.

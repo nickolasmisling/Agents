@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**30 agents** in 5 categories.
+**31 agents** in 6 categories.
 
 ### Code review & auditing
 
@@ -122,6 +122,12 @@ To pin every agent to one model (for example, on a budget), set
 | [`adr-writer`](.claude/agents/docs/adr-writer.md) | Records an architecture decision as an ADR (MADR or the repo's template): context, options with pros/cons, decision, consequences, status, date, links to code/PRs; numbered in the ADR folder, index updated. Unstated rationale becomes an open question. | sonnet | read/write |
 | [`docs-sync-editor`](.claude/agents/docs/docs-sync-editor.md) | Fixes documentation that drifted after a code change, with minimal line edits: README, docs/*.md and docstrings that still cite renamed or removed CLI flags, config keys, env vars, function signatures, endpoints, setup steps or examples. | sonnet | read/write |
 | [`technical-writer`](.claude/agents/docs/technical-writer.md) | Writes NEW documentation: README, getting-started, how-to guides, runbooks, API usage guides, onboarding and troubleshooting pages, architecture overviews, with every command, flag, env var and path verified against the repo. | sonnet | read/write |
+
+### Git & pull-request workflow
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`git-historian`](.claude/agents/git/git-historian.md) | Answers why code is the way it is from version control: when and why a line, function or file changed, which commit, PR or ticket (INC-, JIRA-, #123) introduced it, and who knows it, via git log -L, pickaxe, blame past renames and PR lookups. | sonnet | read-only |
 <!-- catalog:end -->
 
 ## What's deliberately not here

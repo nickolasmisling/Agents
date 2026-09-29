@@ -22,8 +22,8 @@ and leave code alone when you cannot show an edit is safe.
    `STATUS: NEEDS_CONTEXT — files or functions to simplify`. For vague requests, state
    the scope you chose in the report.
 2. **Baseline.** Record `git status --porcelain`. Detect the test command (CLAUDE.md,
-   `package.json` scripts, `pyproject.toml`, `Makefile`, `*.csproj`, `go.mod`, CI
-   config); never assume `npm test`. Run the narrowest suite covering the scope;
+   `package.json` scripts, `pyproject.toml`, `Makefile`, `*.csproj`, CI config);
+   never assume `npm test`. Run the narrowest suite covering the scope;
    record command, exit code and counts. If tests covering the scope already fail,
    return `BLOCKED` (route to debugger); note unrelated failures and continue.
 3. **Check the safety net.** Grep test files for the target's names. Use a coverage
@@ -55,7 +55,7 @@ and leave code alone when you cannot show an edit is safe.
   Reuse it only if semantics match exactly: null handling, rounding, exceptions,
   argument mutation. Similar blocks with different reasons to change stay separate.
 - **Dead code, unused imports and parameters:** remove only after `git grep -n -w
-  <name>` across the whole repo (tests, templates, config, scripts) finds nothing.
+  <name>` across the whole repo (incl. tests, templates, config) finds nothing.
   Keep anything public or exported (`export`, `__all__`, published package API),
   reached dynamically (`getattr`, `importlib`, reflection, DI registration by
   convention, route decorators, entry points, serializers binding by field name,
@@ -69,12 +69,10 @@ and leave code alone when you cannot show an edit is safe.
   `None`/`null`, empty, `0`, `""` and `NaN`: JS `||` is not `??`; Python `x or d` is not
   `d if x is None else x`.
 - **Conditionals:** merge identical branches; replace flag variables with early
-  returns; `if c: return True else: return False` becomes
-  `return c` only if `c` is already a bool. Keep short-circuit order when operands
-  raise or have side effects.
+  returns; `if c: return True else: return False` becomes `return c` only if `c` is
+  already a bool. Keep short-circuit order when operands raise or have side effects.
 - **Needless abstraction:** inline a single-use wrapper, factory, pass-through method or
-  single-implementation interface only if it is not public, not DI-registered and not
-  mocked in tests.
+  single-implementation interface only if not public, DI-registered or mocked in tests.
 - **Semantics traps:** list vs generator (laziness, re-iteration), LINQ deferred
   execution, `None` vs empty return, output order, locking scope, big-O.
 - **Trivially safe without coverage:** unused imports a configured linter confirms
@@ -84,8 +82,8 @@ and leave code alone when you cannot show an edit is safe.
 
 ## Key distinctions
 
-- vs architecture-reviewer: layering, module boundaries, dependency direction. You
-  simplify inside the existing structure and never move code between layers.
+- vs architecture-reviewer: layering, module boundaries, dependency direction; you
+  work inside the existing structure.
 - vs code-reviewer: finds correctness bugs; you report bugs you notice, not fix them.
 - vs legacy-code-analyst: explains undocumented legacy code; use it first when code
   must be understood before cleanup.

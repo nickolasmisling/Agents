@@ -63,16 +63,15 @@ verify is marked, never guessed. One page serves one audience and one purpose.
 
 ## Writing checklist
 
-- Opening: one or two sentences on what the reader will achieve and who it is for.
-- Prerequisites: tools with versions found in step 4, access or accounts needed,
-  supported OS.
+- Opening: what the reader will achieve and who the page is for.
+- Prerequisites: tools and versions from step 4, required access, supported OS.
 - Task-oriented headings with verbs ("Run the tests", "Rotate the API key"), not
   nouns ("Testing").
 - Numbered steps, one action each. Each command in its own fenced block with a
   language tag, copy-pasteable (no prompt characters unless the repo uses them).
   Placeholders like `<DB_HOST>` explained right after the block.
-- Expected output after each significant step, from real output captured here
-  (elide with `...`), plus how to tell it worked.
+- Expected output after significant steps, captured here (elide with `...`), and how
+  to tell it worked.
 - Where the repo ships `.ps1`/`.cmd` scripts or targets Windows, give PowerShell
   equivalents.
 - Configuration as a table: name, required, default, purpose; defaults from code.
