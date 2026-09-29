@@ -66,7 +66,7 @@ To pin every agent to one model (for example, on a budget), set
 ## Catalog
 
 <!-- catalog:start -->
-**44 agents** in 9 categories.
+**57 agents** in 12 categories.
 
 ### Code review & auditing
 
@@ -131,6 +131,8 @@ To pin every agent to one model (for example, on a budget), set
 | --- | --- | --- | --- |
 | [`data-analyst`](.claude/agents/data/data-analyst.md) | Answers questions from data files (CSV, TSV, Excel, JSON, Parquet) and databases via read-only SQL: profiles first (rows, types, nulls, duplicates, ranges, dates), flags data quality issues, then computes the answer with reproducible pandas/DuckDB/SQL code, group comparisons and statistical caveats. | sonnet | read/write |
 | [`database-architect`](.claude/agents/data/database-architect.md) | Designs new database schemas or major restructurings from access patterns and invariants: entities, keys, normalization, constraints, temporal/audit history, soft delete, multi-tenancy, partitioning/retention, indexes, expand/contract migration. Returns DDL (not run), Mermaid ER diagram, rationale. | opus | read-only |
+| [`migration-reviewer`](.claude/agents/data/migration-reviewer.md) | Reviews database schema migrations (raw SQL, EF Core, Alembic, Django, Flyway, Liquibase, Rails, Prisma, Knex) for production safety: data loss, drops/renames still used by code, locks and table rewrites, compatibility with the running app (expand/contract), rollback, idempotency, backfills. | sonnet | read-only |
+| [`sql-query-tuner`](.claude/agents/data/sql-query-tuner.md) | Tunes slow SQL (SQL Server, PostgreSQL, MySQL/MariaDB, SQLite, Oracle) from the query, schema and actual plan: non-SARGable predicates, missing or redundant indexes, key lookups, bad estimates, parameter sniffing, OFFSET paging, blocking; proposes rewrites and index DDL with write cost, never runs them. | sonnet | read-only |
 
 ### DevOps, cloud & operations
 
@@ -140,6 +142,8 @@ To pin every agent to one model (for example, on a budget), set
 | [`ci-pipeline-engineer`](.claude/agents/devops/ci-pipeline-engineer.md) | Writes and fixes CI/CD pipeline YAML for GitHub Actions, Azure Pipelines and GitLab CI: build/test/deploy stages, reusable workflows and templates, caching, matrix builds, environments with approvals, OIDC instead of stored cloud secrets, SHA-pinned actions, least-privilege tokens. | sonnet | read/write |
 | [`container-engineer`](.claude/agents/devops/container-engineer.md) | Writes and optimizes Dockerfiles, .dockerignore and docker-compose files: multi-stage builds, pinned slim/distroless base images, layer caching, non-root USER, BuildKit secrets, HEALTHCHECK, PID 1 signals, measured size reduction. | sonnet | read/write |
 | [`iac-reviewer`](.claude/agents/devops/iac-reviewer.md) | Reviews infrastructure-as-code and deployment config (Terraform/OpenTofu, Bicep/ARM, CloudFormation/CDK, Pulumi, Kubernetes/Helm/Kustomize, Dockerfiles, compose) for public exposure, broad IAM/RBAC, secrets, encryption, pinning, securityContext, limits and probes. | sonnet | read-only |
+| [`observability-engineer`](.claude/agents/devops/observability-engineer.md) | Adds or improves observability in application code: structured JSON logs with trace ids and no secrets/PII, RED/USE metrics with bounded cardinality, OpenTelemetry tracing with propagation across async and queues, health/readiness endpoints, symptom-based SLO burn-rate alerts. | sonnet | read/write |
+| [`powershell-scripter`](.claude/agents/devops/powershell-scripter.md) | Writes, reviews and fixes PowerShell scripts and modules (.ps1/.psm1/.psd1) for Windows PowerShell 5.1 or PowerShell 7: -WhatIf/-Confirm support, strict error handling, approved verbs, parameter validation, no hardcoded credentials; runs PSScriptAnalyzer and Pester. | sonnet | read/write |
 
 ### Git & pull-request workflow
 
@@ -154,8 +158,32 @@ To pin every agent to one model (for example, on a budget), set
 
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
+| [`claude-api-reviewer`](.claude/agents/ai/claude-api-reviewer.md) | Reviews code calling the Claude API, Anthropic SDKs or Claude Agent SDK (incl. Bedrock/Vertex) against current docs: model ids, max_tokens, prompt caching, tool_use loops, streaming, stop_reason, retries on 429/529, timeouts, thinking, API keys, cost. | sonnet | read-only + web |
+| [`claude-md-curator`](.claude/agents/ai/claude-md-curator.md) | Creates or maintains CLAUDE.md files (root and nested) for Claude Code: runs every build/test/lint/format command it lists, records non-obvious conventions, architecture pointers and gotchas, prunes stale, generic or derivable lines, and proposes hooks for must-always rules. | sonnet | read/write |
+| [`mcp-server-builder`](.claude/agents/ai/mcp-server-builder.md) | Builds or extends Model Context Protocol (MCP) servers in TypeScript or Python (mcp/FastMCP): tools with precise names, descriptions and JSON schemas, resources, prompts, stdio or Streamable HTTP transport, auth; tests with MCP Inspector and registers via `claude mcp add`. | sonnet | read/write + web |
 | [`subagent-auditor`](.claude/agents/ai/subagent-auditor.md) | Audits Claude Code subagent definitions (.claude/agents, ~/.claude/agents) for broken frontmatter, name/filename or duplicate-name clashes, missing, over-broad or stale tools, dated model ids, and vague, bloated or overlapping descriptions that misroute delegation. | sonnet | read-only |
 | [`subagent-author`](.claude/agents/ai/subagent-author.md) | Creates or improves Claude Code subagents (.claude/agents/**/*.md, ~/.claude/agents): routing-rule description, least-privilege tools, model alias, procedural body with guardrails and output contract, plus trigger and near-miss test prompts. | opus | read/write + web |
+
+### Compliance & regulated software
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`csv-validation-author`](.claude/agents/compliance/csv-validation-author.md) | Drafts GxP validation deliverables (CSV/CSA, GAMP 5) from code and docs: system description and category, intended use and GxP impact, risk assessment, DRAFT URS, traceability matrix, IQ/OQ/PQ or CSA test protocols, never executed. | opus | read/write |
+| [`gxp-data-integrity-reviewer`](.claude/agents/compliance/gxp-data-integrity-reviewer.md) | Reviews code in GxP-regulated systems (pharma, biotech, medical device, labs, QA) touching regulated records, audit trails, e-signatures, timestamps, user identity/roles or record edits/deletes; maps findings to ALCOA+ and 21 CFR Part 11 / EU Annex 11. | opus | read-only |
+
+### Product & requirements
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`i18n-engineer`](.claude/agents/product/i18n-engineer.md) | Internationalizes apps: extracts hardcoded UI strings into the repo's i18n framework (i18next, react-intl/FormatJS, gettext/Babel, .resx/IStringLocalizer, Angular i18n), fixes locale formatting of dates, time zones, numbers and currency, ICU plurals, RTL and text expansion, and drafts es/pt-BR translations for review. | sonnet | read/write |
+| [`requirements-analyst`](.claude/agents/product/requirements-analyst.md) | Turns a vague request, ticket, email or meeting note into testable requirements grounded in the code: problem, actors, user stories or URS "shall" items with IDs, Given/When/Then acceptance criteria, NFRs, edge cases, out-of-scope, assumptions, dependencies, open questions. | sonnet | read/write |
+
+### Research
+
+| Agent | What it does | Model | Access |
+| --- | --- | --- | --- |
+| [`feature-tracer`](.claude/agents/research/feature-tracer.md) | Explains how an existing feature works end to end: entry point (route, CLI command, UI event, job, message handler) through validation, services and domain logic to data stores, side effects and response at path:line, with config flags, error paths and tests. | sonnet | read-only |
+| [`library-evaluator`](.claude/agents/research/library-evaluator.md) | Compares candidate libraries, frameworks or services for a need and recommends one: stack fit, ergonomics, maintenance health, adoption, license, security history, size, transitive deps, platform (Windows, air-gapped), exit cost, cited from registries, GitHub and docs. | sonnet | read-only + web |
 <!-- catalog:end -->
 
 ## What's deliberately not here

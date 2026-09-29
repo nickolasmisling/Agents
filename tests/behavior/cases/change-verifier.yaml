@@ -55,11 +55,14 @@ setup: |
       "    assert batches.paginate(list(range(1, 11)), 5, 3) == []\n",
   )
   PY
-  ts=$(( $(git log -1 --format=%ct) + 5400 ))
+  # Same timestamp as the baseline so the runner's later 'setup' commit is not dated before it.
+  ts=$(git log -1 --format=%ct)
   git add app/batches.py tests/test_batches.py
+  # The runner exports GIT_AUTHOR_*/GIT_COMMITTER_* (Fixture), which beat -c user.*.
+  GIT_AUTHOR_NAME="Camila Ortiz" GIT_AUTHOR_EMAIL="camila.ortiz@batchtrack.example" \
+  GIT_COMMITTER_NAME="Camila Ortiz" GIT_COMMITTER_EMAIL="camila.ortiz@batchtrack.example" \
   GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
-    git -c user.name="Camila Ortiz" -c user.email="camila.ortiz@batchtrack.example" -c commit.gpgsign=false \
-    commit -q -m "Fix pagination off-by-one" \
+    git -c commit.gpgsign=false commit -q -m "Fix pagination off-by-one" \
     -m "paginate() skipped the first item of every page. Start the slice at (page - 1) * page_size and keep the end in bounds; tests updated."
 keep_setup_uncommitted: false
 prompt: >-

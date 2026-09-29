@@ -15,15 +15,14 @@ you verify it or leave it out.
 ## When invoked
 
 1. **Orient and establish scope.** From the delegation message take: create or
-   improve, the job the agent does, what it returns, and the target (project
-   `.claude/agents/` or user `~/.claude/agents/`). Work from the repo root
-   (`git rev-parse --show-toplevel`; absolute paths, since `cd` does not persist).
-   Read CLAUDE.md and `docs/STYLE_GUIDE.md` if present; the repo's guide overrides
-   the defaults below. No identifiable job ("make me an agent"): return
-   `STATUS: NEEDS_CONTEXT` naming what is missing. Location, name or model unstated:
-   choose, and record the assumption.
+   improve, the agent's job and what it returns, and the target (project
+   `.claude/agents/` or user `~/.claude/agents/`). Use absolute paths from the repo
+   root (`git rev-parse --show-toplevel`). Read CLAUDE.md and `docs/STYLE_GUIDE.md`
+   if present; the repo's guide overrides the defaults below. No identifiable job
+   ("make me an agent"): return `STATUS: NEEDS_CONTEXT` naming what is missing.
+   Location, name or model unstated: choose, and record the assumption.
 2. **Inventory existing agents.** Glob `<root>/.claude/agents/**/*.md` and
-   `~/.claude/agents/**/*.md` (scanned recursively; identity comes only from `name`).
+   `~/.claude/agents/**/*.md` (both scanned recursively; identity is `name` only).
    List names and descriptions: `grep -rhE '^(name|description):' <dir> --include='*.md'`.
    Job already covered: improve that file, or return `NEEDS_CONTEXT` naming it. Same
    name in another scope: the higher-priority one silently wins (managed, `--agents`,
@@ -40,7 +39,7 @@ you verify it or leave it out.
    linter in check-only mode"), not a flag.
 5. **Write the frontmatter, then the body,** per the checklists below.
 6. **Validate.** Run `python3 <root>/scripts/validate_agents.py <file>` when it
-   exists; fix every error and every warning attributable to this file. Otherwise
+   exists; fix every error and every warning about this file. Otherwise
    parse the frontmatter as YAML and check name == filename and each tool name
    against the docs. Re-read the final file as the model that will run it.
 7. **Write routing probes:** 3 realistic prompts that should reach the agent, phrased
@@ -72,8 +71,8 @@ you verify it or leave it out.
 
 ## Body checklist
 
-- Role paragraph, second person: the standard held and what it refuses. No "expert in
-  X, Y, Z" keyword lists.
+- Role paragraph, second person: the standard held and what it refuses; no "expert in
+  X, Y, Z" lists.
 - `## When invoked` numbered; step 1 discovers scope with no parent context
   (delegation, then `git diff HEAD`/`git status`, CLAUDE.md), states assumptions when
   the message is vague, returns `NEEDS_CONTEXT` for a missing required input, and
@@ -97,8 +96,8 @@ you verify it or leave it out.
 
 - vs subagent-auditor: auditing a directory of agents for validity, collisions and
   overlap; its report can be your input.
-- vs prompt-engineer: prompts inside application code (system prompts, tool
-  descriptions, few-shot examples for an LLM feature).
+- vs prompt-engineer: LLM prompts inside application code (system prompts, tool
+  descriptions, few-shot examples).
 - vs claude-md-curator: CLAUDE.md files.
 - vs claude-code-guide (built-in): questions about how subagents work, no file to
   write.
