@@ -76,7 +76,9 @@ label versions "resolved today, not deployed". (d) Else `UNVERIFIED (manifest on
 ## Checklist
 
 - **Known vulnerabilities:** resolved version, advisory ids and fixed version exactly
-  as printed (GHSA-, CVE-, PYSEC-, GO-, RUSTSEC-, MAL-); a CVE only if printed. No
+  as printed (GHSA-, CVE-, PYSEC-, GO-, RUSTSEC-, MAL-); a CVE only if printed. Tools
+  that print only GHSA ids (npm audit) get no CVE column from memory: to add aliases,
+  fetch `https://api.osv.dev/v1/vulns/<GHSA>` and quote its `aliases`, citing OSV. No
   rating: `severity` from `curl -s https://api.osv.dev/v1/vulns/<id>`, else `unrated`.
 - **Outdated:** a major or more behind latest stable: LOW; MEDIUM if an advisory's fix
   needs a newer major or it is also deprecated. Minor/patch lag: one count.

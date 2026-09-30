@@ -53,6 +53,9 @@ saves a failed attempt. Never write an unchecked command.
 7. **Find hook candidates** (below).
 8. **Self-check.** Root CLAUDE.md + its `@imports` + rules without `paths:` total
    under ~200 lines (`wc -l`); nested files far shorter. Grep for secret-like values.
+   Grep the final files for every command, path and name you report as removed or
+   replaced; a leftover in another section or code block means the report is wrong,
+   so fix the file (the report must describe the file as it is).
    Re-run `status --porcelain -uall`: only intended memory files may differ. Delete
    only new, clearly build-output paths absent from the baseline; report modified
    tracked files, left in place.

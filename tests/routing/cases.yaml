@@ -6,9 +6,13 @@
 # --- review -----------------------------------------------------------------
 - prompt: "I just finished the pagination changes in app/batches.py. Can you look over my diff before I commit?"
   expect: [code-reviewer]
+  select_only: true
+
 - prompt: "Before I push: I changed how the login endpoint checks passwords and added a password reset token. Anything exploitable?"
   expect: [security-reviewer]
   forbid: [code-reviewer]
+  select_only: true
+
 - prompt: "Here's the ticket: 'Export must include site, respect the date filter, and exclude voided batches.' I implemented it on this branch — did I actually cover everything the ticket asks for?"
   expect: [spec-compliance-reviewer]
 - prompt: "Our LIMS client keeps returning None and nobody notices when the call fails. Go through the error handling and find places where exceptions get eaten."
@@ -28,6 +32,8 @@
   expect: [finding-verifier, security-reviewer]
 
 # --- testing ----------------------------------------------------------------
+  select_only: true
+
 - prompt: "Run the test suite and tell me what's failing."
   expect: [test-runner]
   forbid: [debugger]
@@ -39,26 +45,38 @@
 - prompt: "test_list_recent_batches passes on my machine but fails maybe one in five runs in CI. Figure out why."
   expect: [flaky-test-investigator]
   forbid: [debugger, test-runner]
+  select_only: true
+
 - prompt: "Add a Playwright test that logs in, opens a batch, and checks the detail page renders."
   expect: [e2e-test-writer]
 - prompt: "I think I'm done with the CSV export fix. Before I tell the team, independently confirm it really works end to end."
   expect: [change-verifier]
+  select_only: true
+
 - prompt: "We're about to tag 1.5.0 and deploy Friday. Are we actually ready?"
   expect: [release-readiness-gate]
 
 # --- debugging --------------------------------------------------------------
 - prompt: "Calling compute_yield with a batch that has planned_qty 0 throws ZeroDivisionError in production. Find the root cause and fix it."
   expect: [debugger]
+  select_only: true
+
 - prompt: "tsc is spitting out 40 type errors after the merge and the build is red. Get it compiling again."
   expect: [build-fixer]
   forbid: [debugger]
+  select_only: true
+
 - prompt: "Here's logs/app.log from the incident last night — about 400 lines. What happened and when did it start?"
   expect: [log-analyzer]
 - prompt: "The GitHub Actions run on my PR went red on the test job. Figure out why from the run logs."
   expect: [ci-failure-investigator]
+  select_only: true
+
 - prompt: "Yield numbers were right in v1.3.0 and they're wrong now. Find which commit broke it."
   expect: [git-bisector]
   forbid: [git-historian]
+  select_only: true
+
 - prompt: "The batch list endpoint takes 4 seconds with 10k batches. Where's the time going?"
   expect: [performance-analyst]
 
@@ -81,6 +99,8 @@
 - prompt: "I changed the --site CLI flag to --sites and renamed BATCHTRACK_DB to BATCHTRACK_DB_PATH. Update any docs that still mention the old names."
   expect: [docs-sync-editor]
   forbid: [technical-writer]
+  select_only: true
+
 - prompt: "We decided to use SQLite WAL mode instead of moving to Postgres for now. Write that decision up properly for the record."
   expect: [adr-writer]
 - prompt: "Draw a sequence diagram of what happens when someone signs a batch record."
@@ -89,12 +109,16 @@
 # --- git --------------------------------------------------------------------
 - prompt: "My merge of feature/site-filter into main has conflicts in app/filters.py. Sort it out so both changes survive."
   expect: [merge-conflict-resolver]
+  select_only: true
+
 - prompt: "Why does lims_client dedupe rows by lot number? It looks like a hack — who added it and why?"
   expect: [git-historian]
   forbid: [git-bisector]
 - prompt: "Write the PR description for my feature/export-csv branch."
   expect: [pr-description-writer]
   forbid: [changelog-writer]
+  select_only: true
+
 - prompt: "Update CHANGELOG.md with everything user-facing since the last release tag."
   expect: [changelog-writer]
 
@@ -143,6 +167,8 @@
 # --- compliance -------------------------------------------------------------
 - prompt: "The electronic signature module for batch release changed in this branch. Check it against Part 11 and data integrity expectations."
   expect: [gxp-data-integrity-reviewer]
+  select_only: true
+
 - prompt: "QA needs a traceability matrix and OQ test protocol for the batchtrack signature feature."
   expect: [csv-validation-author]
 - prompt: "We're changing how yield is calculated in a validated system. Draft the change control impact assessment for QA."
@@ -173,6 +199,8 @@
 - prompt: "Before we merge, check the Dockerfile and k8s changes in this PR for anything risky."
   expect: [iac-reviewer]
   forbid: [container-engineer]
+  select_only: true
+
 - prompt: "We're starting a brand-new inventory service next quarter. Lay out the implementation plan: modules, steps, and order of work."
   expect: [Plan, NONE, general-purpose]
   forbid: [architecture-reviewer]
