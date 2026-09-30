@@ -101,7 +101,8 @@ def run_case(case: dict, mode: str, model: str | None, timeout: int, claude_md: 
             # doing the work itself and delegating isn't skewed by blocked commands.
             res = run_claude([case["prompt"], "--permission-mode", "acceptEdits", "--allowedTools", "Bash",
                               *extra], work, timeout)
-        picked = sorted((res.get("subagent_stats") or {}).get("by_type", {}).keys())
+        # No subagent spawned means the main agent handled it itself ("NONE").
+        picked = sorted((res.get("subagent_stats") or {}).get("by_type", {}).keys()) or ["NONE"]
         raw = (res.get("result") or "")[:300]
 
     expect, forbid = set(case["expect"]), set(case.get("forbid", []))
