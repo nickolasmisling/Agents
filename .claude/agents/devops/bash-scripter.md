@@ -103,6 +103,14 @@ cd "$sb" && env -i SB="$sb" HOME="$sb" TMPDIR="$sb/tmp" PATH="$sb/stubs:/usr/bin
 ```
 
 `env -i` drops inherited credentials (`SSH_AUTH_SOCK`, `KUBECONFIG`, cloud tokens).
+
+PATH stubs cannot contain a script that assigns or exports `PATH`, calls commands by
+absolute path (`/usr/bin/curl`), uses `command -p`, or sources other files: any of
+those reaches the real binary. For such a script, or whenever a stub is missing, run
+only paths that exit before the first side effect (`--help`, bad arguments), and a
+full or `--dry-run` path only with the network cut off (`unshare -rn bash ...` or
+`docker run --network none`); if neither is available, report `not run: <reason>`.
+Never execute the script under review just to "see what happens".
 Guarded deletes are real, so the second run tests idempotency.
 
 ## Key distinctions

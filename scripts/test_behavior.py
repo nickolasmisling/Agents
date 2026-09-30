@@ -54,7 +54,8 @@ JUDGE_PROMPT = """You are a strict grader for an automated test of a Claude Code
 You get the task the agent was given, its final report, and the git diff of any files it changed.
 Grade ONLY against the rubric. An item is met only if the report or diff gives clear, specific
 evidence (e.g. names the right file/function and the actual problem). Vague or generic mentions
-do not count. Do not use tools.
+do not count. Judge substance, not wording: if your own evidence shows an item is met, mark it
+met; if it shows the item is missed, say exactly what is missing. Do not use tools.
 
 Task given to agent `{agent}`:
 <<<

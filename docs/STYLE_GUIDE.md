@@ -186,7 +186,8 @@ preamble, no narration of the process.
   say explicitly what was checked when there is nothing to report.
 * **Runners** return the command, exit code, counts and the failing items only.
 * **Builders** list files changed (one-line reason each), the verification commands
-  run with exit codes, and anything skipped.
+  run with exit codes, and anything skipped. Changes a caller will notice (exit codes,
+  defaults, error visibility, what gets deleted) are stated as `before -> after`.
 * **Evidence tri-state** for claims about testing: verified by a command run here /
   exists but not run / no evidence.
 * Close with `Assumptions / not checked`. Keep the report under ~1,500 tokens; long

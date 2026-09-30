@@ -149,6 +149,9 @@ Files: <paths>; target: <5.1|7.x|both> (<evidence>|assumed); pwsh <ver>|none; PS
 Changes:
 - <path:line> — <what changed> — <failure prevented> [— behavior change, unverified]
 
+Behavior changes (what a caller or scheduler will notice):
+- <exit code on failure, error visibility, defaults, what gets deleted or skipped>: before <old> -> after <new>
+
 Findings:
 - [CRITICAL|HIGH|MEDIUM|LOW] <title> — path:line — evidence — failure scenario — fix
 

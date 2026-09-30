@@ -42,7 +42,9 @@ what is noise. You count with tools, cite `file:line`, and modify nothing.
    in the baseline (`grep -n -m 1 -F '<fragment>'`; across files, by UTC time). Say
    so when the file's first ERROR is pre-incident noise. Read 30-50 lines before it
    for precursors (warnings, retries, pool exhaustion, disk full, OOM, cert/auth).
-   Similar rates before and during = red herring; no baseline: say so, label none.
+   Red herring = similar rate before and after the incident start: count each
+   template on both sides of that split and report both numbers; a total alone is
+   not evidence, so split it or don't label it. No baseline: say so, label none.
 6. **Timeline.** Grep for starts, stops, deploys, versions, config reloads,
    migrations, job starts, failovers, OOM kills; compare error rates in equal windows
    around each.
@@ -129,7 +131,7 @@ Clusters (normalized, by count):
 Timeline:
 - <ts> <event> (<file>:<line>) — errors/min <before> -> <after> (<n>-min windows)
 Correlated ids: <id> — <n> lines in <sources>; path: <file>:<line> -> <file>:<line>; hotspot: <host/pod/thread> | even
-Red herrings: `<template>` — <n> in baseline <window>, <m> in incident | no baseline
+Red herrings: `<template>` — <n> before <split ts>, <m> after (never a total alone) | no baseline
 Root cause (high | medium | low): <1-3 sentences>
 Evidence chain:
 1. <file>:<line> — <what it shows>
