@@ -11,6 +11,7 @@ Cases live in tests/routing/cases.yaml:
     - prompt: "I just changed the checkout flow, can you look it over before I push?"
       expect: [code-reviewer]          # any of these counts as a pass
       forbid: [security-auditor]       # optional: picking one of these is a fail
+      select_only: true                # optional: premise not true of the fixture; skip in live mode
 
 Modes:
   select (default)  Ask Claude which agent it would delegate to, without doing
@@ -80,7 +81,7 @@ def agent_names() -> set[str]:
     return names
 
 
-def run_case(case: dict, mode: str, model: str | None, timeout: int) -> dict:
+def run_case(case: dict, mode: str, model: str | None, timeout: int, claude_md: Path | None = None) -> dict:
     extra = ["--model", model] if model else []
     if mode == "select":
         res = run_claude([SELECT_PROMPT.format(prompt=case["prompt"]), "--max-turns", "1", *extra], ROOT, timeout)
@@ -90,11 +91,16 @@ def run_case(case: dict, mode: str, model: str | None, timeout: int) -> dict:
         with tempfile.TemporaryDirectory(prefix="route-") as tmp:
             work = Path(tmp) / "sample-app"
             shutil.copytree(FIXTURE, work)
-            shutil.copytree(ROOT / ".claude", work / ".claude")
+            shutil.copytree(ROOT / ".claude" / "agents", work / ".claude" / "agents")
+            if claude_md:
+                shutil.copy(claude_md, work / "CLAUDE.md")
             subprocess.run(["git", "init", "-q"], cwd=work)
             subprocess.run(["git", "add", "-A"], cwd=work)
             subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "fixture"], cwd=work)
-            res = run_claude([case["prompt"], "--permission-mode", "acceptEdits", *extra], work, timeout)
+            # Pre-approve Bash as a user normally would, so the main agent's choice between
+            # doing the work itself and delegating isn't skewed by blocked commands.
+            res = run_claude([case["prompt"], "--permission-mode", "acceptEdits", "--allowedTools", "Bash",
+                              *extra], work, timeout)
         picked = sorted((res.get("subagent_stats") or {}).get("by_type", {}).keys())
         raw = (res.get("result") or "")[:300]
 
@@ -112,6 +118,8 @@ def main() -> int:
     ap.add_argument("--model", help="model for the routing (main) agent")
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--json", type=Path, help="write full results here")
+    ap.add_argument("--claude-md", type=Path, help="live mode: CLAUDE.md to place in the scratch repo "
+                    "(e.g. docs/ROUTING.md, to measure its effect on delegation)")
     args = ap.parse_args()
 
     if not shutil.which("claude"):
@@ -123,13 +131,17 @@ def main() -> int:
         sys.exit(f"cases reference unknown agents: {sorted(unknown)}")
     if args.only:
         cases = [c for c in cases if set(c["expect"]) & set(args.only)]
+    if args.mode == "live":
+        # Cases whose premise isn't true of the plain fixture (e.g. "review my diff") only
+        # make sense in select mode.
+        cases = [c for c in cases if not c.get("select_only")]
     untested = known - {n for c in cases for n in c["expect"]}
     if untested and not args.only:
         print(f"note: no routing case targets: {', '.join(sorted(untested))}\n")
 
     results = []
     with cf.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futs = {pool.submit(run_case, c, args.mode, args.model, args.timeout): c for c in cases}
+        futs = {pool.submit(run_case, c, args.mode, args.model, args.timeout, args.claude_md): c for c in cases}
         for fut in cf.as_completed(futs):
             try:
                 r = fut.result()

@@ -21,11 +21,19 @@ documented" and never fill the gap. You never modify files.
    how the repo uses it, answer the most likely interpretation and state it under
    Assumptions. No identifiable subject: return
    `ANSWER: NEEDS_CONTEXT — <name the library/service and the question>`.
-2. **Pin the version** from the Version sources below, preferring the resolved
-   version in a lockfile over a declared range. Several workspaces: answer for the
-   one nearest the file in question; list the others. Nothing in the repo (cloud
-   service, external CLI): use the version in the delegation, else the current
-   stable release as stated on a fetched release or download page [n].
+2. **Pin the version.** Mandatory first, even when the delegation names a version:
+   Read the project's own runtime/language declaration (`requires-python`,
+   `engines`, `<TargetFramework>`, the `go` directive, `rust-version`, etc.; see
+   Version sources) and cite it as `path:line` on the Version line. A version from
+   the delegation is a claim to check, not a substitute: if it differs from or is
+   narrower than the declared range, report both, answer for the named one, and
+   confirm the answer holds across the whole declared range (oldest allowed version
+   included) or say where it differs. Write "not pinned" only after checking every
+   listed Version source. Then pin packages, preferring the resolved version in a
+   lockfile over a declared range. Several workspaces: answer for the one nearest
+   the file in question; list the others. Nothing in the repo (cloud service,
+   external CLI): use the version in the delegation, else the current stable
+   release as stated on a fetched release or download page [n].
 3. **Read the repo's usage.** Grep 1-3 call sites and config so the example matches
    the repo's module system, async model and naming.
 4. **Search the right source.** Microsoft stack (.NET, ASP.NET Core, EF Core, Azure,
@@ -63,7 +71,8 @@ documented" and never fill the gap. You never modify files.
   `pnpm-lock.yaml`, `bun.lock`; range in `package.json`; runtime in `engines`,
   `.nvmrc`. Installed: `node_modules/<pkg>/package.json` and its `.d.ts`.
 - **Python:** `poetry.lock`, `uv.lock`, `pdm.lock`, `Pipfile.lock`, pinned
-  `requirements*.txt`; `pyproject.toml`, `.python-version`. Installed: Glob
+  `requirements*.txt`; `pyproject.toml` (`requires-python`), `.python-version`,
+  `setup.cfg`/`setup.py` `python_requires`. Installed: Glob
   `site-packages/<name>-*.dist-info` with `-` and `.` in the name replaced by `_`
   (try case variants; check `.venv/` and `venv/` explicitly) and read `METADATA`.
 - **.NET:** `<PackageReference>` in `*.csproj`; `Directory.Packages.props`;
@@ -136,8 +145,8 @@ Return exactly this shape, no preamble. For NEEDS_CONTEXT, return line 1 only.
 
 ```
 ANSWER: <one-line direct answer> | NOT_DOCUMENTED — <what was searched> | BLOCKED — <what was tried>; answer below from installed sources only | NEEDS_CONTEXT — <what is missing>
-Version: <pkg>@<resolved> from <path:line> (declared <range>); docs cover <version> — MATCH | MISMATCH: <detail>
-   (or) Version: not pinned in repo — answered for <version> per [n]
+Version: <pkg>@<resolved> from <path:line> (declared <range>); runtime <declared range> from <path:line>; docs cover <version> — MATCH | MISMATCH: <detail>; holds across declared range: yes | differs <detail>
+   (or) Version: not pinned in repo (checked <files>) — answered for <version> per [n]
    (or) Version: <pkg>@<v1> (<path>), also <v2> (<path>) — answered for <v1>
 
 Details:
