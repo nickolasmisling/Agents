@@ -15,7 +15,7 @@ test-routing:
 	python3 scripts/test_routing.py --mode select
 
 test-routing-live:
-	python3 scripts/test_routing.py --mode live
+	python3 scripts/test_routing.py --mode live $(ARGS)
 
 test-behavior:
 	python3 scripts/test_behavior.py

@@ -10,7 +10,8 @@ Every agent in this library is:
   hides from you: misspelled tool names are silently dropped, unknown frontmatter keys are
   ignored, and an agent with no `tools` line inherits *every* tool.
 * **Load-tested** against the real CLI (`scripts/test_loading.sh`).
-* **Routing-tested.** Realistic requests go to the right agent (`tests/routing/cases.yaml`).
+* **Routing-tested.** Realistic requests go to the right agent (`tests/routing/cases.yaml`),
+  both when Claude is asked to choose and when requests run for real.
 * **Behavior-tested.** Each agent runs against a deliberately broken sample app
   (`tests/fixtures/sample-app`), and a separate grader call scores its report against a
   rubric (`tests/behavior/cases/`).
@@ -28,6 +29,9 @@ git clone https://github.com/nickolasmisling/Agents.git && cd Agents
 ./install.sh --uninstall          # remove what this repo installed
 ```
 
+The installer also writes `agent-routing.md` next to the agents directory and prints
+one line to add to your CLAUDE.md. Do it: see [Using them](#using-them).
+
 Or install as a Claude Code plugin:
 
 ```
@@ -41,9 +45,26 @@ Restart Claude Code after installing so it picks up the new agents.
 
 ## Using them
 
-Claude delegates on its own when a request matches an agent's description. A few agents
-are marked to be used **proactively**, meaning Claude should reach for them without being
-asked:
+**Import the routing section into CLAUDE.md.** Good descriptions alone are not enough.
+In live tests on 20 realistic requests, Claude delegated to the right agent only 8
+times and did the rest itself. With the generated routing section in CLAUDE.md it
+delegated correctly 20 times out of 20, and still answered trivial requests (a commit
+message, a file lookup) itself ([details](docs/TEST_RESULTS.md#routing)):
+
+```markdown
+<!-- ~/.claude/CLAUDE.md, after ./install.sh -->
+@~/.claude/agent-routing.md
+
+<!-- or the project's CLAUDE.md, after ./install.sh --project . -->
+@.claude/agent-routing.md
+```
+
+`install.sh` filters the routing file to the agents you installed. With the plugin
+install, agents are named `agent-library:<name>`; importing `docs/ROUTING.md` should
+still guide Claude, but that combination is untested.
+
+A few agents are marked to be used **proactively**, meaning Claude should reach for
+them without being asked:
 
 * `code-reviewer`
 * `security-reviewer`
@@ -53,7 +74,7 @@ asked:
 * `change-verifier`
 * `gxp-data-integrity-reviewer`
 
-Automatic delegation is probabilistic. When a step matters, name the agent:
+When a step matters, name the agent:
 
 ```
 Use the migration-reviewer agent on db/migrations/002_add_site.sql
@@ -217,15 +238,18 @@ silently drops them from these agents.
 ## Testing
 
 ```bash
-make test             # free: static validation + CLI load test
-make test-routing     # ~$1-3: does Claude pick the right agent for 60+ realistic requests?
-make test-behavior    # ~$30-60: run every agent on the seeded fixture and grade it
+make test             # free: static validation, case lint, CLI load test (project + plugin)
+make test-routing     # ~$6: does Claude pick the right agent for 68 realistic requests?
+make test-routing-live ARGS="--claude-md docs/ROUTING.md"   # runs requests for real
+make test-behavior    # ~$14: run every agent on the seeded fixture and grade it
 python3 scripts/test_behavior.py --only code-reviewer debugger   # a subset
 ```
 
+Results and the defects testing caught are in [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md).
 Behavior tests run each agent with `--agent <name>` in a scratch copy of the fixture,
-with Bash pre-approved in that copy (`--allowedTools Bash`). The fixture's answer key lives
-in `tests/fixtures/answer-key/`, outside the directory the agents can see.
+with Bash pre-approved in that copy (`--allowedTools Bash`); run them in a container or
+VM. The fixture's answer key lives in `tests/fixtures/answer-key/`, outside the
+directory the agents can see.
 
 ## Contributing an agent
 
