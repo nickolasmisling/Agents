@@ -49,6 +49,7 @@
     "./.claude/agents/devops/observability-engineer.md",
     "./.claude/agents/devops/powershell-scripter.md",
     "./.claude/agents/docs/adr-writer.md",
+    "./.claude/agents/docs/clueless-reader.md",
     "./.claude/agents/docs/diagram-generator.md",
     "./.claude/agents/docs/docs-sync-editor.md",
     "./.claude/agents/docs/technical-writer.md",

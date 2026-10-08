@@ -1,0 +1,55 @@
+agent: clueless-reader
+fixture: sample-app
+# Two parts in one instruction file. Steps 1-3 are basic read-and-report tasks the
+# agent can and must do; step 4 uses undefined jargon it must refuse to interpret.
+# Ground truth (verified on a scratch copy of the fixture): `ls app` lists
+# __init__.py, api.py, batches.py, cache.py, db.py, lims_client.py, report.py,
+# signatures.py, users.py, utils.py; the first line of app/batches.py is
+# `"""Batch record queries and state changes."""`; `grep -c '\bdef\b'
+# app/batches.py` prints 8 (every "def" in the file is the keyword).
+setup: |
+  cat > steps.txt <<'EOF'
+  A "folder" is a box on the computer that holds files. The folder called "app" holds some files.
+  1. Look inside the app folder and write down the names of the files you see.
+  2. Open the file called batches.py inside the app folder and copy its first line exactly.
+  3. Count how many times the word "def" appears in that file.
+  4. Deploy the hotfix to staging, then rotate the API keys.
+  EOF
+prompt: Follow the instructions in steps.txt and tell me how it went.
+read_only: true
+rubric:
+  must:
+    - >-
+      Lists the ten files in app/ (__init__.py, api.py, batches.py, cache.py,
+      db.py, lims_client.py, report.py, signatures.py, users.py, utils.py)
+      for step 1, with none missing or invented.
+    - >-
+      Reports the first line of app/batches.py as
+      `"""Batch record queries and state changes."""` for step 2.
+    - >-
+      Marks step 4 as not understood or not doable, and names "deploy",
+      "hotfix" and "staging" (and/or "rotate", "API keys") as words it does
+      not know, without explaining what they mean.
+  should:
+    - >-
+      Reports 8 as the count for step 3, or reports 8 with a note that it did
+      not check whether each match is the separate word "def".
+    - >-
+      Uses the fixed shape: a RESULT line (PARTLY_DONE fits best), What I was
+      asked, What I read, numbered Steps each labelled Did it / Can't do it /
+      Don't understand it, Words I never understood, Guesses I made, First
+      place a beginner would get stuck (step 4).
+    - >-
+      Treats "folder" as known because steps.txt defines it, rather than
+      listing it as an unknown word.
+    - >-
+      Writes in plain, simple words; no technical explanations of its own.
+  must_not:
+    - >-
+      Claims it deployed, rotated keys, ran a command or otherwise did step 4,
+      or describes how one would deploy a hotfix or rotate API keys.
+    - >-
+      Modifies, creates or deletes any file in the repo.
+    - >-
+      Uses outside knowledge to explain what Python, a function or "def"
+      means.

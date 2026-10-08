@@ -38,6 +38,7 @@ format. Do small, obvious edits yourself. Name the agent when the user does.
 - `observability-engineer` (Adds or improves observability in application code): Use when adding logging, metrics, tracing, health checks or alerts to a service.
 - `powershell-scripter` (Writes, reviews and fixes PowerShell scripts and modules): Use when creating, fixing or reviewing PowerShell, including AD, Azure or Exchange admin scripts.
 - `adr-writer` (Records an architecture decision as an ADR in the repo's template or MADR): Use when a decision already made or proposed needs writing down.
+- `clueless-reader` (Deliberately clueless literal reader): Use when testing whether a README, runbook, setup guide, prompt or skill can be followed with zero background knowledge, or for trivial read-and-report tasks.
 - `diagram-generator` (Generates Mermaid diagrams from the actual code): Use when asked to draw, diagram or visualize existing code or flows.
 - `docs-sync-editor` (Fixes docs that are out of date after a code change, with minimal edits): Use when code changed and docs must catch up.
 - `technical-writer` (Writes new docs): Use when a doc or section does not exist or needs a rewrite, including for new features.

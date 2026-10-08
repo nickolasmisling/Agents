@@ -102,7 +102,7 @@ silently drops them from these agents.
 ## Catalog
 
 <!-- catalog:start -->
-**61 agents** in 12 categories.
+**62 agents** in 12 categories.
 
 ### Code review & auditing
 
@@ -157,6 +157,7 @@ silently drops them from these agents.
 | Agent | What it does | Model | Access |
 | --- | --- | --- | --- |
 | [`adr-writer`](.claude/agents/docs/adr-writer.md) | Records an architecture decision as an ADR in the repo's template or MADR: context, options with pros/cons, decision, consequences, status, date, links to code/PRs; numbered, index updated, unstated rationale kept as an open question. | sonnet | read/write |
+| [`clueless-reader`](.claude/agents/docs/clueless-reader.md) | Deliberately clueless literal reader: knows only everyday words, assumes nothing, follows written instructions word for word and reports each step, every undefined term and each gap where it got stuck. | haiku | read-only |
 | [`diagram-generator`](.claude/agents/docs/diagram-generator.md) | Generates Mermaid diagrams from the actual code: architecture, sequence (request/feature flow), ER (migrations/ORM models), state (status enums), class and CI pipeline diagrams, each node and edge traced to path:line and syntax-checked. | sonnet | read/write |
 | [`docs-sync-editor`](.claude/agents/docs/docs-sync-editor.md) | Fixes docs that are out of date after a code change, with minimal edits: README, docs/*.md and docstrings citing renamed, removed or changed (defaults, types, methods) CLI flags, config keys, env vars, signatures, endpoints, setup steps or examples. | sonnet | read/write |
 | [`technical-writer`](.claude/agents/docs/technical-writer.md) | Writes new docs: README, getting-started, how-to guides, runbooks, API usage guides, onboarding, troubleshooting, architecture overviews, doc comments; commands, flags, env vars and paths verified against the repo. | sonnet | read/write |

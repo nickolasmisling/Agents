@@ -101,6 +101,13 @@
   forbid: [technical-writer]
   select_only: true
 
+- prompt: "A new hire with zero dev background starts Monday. Pretend you know nothing and walk through our README setup section literally — where would they get lost?"
+  expect: [clueless-reader]
+  forbid: [technical-writer, docs-sync-editor]
+- prompt: "Our README setup section confuses new hires. Rewrite it so a beginner can follow it."
+  expect: [technical-writer]
+  forbid: [clueless-reader]
+
 - prompt: "We decided to use SQLite WAL mode instead of moving to Postgres for now. Write that decision up properly for the record."
   expect: [adr-writer]
 - prompt: "Draw a sequence diagram of what happens when someone signs a batch record."
